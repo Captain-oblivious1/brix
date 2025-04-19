@@ -43,7 +43,7 @@ class CommandLineAction(Action):
     def __repr__(self):
         return f"CommandLineAction(command={self.command!r})"
 
-class MakeDir(Action):  # New: Action to create a directory
+class MakeDir(Action):
     """Action that creates a directory."""
     def __init__(self, file_loader: 'FileLoader' = None):
         self.file_loader = file_loader
@@ -56,16 +56,16 @@ class MakeDir(Action):  # New: Action to create a directory
                 dir_file = succ
                 break
         if not dir_file:
+            print(f"Error: No directory file found in successors of {node}")
             return False
         
         # Create the directory
         try:
             os.makedirs(dir_file.path, exist_ok=True)
-            # Update hash and status of directory File
             if self.file_loader and dir_file:
-                dir_file.hash = self.file_loader._compute_hash(dir_file.path) or ""  # Empty hash if directory
+                dir_file.hash = ""
                 cached_hash = self.file_loader._cache.get(os.path.relpath(dir_file.path, self.file_loader.root_dir), "")
-                dir_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if dir_file.hash != cached_hash else Status.UNCHANGED
+                dir_file.status = Status.CREATED if cached_hash == "" else Status.UNCHANGED
             return True
         except OSError as e:
             print(f"Error creating directory {dir_file.path}: {e}")
@@ -87,6 +87,7 @@ class CompileCppAction(Action):
                 cpp_file = pred
                 break
         if not cpp_file:
+            print(f"Error: No .cpp file found in predecessors of {node}")
             return False
         
         # Find .o file in successors
@@ -96,6 +97,7 @@ class CompileCppAction(Action):
                 o_file = succ
                 break
         if not o_file:
+            print(f"Error: No .o file found in successors of {node}")
             return False
         
         # Construct and run g++ command
@@ -124,6 +126,7 @@ class LinkCppSharedAction(Action):
         # Find .o files in predecessors
         o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
         if not o_files:
+            print(f"Error: No .o files found in predecessors of {node}")
             return False
         
         # Find .so file in successors
@@ -133,6 +136,7 @@ class LinkCppSharedAction(Action):
                 so_file = succ
                 break
         if not so_file:
+            print(f"Error: No .so file found in successors of {node}")
             return False
         
         # Construct and run g++ command
@@ -144,7 +148,7 @@ class LinkCppSharedAction(Action):
             if self.file_loader and so_file:
                 so_file.hash = self.file_loader._compute_hash(so_file.path)
                 cached_hash = self.file_loader._cache.get(os.path.relpath(so_file.path, self.file_loader.root_dir), "")
-                so_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if so_file.hash != cached_hash else Status.UNCHANGED
+                so_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if o_file.hash != cached_hash else Status.UNCHANGED
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error: {e}")
@@ -163,6 +167,7 @@ class LinkCppAppAction(Action):
         o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
         so_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.so')]
         if not o_files:
+            print(f"Error: No .o files found in predecessors of {node}")
             return False
         
         # Find executable file in successors
@@ -172,6 +177,7 @@ class LinkCppAppAction(Action):
                 exe_file = succ
                 break
         if not exe_file:
+            print(f"Error: No executable file found in successors of {node}")
             return False
         
         # Construct library flags (-L and -l)
@@ -188,7 +194,7 @@ class LinkCppAppAction(Action):
             if self.file_loader and exe_file:
                 exe_file.hash = self.file_loader._compute_hash(exe_file.path)
                 cached_hash = self.file_loader._cache.get(os.path.relpath(exe_file.path, self.file_loader.root_dir), "")
-                exe_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if exe_file.hash != cached_hash else Status.UNCHANGED
+                o_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if o_file.hash != cached_hash else Status.UNCHANGED
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error: {e}")
@@ -213,8 +219,8 @@ class FileLoader:
             return {}
     
     def _compute_hash(self, path: str) -> str:
-        """Compute SHA-256 hash of a file, or empty string if it doesn't exist."""
-        if not os.path.exists(path):
+        """Compute SHA-256 hash of a file, or empty string if it doesn't exist or is a directory."""
+        if not os.path.exists(path) or os.path.isdir(path):  # Changed: Check for directory
             return ""
         with open(path, 'rb') as f:
             return hashlib.sha256(f.read()).hexdigest()
