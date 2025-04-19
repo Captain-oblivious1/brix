@@ -2,6 +2,6 @@
 #include <iostream>
 
 int main() {
-  std::cout << "Sum: " << add(3, 4) << std::endl;
+  std::cout << "Sum: " << add(3, 4) << "!" << std::endl;
   return 0;
 }

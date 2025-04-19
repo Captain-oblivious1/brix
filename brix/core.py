@@ -34,17 +34,51 @@ class CommandLineAction(Action):
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
         try:
             subprocess.run(self.command, shell=True, check=True)
-            print(f"Executed: {self.command}")
+            print(f"{self.command}")
             return True
         except subprocess.CalledProcessError as e:
-            print(f"Command failed: {self.command}\nError: {e}")
+            print(f"Error: {e}")
             return False
     
     def __repr__(self):
         return f"CommandLineAction(command={self.command!r})"
 
+class MakeDir(Action):  # New: Action to create a directory
+    """Action that creates a directory."""
+    def __init__(self, file_loader: 'FileLoader' = None):
+        self.file_loader = file_loader
+    
+    def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
+        # Find directory in successors
+        dir_file = None
+        for succ in successors:
+            if isinstance(succ, File):
+                dir_file = succ
+                break
+        if not dir_file:
+            return False
+        
+        # Create the directory
+        try:
+            os.makedirs(dir_file.path, exist_ok=True)
+            # Update hash and status of directory File
+            if self.file_loader and dir_file:
+                dir_file.hash = self.file_loader._compute_hash(dir_file.path) or ""  # Empty hash if directory
+                cached_hash = self.file_loader._cache.get(os.path.relpath(dir_file.path, self.file_loader.root_dir), "")
+                dir_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if dir_file.hash != cached_hash else Status.UNCHANGED
+            return True
+        except OSError as e:
+            print(f"Error creating directory {dir_file.path}: {e}")
+            return False
+    
+    def __repr__(self):
+        return f"MakeDir(file_loader={self.file_loader!r})"
+
 class CompileCppAction(Action):
     """Action that compiles a .cpp file to a .o file using g++."""
+    def __init__(self, file_loader: 'FileLoader' = None):
+        self.file_loader = file_loader
+    
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
         # Find .cpp file in predecessors
         cpp_file = None
@@ -53,7 +87,6 @@ class CompileCppAction(Action):
                 cpp_file = pred
                 break
         if not cpp_file:
-            print(f"No .cpp file found in predecessors of {node}")
             return False
         
         # Find .o file in successors
@@ -63,29 +96,34 @@ class CompileCppAction(Action):
                 o_file = succ
                 break
         if not o_file:
-            print(f"No .o file found in successors of {node}")
             return False
         
         # Construct and run g++ command
         command = f"g++ -c {cpp_file.path} -o {o_file.path} -fPIC"
         try:
             subprocess.run(command, shell=True, check=True)
-            print(f"Executed: {command}")
+            print(f"{command}")
+            if self.file_loader and o_file:
+                o_file.hash = self.file_loader._compute_hash(o_file.path)
+                cached_hash = self.file_loader._cache.get(os.path.relpath(o_file.path, self.file_loader.root_dir), "")
+                o_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if o_file.hash != cached_hash else Status.UNCHANGED
             return True
         except subprocess.CalledProcessError as e:
-            print(f"Compile failed: {command}\nError: {e}")
+            print(f"Error: {e}")
             return False
     
     def __repr__(self):
-        return "CompileCppAction()"
+        return f"CompileCppAction(file_loader={self.file_loader!r})"
 
 class LinkCppSharedAction(Action):
     """Action that links .o files into a .so shared library using g++."""
+    def __init__(self, file_loader: 'FileLoader' = None):
+        self.file_loader = file_loader
+    
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
         # Find .o files in predecessors
         o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
         if not o_files:
-            print(f"No .o files found in predecessors of {node}")
             return False
         
         # Find .so file in successors
@@ -95,7 +133,6 @@ class LinkCppSharedAction(Action):
                 so_file = succ
                 break
         if not so_file:
-            print(f"No .so file found in successors of {node}")
             return False
         
         # Construct and run g++ command
@@ -103,23 +140,29 @@ class LinkCppSharedAction(Action):
         command = f"g++ -shared {o_paths} -o {so_file.path}"
         try:
             subprocess.run(command, shell=True, check=True)
-            print(f"Executed: {command}")
+            print(f"{command}")
+            if self.file_loader and so_file:
+                so_file.hash = self.file_loader._compute_hash(so_file.path)
+                cached_hash = self.file_loader._cache.get(os.path.relpath(so_file.path, self.file_loader.root_dir), "")
+                so_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if so_file.hash != cached_hash else Status.UNCHANGED
             return True
         except subprocess.CalledProcessError as e:
-            print(f"Link failed: {command}\nError: {e}")
+            print(f"Error: {e}")
             return False
     
     def __repr__(self):
-        return "LinkCppSharedAction()"
+        return f"LinkCppSharedAction(file_loader={self.file_loader!r})"
 
 class LinkCppAppAction(Action):
     """Action that links .o files and .so libraries into an executable using g++."""
+    def __init__(self, file_loader: 'FileLoader' = None):
+        self.file_loader = file_loader
+    
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
         # Find .o files and .so libraries in predecessors
         o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
         so_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.so')]
         if not o_files:
-            print(f"No .o files found in predecessors of {node}")
             return False
         
         # Find executable file in successors
@@ -129,7 +172,6 @@ class LinkCppAppAction(Action):
                 exe_file = succ
                 break
         if not exe_file:
-            print(f"No executable file found in successors of {node}")
             return False
         
         # Construct library flags (-L and -l)
@@ -142,14 +184,18 @@ class LinkCppAppAction(Action):
         command = f"g++ {o_paths} -o {exe_file.path} {lib_flags}".strip()
         try:
             subprocess.run(command, shell=True, check=True)
-            print(f"Executed: {command}")
+            print(f"{command}")
+            if self.file_loader and exe_file:
+                exe_file.hash = self.file_loader._compute_hash(exe_file.path)
+                cached_hash = self.file_loader._cache.get(os.path.relpath(exe_file.path, self.file_loader.root_dir), "")
+                exe_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if exe_file.hash != cached_hash else Status.UNCHANGED
             return True
         except subprocess.CalledProcessError as e:
-            print(f"Link failed: {command}\nError: {e}")
+            print(f"Error: {e}")
             return False
     
     def __repr__(self):
-        return "LinkCppAppAction()"
+        return f"LinkCppAppAction(file_loader={self.file_loader!r})"
 
 class FileLoader:
     """Loads File objects with hashes and status based on a cache file."""
@@ -174,12 +220,13 @@ class FileLoader:
             return hashlib.sha256(f.read()).hexdigest()
     
     def load_file(self, path: str) -> 'File':
-        """Create a File object with hash and status based on cache."""
-        rel_path = os.path.relpath(path, self.root_dir)
-        current_hash = self._compute_hash(path)
+        """Create a File object with hash and status based on cache, using path relative to root_dir."""
+        abs_path = os.path.join(self.root_dir, path) if not os.path.isabs(path) else path
+        rel_path = os.path.relpath(abs_path, self.root_dir)
+        current_hash = self._compute_hash(abs_path)
         cached_hash = self._cache.get(rel_path, "")
         
-        if not os.path.exists(path):
+        if not os.path.exists(abs_path):
             status = Status.DELETED
         elif cached_hash == "":
             status = Status.CREATED
@@ -188,7 +235,7 @@ class FileLoader:
         else:
             status = Status.MODIFIED
         
-        return File(path, timestamp=os.path.getmtime(path) if os.path.exists(path) else 0.0, hash=current_hash, status=status)
+        return File(abs_path, timestamp=os.path.getmtime(abs_path) if os.path.exists(abs_path) else 0.0, hash=current_hash, status=status)
     
     def save_cache(self, files: Set['File']):
         """Save the cache with updated hashes for the given files."""
@@ -331,7 +378,6 @@ def execute_dependency_graph(*targets, n_threads: int = 10) -> None:
     ready = queue.SimpleQueue()
     for node in nodes:
         if in_degree[node] == 0:
-            print(f"Initial ready node: {node}")
             ready.put(node)
 
     # Track completed nodes and build status
@@ -343,37 +389,35 @@ def execute_dependency_graph(*targets, n_threads: int = 10) -> None:
         """Execute a node's action and return success status."""
         nonlocal build_failed
         if build_failed:
-            print(f"Skipping {node} due to build failure")
             return False
-        print(f"Executing node: {node}")
         if hasattr(node, 'action') and isinstance(node.action, Action):
             success = node.action.execute(node, node.predecessors, node.successors)
             if not success:
                 build_failed = True
-                print(f"Node {node} failed")
                 raise BuildFailure(f"Build failed at {node}")
-            print(f"Node {node} succeeded")
             return success
-        print(f"Node {node} has no action, treated as success")
         return True
 
     # Execute nodes in parallel
     with ThreadPoolExecutor(max_workers=max(1, n_threads)) as executor:
         futures = []
+        node_futures = {}
         while not ready.empty() or futures:
             # Submit tasks for ready nodes if build hasn't failed
             with lock:
                 if not build_failed:
                     while not ready.empty() and len(futures) < n_threads:
                         node = ready.get()
-                        print(f"Scheduling node: {node}")
-                        futures.append(executor.submit(execute_node, node))
+                        future = executor.submit(execute_node, node)
+                        node_futures[future] = node
+                        futures.append(future)
             
             # Wait for at least one task to complete
             if futures:
                 from concurrent.futures import wait, FIRST_COMPLETED
                 done, _ = wait(futures, return_when=FIRST_COMPLETED)
                 for future in done:
+                    node = node_futures[future]
                     try:
                         success = future.result()
                         if success:
@@ -381,17 +425,15 @@ def execute_dependency_graph(*targets, n_threads: int = 10) -> None:
                                 # Update successors' in-degrees
                                 for succ in node.successors & nodes:
                                     in_degree[succ] -= 1
-                                    print(f"Updated in_degree for {succ}: {in_degree[succ]}")
                                     if in_degree[succ] == 0 and not build_failed:
-                                        print(f"Adding {succ} to ready queue")
                                         ready.put(succ)
                                 completed.add(node)
-                                print(f"Completed node: {node}, Total completed: {len(completed)}/{len(nodes)}")
                     except BuildFailure as e:
                         with lock:
                             build_failed = True
                             print(f"Build canceled: {e}")
                     futures.remove(future)
+                    del node_futures[future]
 
         # Check if all nodes were processed (unless build failed)
         if len(completed) != len(nodes) and not build_failed:
