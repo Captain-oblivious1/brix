@@ -1,0 +1,9 @@
+setup.py
+brix/__init__.py
+brix/core.py
+brix.egg-info/PKG-INFO
+brix.egg-info/SOURCES.txt
+brix.egg-info/dependency_links.txt
+brix.egg-info/requires.txt
+brix.egg-info/top_level.txt
+tests/test_dependency_graph.py

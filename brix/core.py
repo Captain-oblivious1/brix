@@ -1,0 +1,406 @@
+import queue
+import threading
+import enum
+import abc
+import subprocess
+import os
+import json
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
+from typing import Set, Callable, Any
+
+class Status(enum.Enum):
+    UNCHANGED = "unchanged"
+    CREATED = "created"
+    DELETED = "deleted"
+    MODIFIED = "modified"
+
+class BuildFailure(Exception):
+    """Raised when an action fails, canceling the build."""
+    pass
+
+class Action(abc.ABC):
+    """Base class for actions executed by Command nodes."""
+    @abc.abstractmethod
+    def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
+        """Execute the action for the given node, returning True for success, False for failure."""
+        pass
+
+class CommandLineAction(Action):
+    """Action that executes a command-line string."""
+    def __init__(self, command: str):
+        self.command = command
+    
+    def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
+        try:
+            subprocess.run(self.command, shell=True, check=True)
+            print(f"Executed: {self.command}")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Command failed: {self.command}\nError: {e}")
+            return False
+    
+    def __repr__(self):
+        return f"CommandLineAction(command={self.command!r})"
+
+class CompileCppAction(Action):
+    """Action that compiles a .cpp file to a .o file using g++."""
+    def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
+        # Find .cpp file in predecessors
+        cpp_file = None
+        for pred in predecessors:
+            if isinstance(pred, File) and pred.path.endswith('.cpp'):
+                cpp_file = pred
+                break
+        if not cpp_file:
+            print(f"No .cpp file found in predecessors of {node}")
+            return False
+        
+        # Find .o file in successors
+        o_file = None
+        for succ in successors:
+            if isinstance(succ, File) and succ.path.endswith('.o'):
+                o_file = succ
+                break
+        if not o_file:
+            print(f"No .o file found in successors of {node}")
+            return False
+        
+        # Construct and run g++ command
+        command = f"g++ -c {cpp_file.path} -o {o_file.path} -fPIC"
+        try:
+            subprocess.run(command, shell=True, check=True)
+            print(f"Executed: {command}")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Compile failed: {command}\nError: {e}")
+            return False
+    
+    def __repr__(self):
+        return "CompileCppAction()"
+
+class LinkCppSharedAction(Action):
+    """Action that links .o files into a .so shared library using g++."""
+    def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
+        # Find .o files in predecessors
+        o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
+        if not o_files:
+            print(f"No .o files found in predecessors of {node}")
+            return False
+        
+        # Find .so file in successors
+        so_file = None
+        for succ in successors:
+            if isinstance(succ, File) and succ.path.endswith('.so'):
+                so_file = succ
+                break
+        if not so_file:
+            print(f"No .so file found in successors of {node}")
+            return False
+        
+        # Construct and run g++ command
+        o_paths = ' '.join(o.path for o in o_files)
+        command = f"g++ -shared {o_paths} -o {so_file.path}"
+        try:
+            subprocess.run(command, shell=True, check=True)
+            print(f"Executed: {command}")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Link failed: {command}\nError: {e}")
+            return False
+    
+    def __repr__(self):
+        return "LinkCppSharedAction()"
+
+class LinkCppAppAction(Action):
+    """Action that links .o files and .so libraries into an executable using g++."""
+    def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
+        # Find .o files and .so libraries in predecessors
+        o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
+        so_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.so')]
+        if not o_files:
+            print(f"No .o files found in predecessors of {node}")
+            return False
+        
+        # Find executable file in successors
+        exe_file = None
+        for succ in successors:
+            if isinstance(succ, File) and not succ.path.endswith(('.o', '.so', '.cpp', '.h')):
+                exe_file = succ
+                break
+        if not exe_file:
+            print(f"No executable file found in successors of {node}")
+            return False
+        
+        # Construct library flags (-L and -l)
+        lib_dirs = set(os.path.dirname(so.path) for so in so_files)
+        lib_names = [os.path.basename(so.path).replace('lib', '').replace('.so', '') for so in so_files]
+        lib_flags = ' '.join(f"-L {dir} -l{name}" for dir, name in zip(lib_dirs, lib_names)) if so_files else ''
+        
+        # Construct and run g++ command
+        o_paths = ' '.join(o.path for o in o_files)
+        command = f"g++ {o_paths} -o {exe_file.path} {lib_flags}".strip()
+        try:
+            subprocess.run(command, shell=True, check=True)
+            print(f"Executed: {command}")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Link failed: {command}\nError: {e}")
+            return False
+    
+    def __repr__(self):
+        return "LinkCppAppAction()"
+
+class FileLoader:
+    """Loads File objects with hashes and status based on a cache file."""
+    def __init__(self, cache_file: str, root_dir: str):
+        self.cache_file = cache_file
+        self.root_dir = root_dir
+        self._cache = self._load_cache()
+    
+    def _load_cache(self) -> dict:
+        """Load the cache from the cache file."""
+        try:
+            with open(self.cache_file, 'r') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+    
+    def _compute_hash(self, path: str) -> str:
+        """Compute SHA-256 hash of a file, or empty string if it doesn't exist."""
+        if not os.path.exists(path):
+            return ""
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    
+    def load_file(self, path: str) -> 'File':
+        """Create a File object with hash and status based on cache."""
+        rel_path = os.path.relpath(path, self.root_dir)
+        current_hash = self._compute_hash(path)
+        cached_hash = self._cache.get(rel_path, "")
+        
+        if not os.path.exists(path):
+            status = Status.DELETED
+        elif cached_hash == "":
+            status = Status.CREATED
+        elif current_hash == cached_hash:
+            status = Status.UNCHANGED
+        else:
+            status = Status.MODIFIED
+        
+        return File(path, timestamp=os.path.getmtime(path) if os.path.exists(path) else 0.0, hash=current_hash, status=status)
+    
+    def save_cache(self, files: Set['File']):
+        """Save the cache with updated hashes for the given files."""
+        cache = self._cache
+        for file in files:
+            rel_path = os.path.relpath(file.path, self.root_dir)
+            cache[rel_path] = file.hash or ""
+        os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
+        with open(self.cache_file, 'w') as f:
+            json.dump(cache, f, indent=2)
+
+class ExecuteOnTouchedAction(Action):
+    """Action that executes a wrapped action only if any predecessor has a touched status."""
+    def __init__(self, action: Action, file_loader: 'FileLoader'):
+        self.action = action
+        self.file_loader = file_loader
+    
+    def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
+        # Check if any predecessor File has a touched status
+        should_execute = any(
+            isinstance(pred, File) and pred.status in (Status.CREATED, Status.MODIFIED, Status.DELETED)
+            for pred in predecessors
+        )
+        
+        # Execute the wrapped action if needed
+        if should_execute:
+            success = self.action.execute(node, predecessors, successors)
+            if success:
+                # Update cache with hashes of all files (predecessors and successors)
+                files = {pred for pred in predecessors if isinstance(pred, File)} | \
+                        {succ for succ in successors if isinstance(succ, File)}
+                self.file_loader.save_cache(files)
+            return success
+        return True
+    
+    def __repr__(self):
+        return f"ExecuteOnTouchedAction(action={self.action!r}, file_loader={self.file_loader!r})"
+
+class Node:
+    """Base class for nodes in the dependency graph."""
+    def __init__(self):
+        self.predecessors: Set['Node'] = set()
+        self.successors: Set['Node'] = set()
+    
+    def __repr__(self):
+        return f"Node(predecessors={set(id(p) for p in self.predecessors)}, successors={set(id(s) for s in self.successors)})"
+
+class Data(Node):
+    """Node representing data entities like files."""
+    def __init__(self, status: Status = Status.UNCHANGED):
+        super().__init__()
+        self.status = status
+    
+    def __repr__(self):
+        return f"Data(status={self.status})"
+
+class File(Data):
+    """Node representing a file with path, timestamp, and hash."""
+    def __init__(self, path: str, timestamp: float = 0.0, hash: str = "", status: Status = Status.UNCHANGED):
+        super().__init__(status)
+        self.path = path
+        self.timestamp = timestamp
+        self.hash = hash
+    
+    def __repr__(self):
+        return f"File(path={self.path!r}, timestamp={self.timestamp}, hash={self.hash!r}, status={self.status})"
+
+class Command(Node):
+    """Node representing actions that read predecessors and write successors."""
+    def __init__(self, action: Action = None):
+        super().__init__()
+        if action:
+            self.action = action
+    
+    def __repr__(self):
+        return f"Command(action={self.action!r})"
+
+def execute_dependency_graph(*targets, n_threads: int = 10) -> None:
+    """
+    Execute the dependency graph for the given targets in topological order, using parallel execution.
+    Executes the node's action.execute() if the node has an 'action' attribute that is an Action.
+    Cancels the build if any action returns False.
+    Enforces alternating Data and Command nodes.
+    
+    Args:
+        *targets: Node objects (Data, File, or Command) with predecessors (set) and successors (set); action (Action) is optional.
+        n_threads: Number of threads for parallel execution (default 10).
+    
+    Raises:
+        ValueError: If targets are invalid or empty.
+        BuildFailure: If an action fails (returns False).
+        RuntimeError: If the graph has cycles, nodes have invalid attributes, or the alternating structure is violated.
+    """
+    if not targets:
+        raise ValueError("At least one target must be provided")
+
+    # Collect all relevant nodes (subgraph reachable from targets) and detect cycles
+    nodes = set()
+    visiting = set()  # Nodes in the current DFS path
+    def collect_nodes(node):
+        if node in visiting:
+            raise RuntimeError(f"Cycle detected involving {node}")
+        if node in nodes:
+            return
+        visiting.add(node)
+        # Validate node attributes
+        if not (hasattr(node, 'predecessors') and isinstance(node.predecessors, set) and
+                hasattr(node, 'successors') and isinstance(node.successors, set)):
+            raise RuntimeError(f"Invalid node {node}: must have predecessors (set) and successors (set)")
+        # Validate alternating structure
+        if isinstance(node, (Data, File)):
+            for pred in node.predecessors:
+                if not isinstance(pred, Command):
+                    raise RuntimeError(f"Data/File node {node} has invalid predecessor {pred}: must be Command")
+            for succ in node.successors:
+                if not isinstance(succ, Command):
+                    raise RuntimeError(f"Data/File node {node} has invalid successor {succ}: must be Command")
+        elif isinstance(node, Command):
+            for pred in node.predecessors:
+                if not isinstance(pred, (Data, File)):
+                    raise RuntimeError(f"Command node {node} has invalid predecessor {pred}: must be Data or File")
+            for succ in node.successors:
+                if not isinstance(succ, (Data, File)):
+                    raise RuntimeError(f"Command node {node} has invalid successor {succ}: must be Data or File")
+        else:
+            raise RuntimeError(f"Invalid node {node}: must be Data, File, or Command")
+        nodes.add(node)
+        for pred in node.predecessors:
+            collect_nodes(pred)
+        visiting.remove(node)
+
+    # Traverse predecessors to collect nodes
+    for target in targets:
+        collect_nodes(target)
+
+    # Compute in-degrees for topological sorting (number of unexecuted predecessors)
+    in_degree = {node: len(node.predecessors & nodes) for node in nodes}
+    
+    # Initialize ready queue with nodes that have no predecessors
+    ready = queue.SimpleQueue()
+    for node in nodes:
+        if in_degree[node] == 0:
+            print(f"Initial ready node: {node}")
+            ready.put(node)
+
+    # Track completed nodes and build status
+    completed = set()
+    lock = threading.Lock()
+    build_failed = False
+
+    def execute_node(node):
+        """Execute a node's action and return success status."""
+        nonlocal build_failed
+        if build_failed:
+            print(f"Skipping {node} due to build failure")
+            return False
+        print(f"Executing node: {node}")
+        if hasattr(node, 'action') and isinstance(node.action, Action):
+            success = node.action.execute(node, node.predecessors, node.successors)
+            if not success:
+                build_failed = True
+                print(f"Node {node} failed")
+                raise BuildFailure(f"Build failed at {node}")
+            print(f"Node {node} succeeded")
+            return success
+        print(f"Node {node} has no action, treated as success")
+        return True
+
+    # Execute nodes in parallel
+    with ThreadPoolExecutor(max_workers=max(1, n_threads)) as executor:
+        futures = []
+        while not ready.empty() or futures:
+            # Submit tasks for ready nodes if build hasn't failed
+            with lock:
+                if not build_failed:
+                    while not ready.empty() and len(futures) < n_threads:
+                        node = ready.get()
+                        print(f"Scheduling node: {node}")
+                        futures.append(executor.submit(execute_node, node))
+            
+            # Wait for at least one task to complete
+            if futures:
+                from concurrent.futures import wait, FIRST_COMPLETED
+                done, _ = wait(futures, return_when=FIRST_COMPLETED)
+                for future in done:
+                    try:
+                        success = future.result()
+                        if success:
+                            with lock:
+                                # Update successors' in-degrees
+                                for succ in node.successors & nodes:
+                                    in_degree[succ] -= 1
+                                    print(f"Updated in_degree for {succ}: {in_degree[succ]}")
+                                    if in_degree[succ] == 0 and not build_failed:
+                                        print(f"Adding {succ} to ready queue")
+                                        ready.put(succ)
+                                completed.add(node)
+                                print(f"Completed node: {node}, Total completed: {len(completed)}/{len(nodes)}")
+                    except BuildFailure as e:
+                        with lock:
+                            build_failed = True
+                            print(f"Build canceled: {e}")
+                    futures.remove(future)
+
+        # Check if all nodes were processed (unless build failed)
+        if len(completed) != len(nodes) and not build_failed:
+            unprocessed = nodes - completed
+            unprocessed_info = "\n".join(
+                f"Node {node}: in_degree={in_degree[node]}, predecessors={[p for p in node.predecessors]}"
+                for node in unprocessed
+            )
+            raise RuntimeError(
+                f"Execution incomplete: possible graph inconsistency\n"
+                f"Unprocessed nodes ({len(unprocessed)}):\n{unprocessed_info}"
+            )
