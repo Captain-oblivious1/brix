@@ -6,4 +6,7 @@ brix.egg-info/SOURCES.txt
 brix.egg-info/dependency_links.txt
 brix.egg-info/requires.txt
 brix.egg-info/top_level.txt
+tests/test_cache_persistence.py
 tests/test_dependency_graph.py
+tests/test_directory_creation.py
+tests/test_incremental_build.py

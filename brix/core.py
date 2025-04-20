@@ -232,13 +232,16 @@ class FileLoader:
         else:
             status = Status.MODIFIED
         
-        return File(abs_path, timestamp=os.path.getmtime(abs_path) if os.path.exists(abs_path) else 0.0, hash=current_hash, status=status)
+        file_node = File(abs_path, timestamp=os.path.getmtime(abs_path) if os.path.exists(abs_path) else 0.0, hash=current_hash, status=status)
+        self._cache[rel_path] = current_hash  # Update cache immediately
+        return file_node
     
-    def save_cache(self, files: Set['File']):
-        cache = {}
-        for file in files:
-            rel_path = os.path.relpath(file.path, self.root_dir)
-            cache[rel_path] = file.hash or ""
+    def save_cache(self, files: Set['File'] = None):
+        cache = self._cache if files is None else {}
+        if files:
+            for file in files:
+                rel_path = os.path.relpath(file.path, self.root_dir)
+                cache[rel_path] = file.hash or ""
         os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
         with open(self.cache_file, 'w') as f:
             json.dump(cache, f, indent=2)
@@ -255,23 +258,34 @@ class ExecuteOnTouchedAction(Action):
             for pred in predecessors
         )
         
+        files = {pred for pred in predecessors if isinstance(pred, File)} | \
+                {succ for succ in successors if isinstance(succ, File)}
+        
         if should_execute:
             success = self.action.execute(node, predecessors, successors)
             if success:
-                files = {pred for pred in predecessors if isinstance(pred, File)} | \
-                        {succ for succ in successors if isinstance(succ, File)}
+                for file in files:
+                    if os.path.exists(file.path):
+                        file.hash = self.file_loader._compute_hash(file.path)
+                        cached_hash = self.file_loader._cache.get(os.path.relpath(file.path, self.file_loader.root_dir), "")
+                        file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if file.hash != cached_hash else Status.UNCHANGED
+                    else:
+                        file.hash = ""
+                        file.status = Status.DELETED
                 self.file_loader.save_cache(files)
             return success
         else:
-            # Update output file statuses to UNCHANGED if no execution
-            files = {succ for succ in successors if isinstance(succ, File)}
             for file in files:
                 if os.path.exists(file.path):
                     file.hash = self.file_loader._compute_hash(file.path)
-                    file.status = Status.UNCHANGED
+                    cached_hash = self.file_loader._cache.get(os.path.relpath(file.path, self.file_loader.root_dir), "")
+                    file.status = Status.UNCHANGED if file.hash == cached_hash and file.hash != "" else Status.MODIFIED
+                else:
+                    file.hash = ""
+                    file.status = Status.DELETED
             self.file_loader.save_cache(files)
             return True
-    
+
     def __repr__(self):
         return f"ExecuteOnTouchedAction(action={self.action!r}, file_loader={self.file_loader!r})"
 
