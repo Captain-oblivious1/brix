@@ -1,6 +1,6 @@
 {
   "build/bin": "",
-  "build": "",
-  "build/obj": "",
-  "build/obj/myLib": ""
+  "build/obj/app.o": "76259c919373dd41cbf933adf89e195b725c87d64046c479a8d520dcced2cd40",
+  "build/bin/app": "c6d0f2f6544326947325c50aeefdd368ddf37fa35f3d3a95fc25d095911b4ff1",
+  "build/bin/libexample.so": "012622cb7c840fc1b60a2f55c19d9c7941655731cdb72003ec8fc0c3ff05d832"
 }

@@ -1,4 +1,4 @@
-#include "lib.h"
+#include "myLib/lib.h"
 #include <iostream>
 
 int main() {

@@ -43,7 +43,7 @@ class CommandLineAction(Action):
     def __repr__(self):
         return f"CommandLineAction(command={self.command!r})"
 
-class MakeDir(Action):
+class MakeDirAction(Action):
     """Action that creates a directory."""
     def __init__(self, file_loader: 'FileLoader' = None):
         self.file_loader = file_loader
@@ -62,6 +62,7 @@ class MakeDir(Action):
         # Create the directory
         try:
             os.makedirs(dir_file.path, exist_ok=True)
+            print(f"mkdir {dir_file.path}")
             if self.file_loader and dir_file:
                 dir_file.hash = ""
                 cached_hash = self.file_loader._cache.get(os.path.relpath(dir_file.path, self.file_loader.root_dir), "")
@@ -80,7 +81,6 @@ class CompileCppAction(Action):
         self.file_loader = file_loader
     
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
-        # Find .cpp file in predecessors
         cpp_file = None
         for pred in predecessors:
             if isinstance(pred, File) and pred.path.endswith('.cpp'):
@@ -90,7 +90,6 @@ class CompileCppAction(Action):
             print(f"Error: No .cpp file found in predecessors of {node}")
             return False
         
-        # Find .o file in successors
         o_file = None
         for succ in successors:
             if isinstance(succ, File) and succ.path.endswith('.o'):
@@ -100,10 +99,11 @@ class CompileCppAction(Action):
             print(f"Error: No .o file found in successors of {node}")
             return False
         
-        # Construct and run g++ command
-        command = f"g++ -c {cpp_file.path} -o {o_file.path} -fPIC"
+        cpp_rel_path = os.path.relpath(cpp_file.path, self.file_loader.root_dir)
+        o_rel_path = os.path.relpath(o_file.path, self.file_loader.root_dir)
+        command = f"g++ -c {cpp_rel_path} -o {o_rel_path} -fPIC"
         try:
-            subprocess.run(command, shell=True, check=True)
+            subprocess.run(command, shell=True, check=True, cwd=self.file_loader.root_dir)
             print(f"{command}")
             if self.file_loader and o_file:
                 o_file.hash = self.file_loader._compute_hash(o_file.path)
@@ -112,8 +112,8 @@ class CompileCppAction(Action):
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error: {e}")
-            return False
-    
+            return False    
+
     def __repr__(self):
         return f"CompileCppAction(file_loader={self.file_loader!r})"
 
@@ -121,15 +121,13 @@ class LinkCppSharedAction(Action):
     """Action that links .o files into a .so shared library using g++."""
     def __init__(self, file_loader: 'FileLoader' = None):
         self.file_loader = file_loader
-    
+
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
-        # Find .o files in predecessors
         o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
         if not o_files:
             print(f"Error: No .o files found in predecessors of {node}")
             return False
         
-        # Find .so file in successors
         so_file = None
         for succ in successors:
             if isinstance(succ, File) and succ.path.endswith('.so'):
@@ -139,16 +137,16 @@ class LinkCppSharedAction(Action):
             print(f"Error: No .so file found in successors of {node}")
             return False
         
-        # Construct and run g++ command
-        o_paths = ' '.join(o.path for o in o_files)
-        command = f"g++ -shared {o_paths} -o {so_file.path}"
+        o_rel_paths = ' '.join(os.path.relpath(o.path, self.file_loader.root_dir) for o in o_files)
+        so_rel_path = os.path.relpath(so_file.path, self.file_loader.root_dir)
+        command = f"g++ -shared {o_rel_paths} -o {so_rel_path}"
         try:
-            subprocess.run(command, shell=True, check=True)
+            subprocess.run(command, shell=True, check=True, cwd=self.file_loader.root_dir)
             print(f"{command}")
             if self.file_loader and so_file:
                 so_file.hash = self.file_loader._compute_hash(so_file.path)
                 cached_hash = self.file_loader._cache.get(os.path.relpath(so_file.path, self.file_loader.root_dir), "")
-                so_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if o_file.hash != cached_hash else Status.UNCHANGED
+                so_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if so_file.hash != cached_hash else Status.UNCHANGED
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error: {e}")
@@ -161,16 +159,14 @@ class LinkCppAppAction(Action):
     """Action that links .o files and .so libraries into an executable using g++."""
     def __init__(self, file_loader: 'FileLoader' = None):
         self.file_loader = file_loader
-    
+
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
-        # Find .o files and .so libraries in predecessors
         o_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.o')]
         so_files = [pred for pred in predecessors if isinstance(pred, File) and pred.path.endswith('.so')]
         if not o_files:
             print(f"Error: No .o files found in predecessors of {node}")
             return False
         
-        # Find executable file in successors
         exe_file = None
         for succ in successors:
             if isinstance(succ, File) and not succ.path.endswith(('.o', '.so', '.cpp', '.h')):
@@ -180,38 +176,35 @@ class LinkCppAppAction(Action):
             print(f"Error: No executable file found in successors of {node}")
             return False
         
-        # Construct library flags (-L and -l)
         lib_dirs = set(os.path.dirname(so.path) for so in so_files)
         lib_names = [os.path.basename(so.path).replace('lib', '').replace('.so', '') for so in so_files]
-        lib_flags = ' '.join(f"-L {dir} -l{name}" for dir, name in zip(lib_dirs, lib_names)) if so_files else ''
+        lib_flags = ' '.join(f"-L {os.path.relpath(dir, self.file_loader.root_dir)} -l{name}" for dir, name in zip(lib_dirs, lib_names)) if so_files else ''
         
-        # Construct and run g++ command
-        o_paths = ' '.join(o.path for o in o_files)
-        command = f"g++ {o_paths} -o {exe_file.path} {lib_flags}".strip()
+        o_rel_paths = ' '.join(os.path.relpath(o.path, self.file_loader.root_dir) for o in o_files)
+        exe_rel_path = os.path.relpath(exe_file.path, self.file_loader.root_dir)
+        command = f"g++ {o_rel_paths} -o {exe_rel_path} {lib_flags}".strip()
         try:
-            subprocess.run(command, shell=True, check=True)
+            subprocess.run(command, shell=True, check=True, cwd=self.file_loader.root_dir)
             print(f"{command}")
             if self.file_loader and exe_file:
                 exe_file.hash = self.file_loader._compute_hash(exe_file.path)
                 cached_hash = self.file_loader._cache.get(os.path.relpath(exe_file.path, self.file_loader.root_dir), "")
-                o_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if o_file.hash != cached_hash else Status.UNCHANGED
+                exe_file.status = Status.CREATED if cached_hash == "" else Status.MODIFIED if exe_file.hash != cached_hash else Status.UNCHANGED
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error: {e}")
             return False
-    
+
     def __repr__(self):
         return f"LinkCppAppAction(file_loader={self.file_loader!r})"
 
 class FileLoader:
-    """Loads File objects with hashes and status based on a cache file."""
     def __init__(self, cache_file: str, root_dir: str):
         self.cache_file = cache_file
         self.root_dir = root_dir
         self._cache = self._load_cache()
     
     def _load_cache(self) -> dict:
-        """Load the cache from the cache file."""
         try:
             with open(self.cache_file, 'r') as f:
                 return json.load(f)
@@ -219,14 +212,12 @@ class FileLoader:
             return {}
     
     def _compute_hash(self, path: str) -> str:
-        """Compute SHA-256 hash of a file, or empty string if it doesn't exist or is a directory."""
-        if not os.path.exists(path) or os.path.isdir(path):  # Changed: Check for directory
+        if not os.path.exists(path) or os.path.isdir(path):
             return ""
         with open(path, 'rb') as f:
             return hashlib.sha256(f.read()).hexdigest()
     
     def load_file(self, path: str) -> 'File':
-        """Create a File object with hash and status based on cache, using path relative to root_dir."""
         abs_path = os.path.join(self.root_dir, path) if not os.path.isabs(path) else path
         rel_path = os.path.relpath(abs_path, self.root_dir)
         current_hash = self._compute_hash(abs_path)
@@ -234,9 +225,9 @@ class FileLoader:
         
         if not os.path.exists(abs_path):
             status = Status.DELETED
-        elif cached_hash == "":
+        elif cached_hash == "" and current_hash != "":
             status = Status.CREATED
-        elif current_hash == cached_hash:
+        elif current_hash == cached_hash and current_hash != "":
             status = Status.UNCHANGED
         else:
             status = Status.MODIFIED
@@ -244,8 +235,7 @@ class FileLoader:
         return File(abs_path, timestamp=os.path.getmtime(abs_path) if os.path.exists(abs_path) else 0.0, hash=current_hash, status=status)
     
     def save_cache(self, files: Set['File']):
-        """Save the cache with updated hashes for the given files."""
-        cache = self._cache
+        cache = {}
         for file in files:
             rel_path = os.path.relpath(file.path, self.root_dir)
             cache[rel_path] = file.hash or ""
@@ -258,24 +248,29 @@ class ExecuteOnTouchedAction(Action):
     def __init__(self, action: Action, file_loader: 'FileLoader'):
         self.action = action
         self.file_loader = file_loader
-    
+
     def execute(self, node: 'Command', predecessors: Set['Node'], successors: Set['Node']) -> bool:
-        # Check if any predecessor File has a touched status
         should_execute = any(
             isinstance(pred, File) and pred.status in (Status.CREATED, Status.MODIFIED, Status.DELETED)
             for pred in predecessors
         )
         
-        # Execute the wrapped action if needed
         if should_execute:
             success = self.action.execute(node, predecessors, successors)
             if success:
-                # Update cache with hashes of all files (predecessors and successors)
                 files = {pred for pred in predecessors if isinstance(pred, File)} | \
                         {succ for succ in successors if isinstance(succ, File)}
                 self.file_loader.save_cache(files)
             return success
-        return True
+        else:
+            # Update output file statuses to UNCHANGED if no execution
+            files = {succ for succ in successors if isinstance(succ, File)}
+            for file in files:
+                if os.path.exists(file.path):
+                    file.hash = self.file_loader._compute_hash(file.path)
+                    file.status = Status.UNCHANGED
+            self.file_loader.save_cache(files)
+            return True
     
     def __repr__(self):
         return f"ExecuteOnTouchedAction(action={self.action!r}, file_loader={self.file_loader!r})"
@@ -285,6 +280,12 @@ class Node:
     def __init__(self):
         self.predecessors: Set['Node'] = set()
         self.successors: Set['Node'] = set()
+    
+    def add_predecessors(self, *predecessors):
+        """Add predecessors to this node and set this node as their successor."""
+        for pred in predecessors:
+            self.predecessors.add(pred)
+            pred.successors.add(self)
     
     def __repr__(self):
         return f"Node(predecessors={set(id(p) for p in self.predecessors)}, successors={set(id(s) for s in self.successors)})"
