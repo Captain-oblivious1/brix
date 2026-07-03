@@ -1,0 +1,73 @@
+from brix.patterns import PathPattern, overlaps
+
+
+def test_concrete_pattern():
+    p = PathPattern("src/main.cpp")
+    assert p.is_concrete
+    assert p.match("src/main.cpp") == {}
+    assert p.match("src/other.cpp") is None
+
+
+def test_binding_extraction():
+    p = PathPattern("src/{name}.cpp")
+    assert p.binding_names == ("name",)
+    assert p.match("src/foo.cpp") == {"name": "foo"}
+    assert p.match("src/nested/foo.cpp") is None  # bindings match one segment
+    assert p.match("src/foo.h") is None
+
+
+def test_multiple_bindings():
+    p = PathPattern("{dir}/{name}.o")
+    assert p.match("obj/foo.o") == {"dir": "obj", "name": "foo"}
+
+
+def test_repeated_binding_must_agree():
+    p = PathPattern("src/{name}/{name}.cpp")
+    assert p.match("src/foo/foo.cpp") == {"name": "foo"}
+    assert p.match("src/foo/bar.cpp") is None
+
+
+def test_substitute():
+    p = PathPattern("build/obj/{name}.o")
+    assert p.substitute({"name": "foo"}) == "build/obj/foo.o"
+    assert p.substitute({"other": "x"}) == "build/obj/{name}.o"
+
+
+def test_literal_prefix_dir():
+    assert PathPattern("build/obj/{name}.o").literal_prefix_dir == "build/obj"
+    assert PathPattern("{name}.o").literal_prefix_dir == ""
+    assert PathPattern("src/main.cpp").literal_prefix_dir == "src"
+
+
+def test_find(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/foo.cpp").write_text("f")
+    (tmp_path / "src/bar.cpp").write_text("b")
+    (tmp_path / "src/baz.h").write_text("h")
+    found = PathPattern("src/{name}.cpp").find(tmp_path)
+    assert found == [
+        ("src/bar.cpp", {"name": "bar"}),
+        ("src/foo.cpp", {"name": "foo"}),
+    ]
+
+
+def test_find_concrete(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    assert PathPattern("a.txt").find(tmp_path) == [("a.txt", {})]
+    assert PathPattern("b.txt").find(tmp_path) == []
+
+
+def test_overlaps_concrete():
+    assert overlaps(PathPattern("a/b.c"), PathPattern("a/b.c"))
+    assert not overlaps(PathPattern("a/b.c"), PathPattern("a/x.c"))
+
+
+def test_overlaps_pattern_vs_concrete():
+    assert overlaps(PathPattern("src/{name}.cpp"), PathPattern("src/foo.cpp"))
+    assert not overlaps(PathPattern("src/{name}.cpp"), PathPattern("src/foo.h"))
+
+
+def test_overlaps_pattern_vs_pattern():
+    assert overlaps(PathPattern("build/obj/{name}.o"), PathPattern("build/obj/{name}.o"))
+    assert overlaps(PathPattern("build/{a}.o"), PathPattern("build/{b}.o"))
+    assert not overlaps(PathPattern("build/obj/{name}.o"), PathPattern("src/{name}.cpp"))

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m pytest -q)",
+      "Bash(python3 examples/hello_text/brix.py)",
+      "Bash(python3 examples/raw_cpp/brix.py)",
+      "Bash(./examples/raw_cpp/build/bin/app)",
+      "Bash(git add *)",
+      "Bash(git -c user.name=\"Duane Knesek\" -c user.email=\"duane.knesek@gmail.com\" commit -q --amend --no-edit)"
+    ]
+  }
+}
