@@ -78,9 +78,9 @@ def _atom_text(atom: PathAtom) -> str:
 
 def _node_label(action: Action) -> str:
     if isinstance(action, ExternalProcessAction):
-        return action.name
+        return action.label
     if isinstance(action, ExpandAll):
-        return f"expand: {action.child.name}"
+        return f"expand: {action.child.label}"
     return repr(action)
 
 

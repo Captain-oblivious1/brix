@@ -66,7 +66,7 @@ def render_command(action: ExternalProcessAction, root: Path) -> str:
     """
     for name in action.inputs:
         if name in action.outputs:
-            raise RenderError(f"{name!r} is both an input and an output of {action.name!r}")
+            raise RenderError(f"{name!r} is both an input and an output of {action.label!r}")
 
     def repl(m: re.Match[str]) -> str:
         key = m.group(1)
@@ -74,7 +74,7 @@ def render_command(action: ExternalProcessAction, root: Path) -> str:
             return _render_expr(key, action.inputs[key], root, is_output=False)
         if key in action.outputs:
             return _render_expr(key, action.outputs[key], root, is_output=True)
-        raise RenderError(f"{action.name!r}: unknown placeholder {{{key}}}")
+        raise RenderError(f"{action.label!r}: unknown placeholder {{{key}}}")
 
     return _PLACEHOLDER_RE.sub(repl, action.command_line)
 

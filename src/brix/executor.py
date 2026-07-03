@@ -25,8 +25,8 @@ def _run_process_node(node: ExecutionNode, root: Path) -> ProcessResult:
         prepare_output_dirs(action, root)
         command = render_command(action, root)
     except RenderError as exc:
-        return ProcessResult(action_name=action.name, command="", stderr=f"brix: {exc}")
-    return run_process(action.name, command, cwd=root)
+        return ProcessResult(action_name=action.label, command="", stderr=f"brix: {exc}")
+    return run_process(action.label, command, cwd=root)
 
 
 def _collection_members(action: ExpandAll, root: Path) -> list[str]:
@@ -67,7 +67,7 @@ def _expand(plan: ExecutionPlan, node: ExecutionNode) -> list[ExecutionNode]:
     children: list[ExecutionNode] = []
     for value in _collection_members(action, plan.root):
         concrete = action.child.substitute({action.element_name: value})
-        child_node = plan.add_node(NodeKind.PROCESS, concrete.name, concrete)
+        child_node = plan.add_node(NodeKind.PROCESS, concrete.label, concrete)
         for pid in pred_ids:
             plan.add_edge(pid, child_node.id, f"expansion of [{node.id}]")
         for sid in succ_ids:

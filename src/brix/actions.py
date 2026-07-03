@@ -21,11 +21,17 @@ class ExternalProcessAction(Action):
     entries in ``inputs`` and ``outputs``. Binding placeholders such as
     ``{name}`` inside data-expression paths belong to a separate namespace
     and are substituted at expansion time, not at command rendering time.
+
+    ``name`` is diagnostic identity: node labels, echo lines, and process
+    results. It is optional; unnamed actions are labeled by their command
+    template. Named actions will fingerprint/debug better once incremental
+    metadata and caching exist.
     """
 
     def __init__(
         self,
-        name: str,
+        name: str | None = None,
+        *,
         command_line: str,
         inputs: dict[str, DataExpr] | None = None,
         outputs: dict[str, DataExpr] | None = None,
@@ -34,6 +40,10 @@ class ExternalProcessAction(Action):
         self.command_line = command_line
         self.inputs: dict[str, DataExpr] = dict(inputs or {})
         self.outputs: dict[str, DataExpr] = dict(outputs or {})
+
+    @property
+    def label(self) -> str:
+        return self.name if self.name is not None else self.command_line
 
     def substitute(self, bindings: dict[str, str]) -> ExternalProcessAction:
         """Return a concrete copy with bindings applied to name and data paths."""
@@ -45,8 +55,9 @@ class ExternalProcessAction(Action):
             return expr.substitute(bindings)
 
         name = self.name
-        for key, value in bindings.items():
-            name = name.replace("{" + key + "}", value)
+        if name is not None:
+            for key, value in bindings.items():
+                name = name.replace("{" + key + "}", value)
         return ExternalProcessAction(
             name=name,
             command_line=self.command_line,
@@ -55,7 +66,7 @@ class ExternalProcessAction(Action):
         )
 
     def __repr__(self) -> str:
-        return f"ExternalProcessAction({self.name!r})"
+        return f"ExternalProcessAction({self.label!r})"
 
 
 class ExpandAll(Action):
