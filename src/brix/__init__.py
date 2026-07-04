@@ -9,10 +9,19 @@ from .actions import ExpandAll, ExternalProcessAction
 from .builders import BuildResult, CleanBuilder
 from .data import DataExpr, DataFactory, DataUnion
 from .graph import Graph
-from .plan import ExecutionEdge, ExecutionNode, ExecutionPlan, NodeKind, NodeState
+from .layers import BuildLayer, NodeContext
+from .plan import (
+    ExecutionEdge,
+    ExecutionNode,
+    ExecutionPlan,
+    NodeKind,
+    NodeState,
+    NodeStateTable,
+)
 from .process import ProcessResult
 
 __all__ = [
+    "BuildLayer",
     "BuildResult",
     "CleanBuilder",
     "DataExpr",
@@ -24,7 +33,9 @@ __all__ = [
     "ExpandAll",
     "ExternalProcessAction",
     "Graph",
+    "NodeContext",
     "NodeKind",
     "NodeState",
+    "NodeStateTable",
     "ProcessResult",
 ]

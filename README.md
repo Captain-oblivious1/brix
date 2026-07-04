@@ -22,8 +22,8 @@ user-facing build language.
 
 ## Current state
 
-Minimal prototype (spec steps 1–10 plus dependency inference) is implemented
-and working. 42 tests pass.
+Minimal prototype (spec steps 1–10 plus dependency inference) plus the
+build-layer seams are implemented and working. 48 tests pass.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -37,36 +37,32 @@ and working. 42 tests pass.
 - Structured `ProcessResult`s (stdout/stderr/exit/signal); failure cascades
   skip downstream nodes; cycle detection
 - `CleanBuilder(graph, root).plan()` / `.build(jobs, echo)`
+- `BuildLayer` / `NodeContext` seams: per-node `around_node` middleware
+  stack plus lifecycle events in the executor; scheduler-owned monotone
+  `NodeStateTable` (node definitions are frozen)
 
-Not yet implemented: build layers (incremental/cache/atomic), status
+Not yet implemented: the real layers (incremental/cache/atomic), status
 reporting, typed language actions, CLI helpers.
 
 ## TODO (priority order)
 
-1. **Layer seams** — add `BuildLayer`, `NodeContext`, and the middleware
-   stack to the executor; `CleanBuilder` runs with an empty stack; full test
-   suite stays green. Include moving node status/result out of
-   `ExecutionNode` into a scheduler-owned state table (aligns the code with
-   the ground rules — today `executor.py` mutates `node.state` in place).
-2. **Trivial layer** (logging or dry-run) — proves composition works,
-   including for runtime-expanded nodes.
-3. **IncrementalBuilder** — persistent metadata store,
+1. **IncrementalBuilder** — persistent metadata store,
    `TimeAndHashChangeDetector`, fingerprints, membership history,
    deleted-source cleanup nodes, failed-output cleanup, `on-completion`
    edge trigger mode.
-4. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
+2. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
    stdout/stderr replay; cached-failure replay.
-5. **AtomicBuilder** — staging via `ctx.output_root`, commit in
+3. **AtomicBuilder** — staging via `ctx.output_root`, commit in
    `on_build_end`, crash recovery in `on_build_begin`.
-6. **Status reporting** — stale files/actions, missing outputs,
+4. **Status reporting** — stale files/actions, missing outputs,
    membership-change staleness, staged-but-uncommitted state, interrupted
    atomic build needing recovery, cached failures. Build-state inspection,
    not a dry-run mode.
-7. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
+5. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
    to the generic model (deferred by Duane as low-risk).
-8. **CLI helpers** — `build`, `status`, `clean`, `graph`; alias→target
+6. **CLI helpers** — `build`, `status`, `clean`, `graph`; alias→target
    mapping. Separate from `Graph` and builders.
-9. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+7. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
 Further out (from the original spec, unscheduled): graph visualization,
@@ -87,6 +83,18 @@ in-memory and database-backed data expressions.
   diagrams; the PDF version was dropped in favor of browser viewing.
 - `freshStart.md` (the original spec) merged into this README, updated to
   the current understanding, and deleted.
+- **Layer seams** (`src/brix/layers.py`): `BuildLayer` hook interface and
+  `NodeContext`; the executor wraps every ready process node in the
+  `around_node` stack and fires `on_build_begin` /
+  `on_collection_realized` / `on_build_end`; rendering resolves inputs
+  against `ctx.workspace_root` and maps outputs through `ctx.output_root`.
+  Node status/result moved out of `ExecutionNode` (now frozen) into the
+  scheduler-owned, monotone `NodeStateTable`. `CleanBuilder` runs with an
+  empty stack; behavior unchanged.
+- **Trivial-layer proof** (`tests/test_layers.py`): recording, skip-all,
+  output-redirect, and stack-order layers exercised end-to-end — including
+  through runtime-expanded nodes. Runnable demo: `examples/layers_demo/`
+  (trace layer + hand-rolled staging-and-commit layer).
 
 ## Design rules
 
@@ -347,15 +355,16 @@ inputs/outputs; collections realize implicitly at expansion/render time.
 categories; whether data become first-class plan nodes is an open modeling
 question — the ground rules in design rule 4 cover them either way.)
 
-Direction (per `docs/build-layers.html`):
+Current shape (per `docs/build-layers.html`; edge trigger modes are still
+to come with the incremental layer):
 
 ```text
 ExecutionPlan            # append-only
   nodes: [ExecutionNode] # definitions frozen at insertion
-  edges: from -> to, reason, trigger: on-success | on-completion
+  edges: from -> to, reason        # future: trigger on-success | on-completion
 
-Scheduler-owned state table
-  node id -> status, result     # pending -> running -> done|failed|skipped
+NodeStateTable           # scheduler-owned
+  node id -> status, result        # pending -> running -> done|failed|skipped
 ```
 
 The scheduler owns readiness, failure cascade, and the single insertion
@@ -472,6 +481,7 @@ the boundary between the two clean.
 python3 -m pytest                        # run the test suite
 python3 examples/hello_text/brix.py      # portable text-processing demo
 python3 examples/raw_cpp/brix.py         # compile+link demo (needs c++)
+python3 examples/layers_demo/brix.py     # watch the BuildLayer stack work
 ```
 
 A build file looks like:

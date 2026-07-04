@@ -90,7 +90,7 @@ def test_expand_and_build(tmp_path):
     assert (tmp_path / "build/all.txt").read_text() == "HELLO WORLD"
     # ExpandAll node plus two expanded children plus combine.
     assert len(result.plan.nodes) == 4
-    assert all(n.state is NodeState.DONE for n in result.plan.nodes)
+    assert all(result.states.status(n.id) is NodeState.DONE for n in result.plan.nodes)
 
 
 def test_expansion_is_initially_unrealized(tmp_path):
@@ -191,10 +191,10 @@ def test_failure_is_structured_and_skips_downstream(tmp_path):
     result = CleanBuilder(graph, root=tmp_path).build(echo=False)
     assert not result.success
     fail_node, downstream_node = result.plan.nodes
-    assert fail_node.state is NodeState.FAILED
-    assert fail_node.result.exit_code == 3
-    assert downstream_node.state is NodeState.SKIPPED
-    assert downstream_node.result is None
+    assert result.states.status(fail_node.id) is NodeState.FAILED
+    assert result.states.result(fail_node.id).exit_code == 3
+    assert result.states.status(downstream_node.id) is NodeState.SKIPPED
+    assert result.states.result(downstream_node.id) is None
     assert any("exit 3" in e for e in result.errors)
 
 
