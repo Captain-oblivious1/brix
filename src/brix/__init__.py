@@ -6,10 +6,12 @@ runtime ExpandAll expansion, and a clean builder.
 """
 
 from .actions import ExpandAll, ExternalProcessAction
-from .builders import BuildResult, CleanBuilder
+from .builders import BuildResult, CleanBuilder, IncrementalBuilder
 from .data import DataExpr, DataFactory, DataUnion
 from .graph import Graph
+from .incremental import IncrementalLayer
 from .layers import BuildLayer, NodeContext
+from .metadata import BuildMetadata, TimeAndHashChangeDetector
 from .plan import (
     ExecutionEdge,
     ExecutionNode,
@@ -22,6 +24,7 @@ from .process import ProcessResult
 
 __all__ = [
     "BuildLayer",
+    "BuildMetadata",
     "BuildResult",
     "CleanBuilder",
     "DataExpr",
@@ -33,9 +36,12 @@ __all__ = [
     "ExpandAll",
     "ExternalProcessAction",
     "Graph",
+    "IncrementalBuilder",
+    "IncrementalLayer",
     "NodeContext",
     "NodeKind",
     "NodeState",
     "NodeStateTable",
     "ProcessResult",
+    "TimeAndHashChangeDetector",
 ]

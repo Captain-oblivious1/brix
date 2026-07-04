@@ -22,8 +22,9 @@ user-facing build language.
 
 ## Current state
 
-Minimal prototype (spec steps 1–10 plus dependency inference) plus the
-build-layer seams are implemented and working. 48 tests pass.
+Minimal prototype (spec steps 1–10 plus dependency inference), the
+build-layer seams, and incremental fingerprint-skip are implemented and
+working. 55 tests pass.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -46,10 +47,10 @@ reporting, typed language actions, CLI helpers.
 
 ## TODO (priority order)
 
-1. **IncrementalBuilder** — persistent metadata store,
-   `TimeAndHashChangeDetector`, fingerprints, membership history,
-   deleted-source cleanup nodes, failed-output cleanup, `on-completion`
-   edge trigger mode.
+1. **IncrementalBuilder, part 2: cleanup** — membership history diffing,
+   layer-proposed deletion nodes through the scheduler's insertion channel,
+   `on-completion` edge trigger mode. (Part 1 — fingerprints and skip — is
+   done; see Completed.)
 2. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
    stdout/stderr replay; cached-failure replay.
 3. **AtomicBuilder** — staging via `ctx.output_root`, commit in
@@ -95,6 +96,15 @@ in-memory and database-backed data expressions.
   output-redirect, and stack-order layers exercised end-to-end — including
   through runtime-expanded nodes. Runnable demo: `examples/layers_demo/`
   (trace layer + hand-rolled staging-and-commit layer).
+- **IncrementalBuilder part 1 — fingerprints and skip**
+  (`src/brix/metadata.py`, `incremental.py`): persistent JSON metadata with
+  a stat-validated file-hash cache (`TimeAndHashChangeDetector`); action
+  identity keys (structure) vs fingerprints (content — command, tool
+  identity, input hashes; the future cache key); fresh nodes complete with
+  their previous result, stdout/stderr replay included; failed actions are
+  forgotten and their outputs deleted (clean-build parity). Tests: rerun
+  only what changed, byte-identical rerun keeps downstream fresh, value
+  changes refingerprint, failures never replay as fresh.
 
 ## Design rules
 
