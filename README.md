@@ -52,20 +52,31 @@ language actions, CLI helpers.
 
 ## TODO (priority order)
 
-1. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
-   stdout/stderr replay; cached-failure replay.
-2. **AtomicBuilder** — staging via `ctx.output_root`, commit in
+1. **Reporter seam + result provenance** — the engine never prints; the
+   scheduler's `say()`/`echo` calls become events on a `Reporter` interface
+   (`build_begin`, `node_started`, `node_completed`, `node_skipped`,
+   `collection_realized`, `node_inserted`, `build_end`) — the observational
+   twin of `BuildLayer`. Output styles are Reporter implementations chosen
+   by the client (silent/exit-code-only, live console, errors-at-end,
+   machine-readable later); builders default to silent for library use.
+   `ProcessResult` gains a `source` field (`process` / `replayed` / later
+   `cache`), stamped by whatever produced the result, so reporters can
+   render replays honestly while scheduling stays indifferent.
+2. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
+   stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
+3. **AtomicBuilder** — staging via `ctx.output_root`, commit in
    `on_build_end`, crash recovery in `on_build_begin`. Includes making
    downstream *inputs* resolve through staging (today only outputs map
    through `ctx.output_root`).
-3. **Status reporting** — stale files/actions, missing outputs,
-   membership-change staleness, staged-but-uncommitted state, interrupted
-   atomic build needing recovery, cached failures. Build-state inspection,
-   not a dry-run mode.
-4. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
+4. **Status reporting + CLI** — `brix.py status` / `brix.py errors` read
+   persisted metadata (last results including failures) without building:
+   stale files/actions, missing outputs, membership-change staleness,
+   staged-but-uncommitted state, interrupted atomic build needing recovery.
+   Sits on the reporter seam and the metadata store. Plus CLI helpers:
+   `build`, `clean`, `graph`, alias→target mapping — separate from `Graph`
+   and builders.
+5. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
    to the generic model (deferred by Duane as low-risk).
-5. **CLI helpers** — `build`, `status`, `clean`, `graph`; alias→target
-   mapping. Separate from `Graph` and builders.
 6. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
@@ -166,7 +177,12 @@ them:
    raw and typed forms compose in one graph.
 10. **Generated files must be representable before they exist**, and
     `ExpandAll` expands into schedulable graph nodes, not an opaque loop.
-11. **Python owns user composition; Rust eventually owns the engine** —
+11. **The engine never prints.** Output is a client decision: the scheduler
+    emits events to a `Reporter`, output styles are Reporter
+    implementations, and results carry provenance (`process` / `replayed` /
+    `cache`) so reporting can be honest without scheduling caring how a
+    result was obtained. Silent + exit code is a first-class mode.
+12. **Python owns user composition; Rust eventually owns the engine** —
     metadata, graph algorithms, scheduling, caching, fingerprints, and
     performance-critical execution live below the DSL boundary.
 
