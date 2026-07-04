@@ -125,9 +125,13 @@ def test_generated_collection_realizes_through_staging(tmp_path):
                 inputs={
                     "python": data.tool(sys.executable),
                     "tool": data.file("tools/generate.py"),
-                    "out_dir": data.value("build/generated"),
                 },
-                outputs={"generated": data.glob("build/generated/{name}.txt")},
+                outputs={
+                    # Declared as an output so it renders through output_root:
+                    # the generator writes into staging, not the workspace.
+                    "out_dir": data.file("build/generated"),
+                    "generated": data.glob("build/generated/{name}.txt"),
+                },
             ),
             ExpandAll(
                 element_name="name",

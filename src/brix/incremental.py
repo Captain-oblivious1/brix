@@ -154,7 +154,9 @@ def remove_outputs(action: ExternalProcessAction, ctx: NodeContext) -> None:
     for expr in action.outputs.values():
         for atom in expr.atoms():
             if isinstance(atom, FileData) and atom.pattern.is_concrete:
-                (ctx.output_root / atom.path).unlink(missing_ok=True)
+                target = ctx.output_root / atom.path
+                if target.is_file():  # directory outputs are left in place
+                    target.unlink()
             elif isinstance(atom, GlobData):
                 for path, _ in atom.pattern.find(ctx.output_root):
                     (ctx.output_root / path).unlink(missing_ok=True)

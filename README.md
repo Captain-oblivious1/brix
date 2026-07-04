@@ -25,8 +25,9 @@ user-facing build language.
 Minimal prototype (spec steps 1–10 plus dependency inference), the
 build-layer seams, the full IncrementalBuilder (fingerprint skip +
 deleted-source cleanup), the reporter seam, status reporting with a CLI,
-AtomicBuilder, and typed C++ actions are implemented and working. 93
-tests pass.
+AtomicBuilder, and typed C++/Java actions are implemented and working.
+96 tests pass (plus a JDK end-to-end test that skips when no JDK is on
+PATH).
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -64,10 +65,12 @@ tests pass.
   by the next build; failed-build staging is inspectable via status, then
   discarded
 - `brix.cpp` typed actions (`CompileSourceAction`, `LinkApplicationAction`)
-  that lower to the generic model in `Graph.add`; raw and typed forms
-  compose in one graph
+  and `brix.java` (`JarAction` — javac + jar, optional `entry_point`) that
+  lower to the generic model in `Graph.add`; raw and typed forms compose
+  in one graph (`examples/cpp_to_java/`: a C++ tool generates Java sources
+  that feed a jar)
 
-Not yet implemented: cache layer, `brix.java` typed actions.
+Not yet implemented: cache layer.
 
 ## TODO (priority order)
 
@@ -78,16 +81,15 @@ caching; few have honest status inspection or atomic builds.
    stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
    Atomic-outermost stack order routes restored outputs through staging
    for free.
-2. **`brix.java` typed actions** (`JarAction`) plus the spec's
-   C++-generates-Java composability example; possibly
-   `cpp.CompileApplicationAction` (compile+link in one declaration).
-3. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+2. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
 Further out (from the original spec, unscheduled): graph visualization,
 modular/distributed graph loading for large projects, richer change
 detectors (filesystem watcher, source-control based, remote metadata),
-in-memory and database-backed data expressions.
+in-memory and database-backed data expressions,
+`cpp.CompileApplicationAction`, regex output collections (packaged Java
+class tracking).
 
 ## Completed
 
@@ -177,7 +179,20 @@ in-memory and database-backed data expressions.
   `AtomicBuilder(IncrementalBuilder(...))` and the CLI — break a source
   and the old binary keeps working (atomic), `brix.py errors` replays the
   compiler diagnostics without rebuilding, fix it back and even the link
-  stays fresh (byte-identical object). `ProcessResult.source` records how a
+  stays fresh (byte-identical object).
+- **`brix.java` + the composability example**: `JarAction` lowers to one
+  whole-program javac step plus a jar step (optional `entry_point` →
+  `jar cfe`). Established the **output-directory convention**: a dir a
+  tool writes into is declared as a `data.file` *output* (renders through
+  `output_root`, so it stages under atomic — this closed a real atomicity
+  hole where `data.value` out-dirs wrote straight to the workspace) and
+  as a `data.file` *input* on the consumer (resolves via the overlay).
+  `examples/cpp_to_java/`: compile+link a C++ generator, run it to emit
+  Java sources, jar handwritten + generated together — one graph, three
+  action kinds, all layers on. Verified on this machine up to the JDK
+  boundary (no JDK installed): the generated `.java` files land in
+  staging, javac fails cleanly, the workspace stays untouched, and
+  status lists every staged artifact. `ProcessResult.source` records how a
   result was obtained (`process` / `replayed`; `cache` reserved) — stamped
   by the producer, ignored by scheduling.
 

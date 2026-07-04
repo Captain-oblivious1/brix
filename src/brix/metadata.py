@@ -113,7 +113,10 @@ class TimeAndHashChangeDetector:
         return [st.st_mtime_ns, st.st_size]
 
     def hash_file(self, path: Path) -> str | None:
-        """sha256 of the file's content, or None if it doesn't exist."""
+        """sha256 of the file's content; None if missing or not a regular
+        file (directories declared as outputs/inputs hash as None)."""
+        if not path.is_file():
+            return None
         signature = self.stat_signature(path)
         if signature is None:
             return None
