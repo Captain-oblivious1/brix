@@ -28,7 +28,7 @@ def test_on_success_edge_skips_after_failure(tmp_path):
     cleanup = plan.add_node(NodeKind.PROCESS, cleanup_action.label, cleanup_action)
     plan.add_edge(boom.id, cleanup.id, "ordinary data edge")  # default trigger
 
-    result = execute(plan, echo=False)
+    result = execute(plan)
     assert not result.success
     assert result.states.status(cleanup.id) is NodeState.SKIPPED
     assert (tmp_path / "junk.txt").exists()  # cleanup never ran
@@ -44,7 +44,7 @@ def test_on_completion_edge_fires_after_failure(tmp_path):
         boom.id, cleanup.id, "failure cleanup", trigger=EdgeTrigger.ON_COMPLETION
     )
 
-    result = execute(plan, echo=False)
+    result = execute(plan)
     assert not result.success  # boom still failed the build
     assert result.states.status(boom.id) is NodeState.FAILED
     assert result.states.status(cleanup.id) is NodeState.DONE
@@ -63,7 +63,7 @@ def test_on_completion_edge_also_fires_after_success(tmp_path):
     cleanup = plan.add_node(NodeKind.PROCESS, cleanup_action.label, cleanup_action)
     plan.add_edge(ok.id, cleanup.id, "cleanup", trigger=EdgeTrigger.ON_COMPLETION)
 
-    result = execute(plan, echo=False)
+    result = execute(plan)
     assert result.success
     assert result.states.status(cleanup.id) is NodeState.DONE
     assert not (tmp_path / "junk.txt").exists()

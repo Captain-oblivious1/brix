@@ -83,7 +83,7 @@ def upper_then_concat_graph() -> Graph:
 
 def test_expand_and_build(tmp_path):
     write_workspace(tmp_path, {"a.txt": "hello ", "b.txt": "world"})
-    result = CleanBuilder(upper_then_concat_graph(), root=tmp_path).build(echo=False)
+    result = CleanBuilder(upper_then_concat_graph(), root=tmp_path).build()
     assert result.success
     assert (tmp_path / "build/upper/a.txt").read_text() == "HELLO "
     assert (tmp_path / "build/upper/b.txt").read_text() == "WORLD"
@@ -141,7 +141,7 @@ def test_generated_files_expand_at_runtime(tmp_path):
             outputs={"combined": data.file("build/all.txt")},
         ),
     )
-    result = CleanBuilder(graph, root=tmp_path).build(echo=False)
+    result = CleanBuilder(graph, root=tmp_path).build()
     assert result.success
     assert (tmp_path / "build/all.txt").read_text() == "ALPHA\nBETA\n"
 
@@ -157,7 +157,7 @@ def test_stdout_stderr_exit_code_captured(tmp_path):
             inputs={"python": data.tool(sys.executable), "code": data.value(code)},
         )
     )
-    result = CleanBuilder(graph, root=tmp_path).build(echo=False)
+    result = CleanBuilder(graph, root=tmp_path).build()
     assert result.success
     (proc,) = result.process_results
     assert proc.stdout == "to out\n"
@@ -188,7 +188,7 @@ def test_failure_is_structured_and_skips_downstream(tmp_path):
             },
         ),
     )
-    result = CleanBuilder(graph, root=tmp_path).build(echo=False)
+    result = CleanBuilder(graph, root=tmp_path).build()
     assert not result.success
     fail_node, downstream_node = result.plan.nodes
     assert result.states.status(fail_node.id) is NodeState.FAILED
@@ -222,7 +222,7 @@ def test_independent_branch_still_builds_on_failure(tmp_path):
         ),
     )
     write_workspace(tmp_path, {"a.txt": "ok"})
-    result = CleanBuilder(graph, root=tmp_path).build(echo=False)
+    result = CleanBuilder(graph, root=tmp_path).build()
     assert not result.success
     assert (tmp_path / "build/a.txt").read_text() == "OK"
 
@@ -247,7 +247,7 @@ def test_empty_collection_expands_to_nothing(tmp_path):
             ),
         )
     )
-    result = CleanBuilder(graph, root=tmp_path).build(echo=False)
+    result = CleanBuilder(graph, root=tmp_path).build()
     assert result.success
     assert len(result.plan.nodes) == 1
 
@@ -269,6 +269,6 @@ def test_dependency_cycle_reported(tmp_path):
             outputs={"out": data.file("x.txt")},
         ),
     )
-    result = CleanBuilder(graph, root=tmp_path).build(echo=False)
+    result = CleanBuilder(graph, root=tmp_path).build()
     assert not result.success
     assert any("cycle" in e for e in result.errors)

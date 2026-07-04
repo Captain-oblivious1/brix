@@ -23,8 +23,9 @@ user-facing build language.
 ## Current state
 
 Minimal prototype (spec steps 1–10 plus dependency inference), the
-build-layer seams, and the full IncrementalBuilder (fingerprint skip +
-deleted-source cleanup) are implemented and working. 60 tests pass.
+build-layer seams, the full IncrementalBuilder (fingerprint skip +
+deleted-source cleanup), and the reporter seam are implemented and
+working. 67 tests pass.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -46,38 +47,32 @@ deleted-source cleanup) are implemented and working. 60 tests pass.
   `rm` nodes through the insertion channel; failed outputs are removed
 - Edge trigger modes: `on-success` (default, cascades skips) and
   `on-completion` (fires after success *or* failure)
+- Reporter seam: the engine never prints; builders are silent by default
+  and take a `Reporter` (`ConsoleReporter`, `ErrorsAtEndReporter`, or your
+  own); `ProcessResult.source` carries provenance and replays are marked
+  `(replayed)` by the console reporter
 
-Not yet implemented: cache and atomic layers, status reporting, typed
-language actions, CLI helpers.
+Not yet implemented: cache and atomic layers, status/errors CLI, typed
+language actions.
 
 ## TODO (priority order)
 
-1. **Reporter seam + result provenance** — the engine never prints; the
-   scheduler's `say()`/`echo` calls become events on a `Reporter` interface
-   (`build_begin`, `node_started`, `node_completed`, `node_skipped`,
-   `collection_realized`, `node_inserted`, `build_end`) — the observational
-   twin of `BuildLayer`. Output styles are Reporter implementations chosen
-   by the client (silent/exit-code-only, live console, errors-at-end,
-   machine-readable later); builders default to silent for library use.
-   `ProcessResult` gains a `source` field (`process` / `replayed` / later
-   `cache`), stamped by whatever produced the result, so reporters can
-   render replays honestly while scheduling stays indifferent.
-2. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
+1. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
    stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
-3. **AtomicBuilder** — staging via `ctx.output_root`, commit in
+2. **AtomicBuilder** — staging via `ctx.output_root`, commit in
    `on_build_end`, crash recovery in `on_build_begin`. Includes making
    downstream *inputs* resolve through staging (today only outputs map
    through `ctx.output_root`).
-4. **Status reporting + CLI** — `brix.py status` / `brix.py errors` read
+3. **Status reporting + CLI** — `brix.py status` / `brix.py errors` read
    persisted metadata (last results including failures) without building:
    stale files/actions, missing outputs, membership-change staleness,
    staged-but-uncommitted state, interrupted atomic build needing recovery.
    Sits on the reporter seam and the metadata store. Plus CLI helpers:
    `build`, `clean`, `graph`, alias→target mapping — separate from `Graph`
    and builders.
-5. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
+4. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
    to the generic model (deferred by Duane as low-risk).
-6. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+5. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
 Further out (from the original spec, unscheduled): graph visualization,
@@ -129,6 +124,16 @@ in-memory and database-backed data expressions.
   cleanup). Deletions run through the layer stack like any node.
   Runnable demo: `examples/incremental_demo/` — four builds printing how
   many processes actually spawned (4 / 0 / 2 / 1).
+- **Reporter seam + result provenance** (`src/brix/report.py`): the
+  scheduler emits events (`build_begin`, `node_started`, `node_completed`,
+  `node_skipped`, `collection_realized`, `node_inserted`, `build_end`) to a
+  `Reporter` — the observational twin of `BuildLayer` — and never prints.
+  Builders are silent by default (exit-code-only clients just read
+  `result.success`); `ConsoleReporter` restores the live stream and marks
+  non-process results (`ok: upper a (replayed)`); `ErrorsAtEndReporter`
+  prints failures only at completion. `ProcessResult.source` records how a
+  result was obtained (`process` / `replayed`; `cache` reserved) — stamped
+  by the producer, ignored by scheduling.
 
 ## Design rules
 

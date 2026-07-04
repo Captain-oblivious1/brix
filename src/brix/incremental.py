@@ -141,7 +141,9 @@ class IncrementalLayer(BuildLayer):
             and record.get("fingerprint") == fingerprint
             and self._outputs_intact(record, ctx)
         ):
-            return ProcessResult(**record["result"])
+            replayed = dict(record["result"])
+            replayed["source"] = "replayed"
+            return ProcessResult(**replayed)
         result = inner(ctx)
         if result.ok:
             self.metadata.record_action(

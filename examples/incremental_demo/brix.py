@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from brix import ExpandAll, ExternalProcessAction, Graph, IncrementalBuilder
+from brix import ConsoleReporter, ExpandAll, ExternalProcessAction, Graph, IncrementalBuilder
 
 HERE = Path(__file__).parent
 
@@ -63,9 +63,9 @@ def create_graph() -> Graph:
 def _real_runs() -> int:
     """The demo tools append a line to runs.log per actual invocation.
 
-    Replayed results echo exactly like real runs -- by design, downstream
-    can't tell the difference -- so this side channel is how the demo
-    proves that no process was spawned.
+    The ConsoleReporter already marks replays via result provenance
+    ("ok: upper one (replayed)"); this side channel is independent proof
+    that no process was spawned.
     """
     log = HERE / "runs.log"
     return len(log.read_text().splitlines()) if log.exists() else 0
@@ -74,7 +74,7 @@ def _real_runs() -> int:
 def build(title: str) -> None:
     print(f"=== {title} ===")
     before = _real_runs()
-    result = IncrementalBuilder(create_graph, root=HERE).build()
+    result = IncrementalBuilder(create_graph, root=HERE).build(reporter=ConsoleReporter())
     print(f">>> processes actually spawned: {_real_runs() - before}")
     print(f">>> combined output: {(HERE / 'build/all.txt').read_text()!r}")
     print()

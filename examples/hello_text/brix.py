@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph
+from brix import CleanBuilder, ConsoleReporter, ExpandAll, ExternalProcessAction, Graph
 
 
 def create_graph() -> Graph:
@@ -51,5 +51,5 @@ def create_graph() -> Graph:
 
 
 if __name__ == "__main__":
-    result = CleanBuilder(create_graph(), root=Path(__file__).parent).build()
+    result = CleanBuilder(create_graph(), root=Path(__file__).parent).build(reporter=ConsoleReporter())
     sys.exit(0 if result.success else 1)

@@ -22,17 +22,20 @@ from .plan import (
     NodeStateTable,
 )
 from .process import ProcessResult
+from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 
 __all__ = [
     "BuildLayer",
     "BuildMetadata",
     "BuildResult",
     "CleanBuilder",
+    "ConsoleReporter",
     "DataExpr",
     "DataFactory",
     "DataUnion",
     "DeleteFilesAction",
     "EdgeTrigger",
+    "ErrorsAtEndReporter",
     "ExecutionEdge",
     "ExecutionNode",
     "ExecutionPlan",
@@ -47,5 +50,6 @@ __all__ = [
     "NodeState",
     "NodeStateTable",
     "ProcessResult",
+    "Reporter",
     "TimeAndHashChangeDetector",
 ]

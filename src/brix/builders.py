@@ -45,11 +45,8 @@ class CleanBuilder:
     def plan(self) -> ExecutionPlan:
         return plan_graph(self.graph, self.root)
 
-    def build(self, jobs: int | None = None, echo: bool = True) -> BuildResult:
-        result = self.plan().run(jobs=jobs, echo=echo, layers=[])
-        if echo:
-            print(result.summary())
-        return result
+    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
+        return self.plan().run(jobs=jobs, layers=[], reporter=reporter)
 
 
 class IncrementalBuilder:
@@ -74,7 +71,7 @@ class IncrementalBuilder:
     def plan(self) -> ExecutionPlan:
         return plan_graph(self._supplier(), self.root)
 
-    def build(self, jobs: int | None = None, echo: bool = True) -> BuildResult:
+    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
         from .incremental import IncrementalLayer
         from .metadata import BuildMetadata, TimeAndHashChangeDetector
 
@@ -82,7 +79,4 @@ class IncrementalBuilder:
         metadata.load()
         detector = TimeAndHashChangeDetector(self.root, metadata)
         layer = IncrementalLayer(metadata, detector)
-        result = self.plan().run(jobs=jobs, echo=echo, layers=[layer])
-        if echo:
-            print(result.summary())
-        return result
+        return self.plan().run(jobs=jobs, layers=[layer], reporter=reporter)

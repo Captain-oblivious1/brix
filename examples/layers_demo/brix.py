@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from brix import (
     BuildLayer,
     CleanBuilder,
+    ConsoleReporter,
     ExpandAll,
     ExternalProcessAction,
     Graph,
@@ -134,7 +135,7 @@ if __name__ == "__main__":
     print("plan before execution (expansion point still unrealized):")
     print(plan.describe())
     print()
-    result = plan.run(layers=[TraceLayer()])
+    result = plan.run(layers=[TraceLayer()], reporter=ConsoleReporter())
     print(result.summary())
     print(f"combined output: {(HERE / 'build/all.txt').read_text()!r}")
     if not result.success:
@@ -144,7 +145,8 @@ if __name__ == "__main__":
     print("=== run 2: outputs through a hand-rolled staging layer ===")
     shutil.rmtree(HERE / "build")
     plan = CleanBuilder(upper_only_graph(), root=HERE).plan()
-    result = plan.run(echo=False, layers=[StagingLayer(HERE / "build" / "staging")])
+    # No reporter: the engine is silent; only the staging layer's own prints show.
+    result = plan.run(layers=[StagingLayer(HERE / "build" / "staging")])
     print(result.summary())
     print(f"committed output: {(HERE / 'build/upper/one.txt').read_text()!r}")
     sys.exit(0 if result.success else 1)

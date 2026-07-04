@@ -29,6 +29,7 @@ from .plan import (
 )
 from .process import ProcessResult, run_process
 from .render import RenderError, prepare_output_dirs, render_command
+from .report import Reporter
 
 _TERMINAL = {NodeState.DONE, NodeState.FAILED, NodeState.SKIPPED}
 
@@ -138,12 +139,13 @@ def _expand(
 def execute(
     plan: ExecutionPlan,
     jobs: int | None = None,
-    echo: bool = True,
     layers: list[BuildLayer] | None = None,
+    reporter: Reporter | None = None,
 ):
     from .builders import BuildResult
 
     layers = list(layers or [])
+    reporter = reporter if reporter is not None else Reporter()
     states = NodeStateTable()
     ctx = NodeContext.for_root(plan.root)
     max_workers = jobs or min(32, os.cpu_count() or 4)
@@ -151,10 +153,6 @@ def execute(
     running: dict[Future[ProcessResult], int] = {}
     results: list[ProcessResult] = []
     errors: list[str] = []
-
-    def say(message: str) -> None:
-        if echo:
-            print(message)
 
     def ready(node_id: int) -> bool:
         for edge in plan.incoming(node_id):
@@ -182,7 +180,7 @@ def execute(
                 continue
             states.advance(nid, NodeState.SKIPPED)
             pending.discard(nid)
-            say(f"skip: {plan.nodes[nid].label} ({why})")
+            reporter.node_skipped(plan.nodes[nid], why)
             stack.extend(_success_successor_ids(nid))
 
     def insert_proposals(source: ExecutionNode, proposals) -> None:
@@ -192,11 +190,13 @@ def execute(
         for proposal in proposals:
             label = proposal.label or getattr(proposal.action, "label", repr(proposal.action))
             new_node = plan.add_node(NodeKind.PROCESS, label, proposal.action)
+            reason = f"cleanup proposed at [{source.id}]"
             for cid in consumer_ids:
-                plan.add_edge(new_node.id, cid, f"cleanup proposed at [{source.id}]")
+                plan.add_edge(new_node.id, cid, reason)
             pending.add(new_node.id)
-            say(f"insert: {label}")
+            reporter.node_inserted(new_node, reason)
 
+    reporter.build_begin(plan)
     for layer in layers:
         layer.on_build_begin(plan, ctx)
 
@@ -215,18 +215,19 @@ def execute(
                     except RenderError as exc:
                         states.advance(nid, NodeState.FAILED)
                         errors.append(f"{node.label}: {exc}")
-                        say(f"FAILED: {node.label}: {exc}")
+                        reporter.node_completed(node, NodeState.FAILED, None, error=str(exc))
                         cascade_skip(nid, f"upstream failed: {node.label}")
                         continue
                     states.advance(nid, NodeState.DONE)
                     pending.update(c.id for c in children)
-                    say(f"{node.label} -> {len(children)} action(s)")
+                    reporter.collection_realized(node, members, children)
                     for layer in layers:
                         proposals = layer.on_collection_realized(node, members, ctx)
                         if proposals:
                             insert_proposals(node, proposals)
                 else:
                     states.advance(nid, NodeState.RUNNING)
+                    reporter.node_started(node)
                     future = pool.submit(_stacked_runner(node, layers), ctx)
                     running[future] = nid
 
@@ -237,17 +238,13 @@ def execute(
                     node = plan.nodes[nid]
                     result = future.result()
                     results.append(result)
-                    say(result.summary())
                     if result.ok:
                         states.advance(nid, NodeState.DONE, result)
-                        if result.stdout:
-                            say(result.stdout.rstrip("\n"))
+                        reporter.node_completed(node, NodeState.DONE, result)
                     else:
                         states.advance(nid, NodeState.FAILED, result)
                         errors.append(result.summary())
-                        for stream in (result.stdout, result.stderr):
-                            if stream:
-                                say(stream.rstrip("\n"))
+                        reporter.node_completed(node, NodeState.FAILED, result)
                         cascade_skip(nid, f"upstream failed: {node.label}")
             elif not scheduled and pending:
                 # Judge every stuck node against the same snapshot: advancing
@@ -263,10 +260,10 @@ def execute(
                     states.advance(nid, NodeState.SKIPPED)
                     if verdicts[nid]:
                         # e.g. an on-completion successor of a skipped node
-                        say(f"skip: {node.label} (upstream skipped)")
+                        reporter.node_skipped(node, "upstream skipped")
                     else:
                         errors.append(f"{node.label}: unreachable (dependency cycle?)")
-                        say(f"skip: {node.label} (unreachable — dependency cycle?)")
+                        reporter.node_skipped(node, "unreachable — dependency cycle?")
                 pending.clear()
 
     success = not errors
@@ -275,4 +272,5 @@ def execute(
     )
     for layer in layers:
         layer.on_build_end(build_result, ctx)
+    reporter.build_end(build_result)
     return build_result

@@ -19,6 +19,10 @@ class ProcessResult:
     signal: int | None = None
     stdout: str = ""
     stderr: str = ""
+    # Provenance: how this result was obtained ("process", "replayed",
+    # later "cache"). Stamped by whatever produced the result. Scheduling
+    # never reads it; reporting may.
+    source: str = "process"
 
     @property
     def ok(self) -> bool:

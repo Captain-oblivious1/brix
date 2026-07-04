@@ -78,7 +78,7 @@ def test_second_build_runs_nothing(tmp_path):
     write_workspace(tmp_path, {"a": "hi ", "b": "there"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)
 
-    first = builder.build(echo=False)
+    first = builder.build()
     assert first.success
     assert (tmp_path / "build/all.txt").read_text() == "HI THERE"
     after_first = runs(tmp_path)
@@ -86,7 +86,7 @@ def test_second_build_runs_nothing(tmp_path):
         {"upper:src/a.txt": 1, "upper:src/b.txt": 1, "combine": 1}
     )
 
-    second = builder.build(echo=False)
+    second = builder.build()
     assert second.success
     assert runs(tmp_path) == after_first  # no process ran
     assert all(
@@ -97,8 +97,8 @@ def test_second_build_runs_nothing(tmp_path):
 def test_replayed_result_carries_previous_stdout(tmp_path):
     write_workspace(tmp_path, {"a": "x"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)
-    builder.build(echo=False)
-    second = builder.build(echo=False)
+    builder.build()
+    second = builder.build()
     replayed = [r for r in second.process_results if "uppercased" in r.stdout]
     assert replayed, "previous stdout should replay on skip"
 
@@ -106,10 +106,10 @@ def test_replayed_result_carries_previous_stdout(tmp_path):
 def test_changed_source_reruns_only_affected(tmp_path):
     write_workspace(tmp_path, {"a": "one", "b": "two"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)
-    builder.build(echo=False)
+    builder.build()
 
     (tmp_path / "src/a.txt").write_text("ONE CHANGED")
-    result = builder.build(echo=False)
+    result = builder.build()
     assert result.success
     counts = runs(tmp_path)
     assert counts["upper:src/a.txt"] == 2  # reran
@@ -121,10 +121,10 @@ def test_changed_source_reruns_only_affected(tmp_path):
 def test_deleted_output_rebuilds_but_downstream_stays_fresh(tmp_path):
     write_workspace(tmp_path, {"a": "aa", "b": "bb"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)
-    builder.build(echo=False)
+    builder.build()
 
     (tmp_path / "build/upper/a.txt").unlink()
-    result = builder.build(echo=False)
+    result = builder.build()
     assert result.success
     counts = runs(tmp_path)
     assert counts["upper:src/a.txt"] == 2  # output was gone, must rerun
@@ -165,16 +165,16 @@ def test_changed_value_input_reruns(tmp_path):
         "Path(sys.argv[2]).write_text(sys.argv[1])\n"
     )
 
-    IncrementalBuilder(graph_with_flag("-O2"), root=tmp_path).build(echo=False)
+    IncrementalBuilder(graph_with_flag("-O2"), root=tmp_path).build()
     assert (tmp_path / "build/out.txt").read_text() == "-O2"
     assert runs(tmp_path)["gen"] == 1
 
     # Same command shape, different value: fingerprint changes, key does not.
-    IncrementalBuilder(graph_with_flag("-O3"), root=tmp_path).build(echo=False)
+    IncrementalBuilder(graph_with_flag("-O3"), root=tmp_path).build()
     assert (tmp_path / "build/out.txt").read_text() == "-O3"
     assert runs(tmp_path)["gen"] == 2
 
-    IncrementalBuilder(graph_with_flag("-O3"), root=tmp_path).build(echo=False)
+    IncrementalBuilder(graph_with_flag("-O3"), root=tmp_path).build()
     assert runs(tmp_path)["gen"] == 2  # fresh again
 
 
@@ -207,12 +207,12 @@ def test_failed_action_outputs_removed_and_not_replayed(tmp_path):
     )
 
     builder = IncrementalBuilder(make, root=tmp_path)
-    first = builder.build(echo=False)
+    first = builder.build()
     assert not first.success
     # A clean build would not have produced this output; neither may we.
     assert not (tmp_path / "build/out.txt").exists()
 
-    second = builder.build(echo=False)
+    second = builder.build()
     assert not second.success
     assert runs(tmp_path)["fail"] == 2  # failure was never treated as fresh
 
@@ -220,11 +220,11 @@ def test_failed_action_outputs_removed_and_not_replayed(tmp_path):
 def test_deleted_source_removes_stale_output_and_recombines(tmp_path):
     write_workspace(tmp_path, {"a": "aa", "b": "bb", "c": "cc"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)
-    builder.build(echo=False)
+    builder.build()
     assert (tmp_path / "build/all.txt").read_text() == "AABBCC"
 
     (tmp_path / "src/c.txt").unlink()
-    result = builder.build(echo=False)
+    result = builder.build()
     assert result.success
     # The stale output is gone and the combined output matches a clean build.
     assert not (tmp_path / "build/upper/c.txt").exists()
@@ -240,7 +240,7 @@ def test_deleted_source_removes_stale_output_and_recombines(tmp_path):
     assert counts["combine"] == 2
 
     # Next build: membership history is settled, nothing to delete or run.
-    third = builder.build(echo=False)
+    third = builder.build()
     assert third.success
     assert not any(n.label.startswith("rm ") for n in third.plan.nodes)
     assert runs(tmp_path) == counts
@@ -249,11 +249,11 @@ def test_deleted_source_removes_stale_output_and_recombines(tmp_path):
 def test_readded_source_rebuilds_without_deletion(tmp_path):
     write_workspace(tmp_path, {"a": "aa", "b": "bb"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)
-    builder.build(echo=False)
+    builder.build()
     (tmp_path / "src/b.txt").unlink()
-    builder.build(echo=False)
+    builder.build()
     write_workspace(tmp_path, {"a": "aa", "b": "bb"})  # b comes back
-    result = builder.build(echo=False)
+    result = builder.build()
     assert result.success
     assert not any(n.label.startswith("rm ") for n in result.plan.nodes)
     assert (tmp_path / "build/all.txt").read_text() == "AABB"
@@ -262,7 +262,7 @@ def test_readded_source_rebuilds_without_deletion(tmp_path):
 def test_metadata_file_is_written(tmp_path):
     write_workspace(tmp_path, {"a": "x"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)
-    builder.build(echo=False)
+    builder.build()
     metadata_path = tmp_path / "build/.brix/metadata.json"
     assert metadata_path.exists()
     stored = json.loads(metadata_path.read_text())

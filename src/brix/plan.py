@@ -23,6 +23,7 @@ from .process import ProcessResult
 if TYPE_CHECKING:
     from .builders import BuildResult
     from .layers import BuildLayer
+    from .report import Reporter
 
 
 class NodeKind(enum.Enum):
@@ -141,12 +142,12 @@ class ExecutionPlan:
     def run(
         self,
         jobs: int | None = None,
-        echo: bool = True,
         layers: list[BuildLayer] | None = None,
+        reporter: Reporter | None = None,
     ) -> BuildResult:
         from .executor import execute
 
-        return execute(self, jobs=jobs, echo=echo, layers=layers)
+        return execute(self, jobs=jobs, layers=layers, reporter=reporter)
 
     def describe(self) -> str:
         """A plain-text rendering of the plan's structure, for inspection."""

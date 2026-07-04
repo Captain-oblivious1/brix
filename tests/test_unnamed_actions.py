@@ -54,7 +54,7 @@ def test_unnamed_actions_build(tmp_path):
             ),
         )
     )
-    result = CleanBuilder(graph, root=tmp_path).build(echo=False)
+    result = CleanBuilder(graph, root=tmp_path).build()
     assert result.success
     assert (tmp_path / "build/a.txt").read_text() == "HI"
     (proc,) = result.process_results
