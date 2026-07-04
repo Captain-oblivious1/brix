@@ -25,7 +25,7 @@ from .plan import (
 from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 from .status import ActionStatus, StatusReport, compute_status
-from . import cli
+from . import cli, cpp
 
 __all__ = [
     "ActionStatus",
@@ -61,4 +61,5 @@ __all__ = [
     "TimeAndHashChangeDetector",
     "cli",
     "compute_status",
+    "cpp",
 ]

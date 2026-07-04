@@ -18,8 +18,16 @@ class Graph:
         self.actions: list[Action] = []
 
     def add(self, *actions: Action) -> Graph:
-        for action in actions:
+        stack = list(reversed(actions))
+        while stack:
+            action = stack.pop()
             if not isinstance(action, Action):
                 raise TypeError(f"Graph.add expects Action instances, got {action!r}")
-            self.actions.append(action)
+            lower = getattr(action, "lower", None)
+            if lower is not None:
+                # Typed helpers (brix.cpp, …) lower into the generic model
+                # here — one underlying representation for everything.
+                stack.extend(reversed(lower()))
+            else:
+                self.actions.append(action)
         return self

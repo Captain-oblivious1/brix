@@ -25,7 +25,8 @@ user-facing build language.
 Minimal prototype (spec steps 1–10 plus dependency inference), the
 build-layer seams, the full IncrementalBuilder (fingerprint skip +
 deleted-source cleanup), the reporter seam, status reporting with a CLI,
-and AtomicBuilder are implemented and working. 88 tests pass.
+AtomicBuilder, and typed C++ actions are implemented and working. 93
+tests pass.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -62,8 +63,11 @@ and AtomicBuilder are implemented and working. 88 tests pass.
   after commit; crash mid-commit is journaled (COMMIT marker) and finished
   by the next build; failed-build staging is inspectable via status, then
   discarded
+- `brix.cpp` typed actions (`CompileSourceAction`, `LinkApplicationAction`)
+  that lower to the generic model in `Graph.add`; raw and typed forms
+  compose in one graph
 
-Not yet implemented: cache layer, typed language actions.
+Not yet implemented: cache layer, `brix.java` typed actions.
 
 ## TODO (priority order)
 
@@ -74,8 +78,9 @@ caching; few have honest status inspection or atomic builds.
    stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
    Atomic-outermost stack order routes restored outputs through staging
    for free.
-2. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
-   to the generic model (deferred by Duane as low-risk).
+2. **`brix.java` typed actions** (`JarAction`) plus the spec's
+   C++-generates-Java composability example; possibly
+   `cpp.CompileApplicationAction` (compile+link in one declaration).
 3. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
@@ -162,7 +167,17 @@ in-memory and database-backed data expressions.
   and is discarded when the next build starts. Composes with
   IncrementalBuilder: unchanged rebuilds spawn nothing and stage nothing;
   a failed build leaves the workspace byte-identical — even the successful
-  half of it. Builders gained `layers()` for wrapper composition. `ProcessResult.source` records how a
+  half of it. Builders gained `layers()` for wrapper composition.
+- **`brix.cpp` typed actions + lifelike example**: `CompileSourceAction`
+  (lowers to ExpandAll over sources; source/object patterns must share one
+  binding) and `LinkApplicationAction`; `Graph.add` lowers anything with a
+  `lower()` method, so typed and raw actions compose in one graph.
+  `cli.main` accepts `builder_factory` for a full custom stack.
+  `examples/cpp_app/`: real C++ compiled with
+  `AtomicBuilder(IncrementalBuilder(...))` and the CLI — break a source
+  and the old binary keeps working (atomic), `brix.py errors` replays the
+  compiler diagnostics without rebuilding, fix it back and even the link
+  stays fresh (byte-identical object). `ProcessResult.source` records how a
   result was obtained (`process` / `replayed`; `cache` reserved) — stamped
   by the producer, ignored by scheduling.
 
@@ -558,6 +573,7 @@ python3 examples/raw_cpp/brix.py         # compile+link demo (needs c++)
 python3 examples/layers_demo/brix.py     # watch the BuildLayer stack work
 python3 examples/incremental_demo/brix.py  # build/rebuild/edit/delete-a-source
 python3 examples/cli_demo/brix.py status   # project CLI: status/errors/build/clean
+python3 examples/cpp_app/brix.py           # real C++, typed actions, all layers
 ```
 
 A build file looks like:

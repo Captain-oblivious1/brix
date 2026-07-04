@@ -40,7 +40,12 @@ def main(
     argv: list[str] | None = None,
     metadata_dir: str | Path = "build/.brix",
     staging_dir: str | Path = "build/staging",
+    builder_factory=None,
 ) -> int:
+    """``builder_factory`` (optional): zero-argument callable returning the
+    builder to use for ``build`` — e.g. the full
+    ``AtomicBuilder(IncrementalBuilder(...))`` stack. Defaults to a plain
+    ``IncrementalBuilder``."""
     parser = argparse.ArgumentParser(prog="brix.py")
     commands = parser.add_subparsers(dest="command")
 
@@ -68,7 +73,10 @@ def main(
             reporter = None
         else:
             reporter = ConsoleReporter(show_replays=not args.quiet_replays)
-        builder = IncrementalBuilder(graph_supplier, root=root, metadata_dir=metadata_dir)
+        if builder_factory is not None:
+            builder = builder_factory()
+        else:
+            builder = IncrementalBuilder(graph_supplier, root=root, metadata_dir=metadata_dir)
         result = builder.build(jobs=args.jobs, reporter=reporter)
         return 0 if result.success else 1
 
