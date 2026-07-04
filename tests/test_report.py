@@ -131,6 +131,19 @@ def test_console_reporter_marks_replays(tmp_path):
     assert "worked on src/a.txt" in out2.getvalue()  # stdout replay still shown
 
 
+def test_console_reporter_can_hide_replays(tmp_path):
+    _write_workspace(tmp_path)
+    builder = IncrementalBuilder(_upper_graph, root=tmp_path)
+    builder.build()
+
+    out = io.StringIO()
+    second = builder.build(reporter=ConsoleReporter(stream=out, show_replays=False))
+    assert second.success
+    text = out.getvalue()
+    assert "upper a" not in text  # fresh work only; nothing was fresh work
+    assert "BUILD OK" in text
+
+
 def test_result_provenance(tmp_path):
     _write_workspace(tmp_path)
     builder = IncrementalBuilder(_upper_graph, root=tmp_path)

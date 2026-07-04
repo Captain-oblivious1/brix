@@ -56,11 +56,14 @@ class ConsoleReporter(Reporter):
     """Live output as the build runs — the classic make-style stream.
 
     Results that were not produced by a fresh process are marked with
-    their provenance, e.g. ``ok: compile foo (replayed)``.
+    their provenance, e.g. ``ok: compile foo (replayed)``. Pass
+    ``show_replays=False`` to print only real work: successful replayed
+    results are suppressed entirely (replayed *failures* still print).
     """
 
-    def __init__(self, stream: TextIO | None = None) -> None:
+    def __init__(self, stream: TextIO | None = None, show_replays: bool = True) -> None:
         self.stream = stream if stream is not None else sys.stdout
+        self.show_replays = show_replays
 
     def _say(self, message: str) -> None:
         print(message, file=self.stream)
@@ -75,6 +78,8 @@ class ConsoleReporter(Reporter):
         if result is None:
             suffix = f": {error}" if error else ""
             self._say(f"FAILED: {node.label}{suffix}")
+            return
+        if not self.show_replays and result.ok and result.source != "process":
             return
         line = result.summary()
         if result.source != "process":

@@ -57,19 +57,22 @@ language actions.
 
 ## TODO (priority order)
 
-1. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
-   stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
-2. **AtomicBuilder** — staging via `ctx.output_root`, commit in
-   `on_build_end`, crash recovery in `on_build_begin`. Includes making
-   downstream *inputs* resolve through staging (today only outputs map
-   through `ctx.output_root`).
-3. **Status reporting + CLI** — `brix.py status` / `brix.py errors` read
+Duane's priority: differentiating features first — most build systems have
+caching; few have honest status inspection or atomic builds.
+
+1. **Status reporting + CLI** — `brix.py status` / `brix.py errors` read
    persisted metadata (last results including failures) without building:
    stale files/actions, missing outputs, membership-change staleness,
    staged-but-uncommitted state, interrupted atomic build needing recovery.
    Sits on the reporter seam and the metadata store. Plus CLI helpers:
    `build`, `clean`, `graph`, alias→target mapping — separate from `Graph`
    and builders.
+2. **AtomicBuilder** — staging via `ctx.output_root`, commit in
+   `on_build_end`, crash recovery in `on_build_begin`. Includes making
+   downstream *inputs* resolve through staging (today only outputs map
+   through `ctx.output_root`).
+3. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
+   stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
 4. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
    to the generic model (deferred by Duane as low-risk).
 5. **Rust engine port** — after the Python API stabilizes; then the JS/TS
@@ -130,8 +133,9 @@ in-memory and database-backed data expressions.
   `Reporter` — the observational twin of `BuildLayer` — and never prints.
   Builders are silent by default (exit-code-only clients just read
   `result.success`); `ConsoleReporter` restores the live stream and marks
-  non-process results (`ok: upper a (replayed)`); `ErrorsAtEndReporter`
-  prints failures only at completion. `ProcessResult.source` records how a
+  non-process results (`ok: upper a (replayed)`), or with
+  `show_replays=False` prints only real work (replayed failures still
+  print); `ErrorsAtEndReporter` prints failures only at completion. `ProcessResult.source` records how a
   result was obtained (`process` / `replayed`; `cache` reserved) — stamped
   by the producer, ignored by scheduling.
 
