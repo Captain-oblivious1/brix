@@ -1,89 +1,88 @@
 <!DOCTYPE html>
-<!-- Source for docs/build-layers.pdf.
-     Regenerate with:  weasyprint docs/build-layers.html docs/build-layers.pdf -->
+<!-- Design note — open directly in a browser.
+     (If a PDF is ever needed: weasyprint docs/build-layers.html out.pdf) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Brix Build Layers</title>
 <style>
-  @page {
-    size: letter;
-    margin: 20mm 18mm;
-    @bottom-center { content: counter(page) " / " counter(pages); font-size: 9px; color: #888; }
-  }
   body {
-    font-family: "DejaVu Sans", sans-serif;
-    font-size: 10.5px;
-    line-height: 1.55;
+    font-family: "DejaVu Sans", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
     color: #1a1a2e;
-    max-width: 680px;
+    background: #fdfdfe;
+    max-width: 700px;
+    margin: 40px auto 80px;
+    padding: 0 20px;
   }
-  h1 { font-size: 24px; margin: 0 0 2px; color: #14213d; }
-  .subtitle { font-size: 12px; color: #5a5a72; margin: 0 0 18px; }
+  h1 { font-size: 30px; margin: 0 0 4px; color: #14213d; }
+  .subtitle { font-size: 15px; color: #5a5a72; margin: 0 0 24px; }
   h2 {
-    font-size: 15px; color: #14213d; margin: 26px 0 8px;
-    padding-bottom: 4px; border-bottom: 2px solid #e3e6ef;
+    font-size: 21px; color: #14213d; margin: 40px 0 10px;
+    padding-bottom: 5px; border-bottom: 2px solid #e3e6ef;
   }
-  h2.break { page-break-before: always; }
-  h3 { font-size: 12px; color: #2b3a67; margin: 16px 0 6px; }
-  p { margin: 6px 0; }
-  figure { margin: 14px 0; page-break-inside: avoid; }
-  figcaption { font-size: 9px; color: #5a5a72; margin-top: 4px; text-align: center; }
+  h3 { font-size: 16px; color: #2b3a67; margin: 22px 0 8px; }
+  p { margin: 8px 0; }
+  figure { margin: 20px 0; overflow-x: auto; }
+  figcaption { font-size: 12px; color: #5a5a72; margin-top: 6px; text-align: center; }
   pre {
     background: #f4f5f9; border: 1px solid #e0e2ec; border-radius: 4px;
-    padding: 10px 12px; font-family: "DejaVu Sans Mono", monospace;
-    font-size: 9px; line-height: 1.5; overflow-x: auto; page-break-inside: avoid;
+    padding: 12px 14px; font-family: "DejaVu Sans Mono", monospace;
+    font-size: 12.5px; line-height: 1.5; overflow-x: auto;
   }
-  code { font-family: "DejaVu Sans Mono", monospace; font-size: 9.5px; background: #f0f1f6; padding: 0 3px; border-radius: 2px; }
+  code { font-family: "DejaVu Sans Mono", monospace; font-size: 13px; background: #f0f1f6; padding: 0 3px; border-radius: 2px; }
   pre code { background: none; padding: 0; }
-  ul { margin: 6px 0; padding-left: 20px; }
-  li { margin: 3px 0; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
   .rule {
-    background: #eef3fb; border-left: 3px solid #3b6ecc; padding: 8px 12px;
-    margin: 12px 0; font-size: 10.5px; page-break-inside: avoid;
+    background: #eef3fb; border-left: 3px solid #3b6ecc; padding: 10px 14px;
+    margin: 16px 0; font-size: 15px;
   }
-  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 9.5px; }
-  th, td { border: 1px solid #d8dbe6; padding: 5px 8px; text-align: left; vertical-align: top; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+  th, td { border: 1px solid #d8dbe6; padding: 6px 9px; text-align: left; vertical-align: top; }
   th { background: #f0f2f8; color: #2b3a67; }
 </style>
 </head>
 <body>
 
 <h1>Brix Build Layers</h1>
-<p class="subtitle">Design note — composing incremental, cache, and atomic capabilities over a partially unrealized execution plan &nbsp;·&nbsp; July 2026</p>
+<p class="subtitle">Design note — how incremental, cached, and atomic builds stack on top of a plan that grows while it runs &nbsp;·&nbsp; July 2026</p>
 
-<h2>1. Context</h2>
+<h2>1. What this note is about</h2>
 <p>
-The Brix spec (<code>freshStart.md</code>) composes build capabilities by nesting builders:
+A Brix build file describes actions and the files they read and write. From that, Brix
+figures out the order and runs things. The simplest builder — <code>CleanBuilder</code>,
+already working in the prototype — just runs everything, every time.
 </p>
-<pre><code>AtomicBuilder(
-    CacheBuilder(
-        IncrementalBuilder(change_set, create_graph),
+<p>
+The spec adds three more abilities, and users turn them on by nesting builders:
+</p>
+<pre><code>AtomicBuilder(                        # nothing lands on disk unless the whole build succeeds
+    CacheBuilder(                     # reuse results stored by earlier builds
+        IncrementalBuilder(           # skip work whose inputs haven't changed
+            ..., create_graph),
         cache_dir="build/cache",
     ),
     staging_dir="build/staging",
 )</code></pre>
 <p>
-and describes the wrapper layers as plan transforms: <code>ExecutionPlan → ExecutionPlan</code>.
-The root builder lowers the logical graph into a plan; each wrapper transforms the plan it
-receives from the builder it wraps.
-</p>
-<p>
-Brix plans, however, are <b>partially unrealized</b>. An <code>ExpandAll</code> node is an
-expansion point, not a loop: it sits in the plan as a single unrealized node until its
-collection membership is known, then expands into concrete sibling process nodes
-<i>during execution</i>. Generated files make this unavoidable — the members of
-<code>build/generated/{name}.cpp</code> do not exist until the generator action runs.
-This is already implemented and working in the prototype's scheduler.
+This note answers one question: <b>what do those wrappers actually do, mechanically —
+and what are they allowed to touch?</b>
 </p>
 
-<h2>2. The problem: static transforms miss runtime nodes</h2>
+<h2>2. The problem: the plan grows while the build runs</h2>
 <p>
-A one-shot plan transform runs after <code>plan()</code> and before execution. At that moment
-the plan for the canonical C++ example contains exactly two nodes: the unrealized
-<code>ExpandAll</code> and <code>link app</code>. The concrete compile actions — the nodes
-caching and staging exist <i>for</i> — are created later, inside the executor, after every
-layer's transform has already run.
+The obvious reading of the spec is that each wrapper rewrites the execution plan before the
+build starts. That can't work, because a Brix plan isn't finished when the build starts.
+</p>
+<p>
+An <code>ExpandAll</code> node is a placeholder that means "one compile per source file —
+whatever files there turn out to be." When those sources are <i>generated</i>, they don't
+exist until an earlier action runs. So the plan begins with just two nodes — the placeholder
+and the link step — and grows into its real shape during execution. A rewrite pass that runs
+up front would wrap those two nodes and miss every actual compile: exactly the nodes that
+caching and staging exist for.
 </p>
 
 <figure>
@@ -145,43 +144,52 @@ layer's transform has already run.
   <text x="360" y="286" font-size="9.5" fill="#a33327">A static pass wraps the link action and misses every compile —</text>
   <text x="360" y="300" font-size="9.5" fill="#a33327">exactly the nodes caching and staging exist for.</text>
 </svg>
-<figcaption>Figure 1 — The static-transform trap: nodes created by runtime expansion bypass any one-shot plan rewrite.</figcaption>
+<figcaption>Figure 1 — Why up-front plan rewriting fails: nodes created by runtime expansion appear after any rewrite pass has already run.</figcaption>
 </figure>
 
 <p>
-The conclusion: capability decisions cannot all be applied to the plan before execution.
-They have to bind <i>during</i> execution. The question is what shape that takes without
-each layer re-implementing scheduler concerns.
+So layers can't work by rewriting the plan. They have to make their decisions while the
+build is running, one node at a time.
 </p>
 
-<h2>3. The principle: lazy decisions, eager graph</h2>
+<h2>3. The ground rules</h2>
 <p>
-One tempting shape is to make layers <i>node sources</i>: the scheduler pulls ready nodes
-from the outermost layer, which pulls from inner layers and transforms what flows through.
-That works, but it splits dependency bookkeeping across layers — what replaces a dropped
-node, how edges attach to a substituted node, when downstream readiness fires. Those are
-scheduler concerns, and distributing them is where composition bugs breed.
+Before saying what layers <i>do</i>, pin down what nobody may do. Three rules, enforced by
+one owner — the scheduler:
 </p>
 <div class="rule">
-<b>Design rule.</b> Keep the graph eager and centralized; make the <i>decisions</i> lazy.
-The scheduler owns nodes, edges, readiness, and failure cascade. A layer never <b>removes
-or replaces</b> a node and never wires edges itself — skipping is completing a node with a
-result obtained elsewhere. A layer <i>may</i> contribute new work (deletion actions,
-recovery steps), but only by <b>proposing nodes through the scheduler's insertion
-channel</b> — the same one <code>ExpandAll</code> expansion already uses. The scheduler
-inserts and wires; layers never touch structure directly.
+<ol>
+  <li><b>The plan only grows.</b> Nodes and edges get added, never removed, replaced, or
+  rewired. All additions go through the scheduler's one insertion channel.</li>
+  <li><b>A node never changes.</b> Once inserted, its definition — action, command,
+  declared inputs and outputs — is frozen. Anything that varies at run time (status,
+  result) lives in a table the scheduler owns, not in the node.</li>
+  <li><b>Status only moves forward.</b> pending → running → done, failed, or skipped.
+  Never backwards, never twice.</li>
+</ol>
 </div>
 <p>
-Node-ready time is exactly when the decision becomes possible: all inputs exist, so
-fingerprints and cache keys can finally be computed. And every capability's "shortcut"
-turns out to be the same move — <b>complete the node with a result obtained somewhere
-other than a process</b>:
+A node is like a promise: fixed identity, a value that gets filled in exactly once.
+Two things <i>look</i> like they break rule 2, and don't:
 </p>
 <ul>
-  <li><b>Incremental skip</b> — metadata proves the node is up to date; synthesize its previous result.</li>
-  <li><b>Cache hit</b> — restore the stored result, replaying stdout/stderr; a cached <i>failure</i> restores as a failure and flows into the normal cascade-skip path untouched.</li>
-  <li><b>No shortcut</b> — the process actually runs.</li>
+  <li><b>Expansion.</b> When <code>ExpandAll</code> runs, it doesn't get replaced by its
+  children. It stays in the plan, marked done, and the scheduler appends the concrete
+  compile nodes next to it. Nothing that existed before is different after — the plan
+  just knows more.</li>
+  <li><b>Realization.</b> A collection like <code>build/generated/{name}.cpp</code> is
+  one thing: <i>the set, whatever its members turn out to be</i>. When it realizes, its
+  membership goes from <i>unknown</i> to <i>known: {foo, bar}</i>. That's a value being
+  filled in, not a node being swapped out. And the collection has to keep existing after
+  realization, because it's the thing the incremental layer attaches membership history
+  to — "last build it was {foo, bar, baz}, now it's {foo, bar}" is a comparison
+  <i>on the collection</i> across builds (§8).</li>
 </ul>
+<p>
+Even "skipping" a node needs no special machinery. Every shortcut a layer offers turns out
+to be the same move: <b>finish the node with a result that came from somewhere other than
+running a process.</b>
+</p>
 
 <figure>
 <svg width="680" height="228" viewBox="0 0 680 228" xmlns="http://www.w3.org/2000/svg">
@@ -217,18 +225,44 @@ other than a process</b>:
   <text x="591" y="104" font-size="10" text-anchor="middle" fill="#2b3a67">node DONE / FAILED</text>
   <text x="591" y="119" font-size="9" text-anchor="middle" fill="#5a5a72">readiness + cascade as usual</text>
 
-  <text x="340" y="218" font-size="9.5" text-anchor="middle" fill="#5a5a72" font-style="italic">Downstream nodes cannot tell which path produced the result — only acquisition varies.</text>
+  <text x="340" y="218" font-size="9.5" text-anchor="middle" fill="#5a5a72" font-style="italic">Downstream nodes cannot tell which path produced the result — only how it was obtained varies.</text>
 </svg>
-<figcaption>Figure 2 — Every capability is a different way of acquiring the same thing. Node identity and graph structure never change.</figcaption>
+<figcaption>Figure 2 — Every capability is just a different way of obtaining the same thing: a ProcessResult. Node identity and graph structure never change.</figcaption>
 </figure>
 
-<h2>4. The design: middleware + events</h2>
+<h2>4. How a layer plugs in</h2>
 <p>
-The shape that satisfies the rule is a <b>middleware stack around node execution</b>, plus a
-small set of build-scoped events. The executor's current hardwired
-<code>_run_process_node</code> becomes the innermost callable; each layer wraps it. The
-stack order mirrors the user-facing builder nesting exactly, so the spec's composition
-story is preserved — it is just applied per node at run time instead of once up front.
+Each layer is an object with four hooks:
+</p>
+<pre><code>class BuildLayer:
+    def on_build_begin(self, plan, ctx): ...
+        # atomic: set up the staging dir, or recover from an interrupted build
+
+    def around_node(self, node, ctx, inner) -> ProcessResult:
+        # gets a chance to answer for the node without calling inner(),
+        # or to adjust ctx before passing the call inward
+        return inner(ctx)
+
+    def on_collection_realized(self, expand_node, members, ctx): ...
+        # membership is now known — compare against last build, propose cleanup
+
+    def on_build_end(self, result, ctx): ...
+        # atomic: everything succeeded -> commit staged files; else leave them</code></pre>
+<p>
+The important hook is <code>around_node</code>. When a node becomes ready, the scheduler
+does not call the process directly. It wraps the process call in each layer's
+<code>around_node</code>, innermost first, and calls the outermost:
+</p>
+<pre><code># executor, when a node becomes ready:
+call = lambda ctx: run_process_node(node, ctx)
+for layer in [incremental, cache, atomic]:   # innermost first
+    call = wrap(layer.around_node, node, call)
+result = call(ctx)                           # scheduler records done/failed as today</code></pre>
+<p>
+The wrapping order is exactly the builder nesting from §1 — the same composition, applied
+per node at run time instead of once up front. That's what fixes Figure 1: a node created
+mid-build gets the identical stack the moment it becomes ready, because the stack is
+applied when nodes <i>run</i>, not when the plan is <i>made</i>.
 </p>
 
 <figure>
@@ -265,36 +299,168 @@ story is preserved — it is just applied per node at run time instead of once u
 
   <text x="340" y="240" font-size="9.5" text-anchor="middle" fill="#5a5a72" font-style="italic">Runtime-expanded nodes get the identical stack for free — there is no "transform already happened" moment to miss.</text>
 </svg>
-<figcaption>Figure 3 — Builder nesting and the per-node middleware stack are the same composition, applied at different times.</figcaption>
+<figcaption>Figure 3 — Builder nesting and the per-node layer stack are the same composition, applied at different times.</figcaption>
 </figure>
 
-<h3>Layer interface sketch</h3>
-<pre><code>class BuildLayer:
-    def on_build_begin(self, plan, ctx): ...
-        # atomic: prepare staging dir, or recover an interrupted build
+<h2>5. The classes</h2>
 
-    def around_node(self, node, ctx, inner) -> ProcessResult:
-        # incremental: fingerprint fresh?  -> synthesize up-to-date result, never call inner
-        # cache:       key hit?            -> restore result;  else result = inner(ctx); store
-        # atomic:      ctx.output_root = staging;  result = inner(ctx)
-        return inner(ctx)
+<figure>
+<svg width="680" height="648" viewBox="0 0 680 648" xmlns="http://www.w3.org/2000/svg">
+  <!-- ===== builders row ===== -->
+  <text x="16" y="16" font-size="11" font-weight="bold" fill="#14213d">User-facing builders (the spec's nesting)</text>
+  <rect x="16" y="28" width="146" height="48" rx="5" fill="#eef3fb" stroke="#3b6ecc" stroke-width="1.3"/>
+  <text x="89" y="48" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">AtomicBuilder</text>
+  <text x="89" y="63" font-size="8.5" text-anchor="middle" fill="#5a5a72">staging_dir</text>
 
-    def on_collection_realized(self, expand_node, members, ctx): ...
-        # incremental: diff previous vs current membership
-        # -> propose deletion nodes; scheduler inserts + wires them
+  <line x1="162" y1="52" x2="186" y2="52" stroke="#7a83a0" stroke-width="1.3"/>
+  <polygon points="190,52 181,48 181,56" fill="#7a83a0"/>
+  <text x="176" y="44" font-size="8" text-anchor="middle" fill="#5a5a72">wraps</text>
 
-    def on_build_end(self, result, ctx): ...
-        # atomic: all ok -> commit staged adds/deletes; else leave staged for status/recovery</code></pre>
+  <rect x="190" y="28" width="146" height="48" rx="5" fill="#eef3fb" stroke="#3b6ecc" stroke-width="1.3"/>
+  <text x="263" y="48" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">CacheBuilder</text>
+  <text x="263" y="63" font-size="8.5" text-anchor="middle" fill="#5a5a72">cache_dir</text>
 
-<pre><code># executor, when a node becomes ready:
-call = lambda ctx: run_process_node(node, ctx)
-for layer in [incremental, cache, atomic]:     # innermost first — atomic ends up outermost
-    call = wrap(layer.around_node, node, call)
-result = call(ctx)                              # scheduler records DONE/FAILED as today</code></pre>
+  <line x1="336" y1="52" x2="360" y2="52" stroke="#7a83a0" stroke-width="1.3"/>
+  <polygon points="364,52 355,48 355,56" fill="#7a83a0"/>
+  <text x="350" y="44" font-size="8" text-anchor="middle" fill="#5a5a72">wraps</text>
 
-<h2 class="break">5. Per-node decision flow</h2>
+  <rect x="364" y="28" width="158" height="48" rx="5" fill="#eef3fb" stroke="#3b6ecc" stroke-width="1.3"/>
+  <text x="443" y="48" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">IncrementalBuilder</text>
+  <text x="443" y="63" font-size="8.5" text-anchor="middle" fill="#5a5a72">change detector</text>
+
+  <line x1="522" y1="52" x2="546" y2="52" stroke="#7a83a0" stroke-width="1.3"/>
+  <polygon points="550,52 541,48 541,56" fill="#7a83a0"/>
+  <text x="536" y="44" font-size="8" text-anchor="middle" fill="#5a5a72">wraps</text>
+
+  <rect x="550" y="28" width="114" height="48" rx="5" fill="#fff" stroke="#3b6ecc" stroke-width="1.3"/>
+  <text x="607" y="48" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">CleanBuilder</text>
+  <text x="607" y="63" font-size="8.5" text-anchor="middle" fill="#5a5a72">graph, root</text>
+
+  <!-- builders contribute layers -->
+  <line x1="263" y1="76" x2="263" y2="120" stroke="#7a83a0" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <polygon points="263,126 258,117 268,117" fill="#7a83a0"/>
+  <text x="275" y="106" font-size="8.5" fill="#5a5a72">each wrapper contributes one concrete layer</text>
+
+  <!-- ===== BuildLayer interface ===== -->
+  <rect x="16" y="130" width="310" height="132" rx="5" fill="#fff" stroke="#2b3a67" stroke-width="1.4"/>
+  <text x="171" y="149" font-size="10.5" text-anchor="middle" fill="#14213d" font-weight="bold">BuildLayer  «interface»</text>
+  <line x1="16" y1="157" x2="326" y2="157" stroke="#2b3a67" stroke-width="1"/>
+  <text x="28" y="175" font-size="9" fill="#2b3a67" font-family="monospace">on_build_begin(plan, ctx)</text>
+  <text x="28" y="193" font-size="9" fill="#2b3a67" font-family="monospace">around_node(node, ctx, inner) → result</text>
+  <text x="28" y="211" font-size="9" fill="#2b3a67" font-family="monospace">on_collection_realized(node, members, ctx)</text>
+  <text x="28" y="229" font-size="9" fill="#2b3a67" font-family="monospace">on_build_end(result, ctx)</text>
+  <text x="28" y="250" font-size="8.5" fill="#5a5a72" font-style="italic">all hooks optional; defaults do nothing</text>
+
+  <!-- concrete layers -->
+  <rect x="380" y="130" width="284" height="56" rx="5" fill="#eef3fb" stroke="#3b6ecc" stroke-width="1.2"/>
+  <text x="522" y="149" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">IncrementalLayer</text>
+  <text x="522" y="164" font-size="8.5" text-anchor="middle" fill="#5a5a72">owns: metadata store (fingerprints,</text>
+  <text x="522" y="176" font-size="8.5" text-anchor="middle" fill="#5a5a72">membership, last results)</text>
+
+  <rect x="380" y="198" width="284" height="52" rx="5" fill="#eef3fb" stroke="#3b6ecc" stroke-width="1.2"/>
+  <text x="522" y="217" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">CacheLayer</text>
+  <text x="522" y="232" font-size="8.5" text-anchor="middle" fill="#5a5a72">owns: cache directory (results + output files)</text>
+
+  <rect x="380" y="262" width="284" height="52" rx="5" fill="#eef3fb" stroke="#3b6ecc" stroke-width="1.2"/>
+  <text x="522" y="281" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">AtomicLayer</text>
+  <text x="522" y="296" font-size="8.5" text-anchor="middle" fill="#5a5a72">owns: staging directory</text>
+
+  <!-- inheritance arrows -->
+  <line x1="380" y1="158" x2="342" y2="176" stroke="#2b3a67" stroke-width="1.2"/>
+  <line x1="380" y1="222" x2="342" y2="196" stroke="#2b3a67" stroke-width="1.2"/>
+  <line x1="380" y1="286" x2="342" y2="214" stroke="#2b3a67" stroke-width="1.2"/>
+  <polygon points="326,196 342,188 342,204" fill="#fff" stroke="#2b3a67" stroke-width="1.2"/>
+
+  <!-- layers propose nodes -->
+  <line x1="420" y1="314" x2="300" y2="376" stroke="#c04a3e" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <polygon points="294,379 303,371 306,381" fill="#c04a3e"/>
+  <text x="418" y="336" font-size="8.5" fill="#a33327">propose new nodes (cleanup, recovery)</text>
+  <text x="418" y="348" font-size="8.5" fill="#a33327">via the insertion channel</text>
+
+  <!-- scheduler calls layers -->
+  <line x1="140" y1="376" x2="140" y2="262" stroke="#7a83a0" stroke-width="1.3"/>
+  <polygon points="140,256 135,265 145,265" fill="#7a83a0"/>
+  <text x="150" y="292" font-size="8.5" fill="#5a5a72">calls hooks; wraps every</text>
+  <text x="150" y="304" font-size="8.5" fill="#5a5a72">ready node in around_node</text>
+
+  <!-- ===== engine ===== -->
+  <text x="16" y="366" font-size="11" font-weight="bold" fill="#14213d">Engine — the scheduler owns all mutable state</text>
+
+  <rect x="16" y="376" width="310" height="88" rx="5" fill="#14213d"/>
+  <text x="171" y="396" font-size="10.5" text-anchor="middle" fill="#fff" font-weight="bold">Scheduler</text>
+  <line x1="30" y1="404" x2="312" y2="404" stroke="#3d4a6b" stroke-width="1"/>
+  <text x="171" y="421" font-size="8.5" text-anchor="middle" fill="#c8ccda">runs ready nodes through the layer stack</text>
+  <text x="171" y="435" font-size="8.5" text-anchor="middle" fill="#c8ccda">owns readiness, failure cascade, and the</text>
+  <text x="171" y="449" font-size="8.5" text-anchor="middle" fill="#c8ccda">insertion channel (insert + wire new nodes)</text>
+
+  <rect x="380" y="376" width="284" height="70" rx="5" fill="#fff" stroke="#2b3a67" stroke-width="1.3"/>
+  <text x="522" y="394" font-size="10" text-anchor="middle" fill="#14213d" font-weight="bold">ExecutionPlan</text>
+  <line x1="380" y1="401" x2="664" y2="401" stroke="#2b3a67" stroke-width="0.8"/>
+  <text x="392" y="417" font-size="8.5" fill="#2b3a67" font-family="monospace">nodes: [ExecutionNode]   # grows only</text>
+  <text x="392" y="432" font-size="8.5" fill="#2b3a67" font-family="monospace">edges: from → to, trigger: on-success</text>
+  <text x="392" y="443" font-size="8.5" fill="#2b3a67" font-family="monospace">                        | on-completion</text>
+
+  <!-- owns arrows -->
+  <line x1="326" y1="400" x2="380" y2="396" stroke="#7a83a0" stroke-width="1.2"/>
+  <polygon points="386,395 376,392 377,401" fill="#7a83a0"/>
+  <text x="352" y="390" font-size="8" text-anchor="middle" fill="#5a5a72">owns</text>
+
+  <rect x="380" y="458" width="284" height="66" rx="5" fill="#fff" stroke="#2b3a67" stroke-width="1.3"/>
+  <text x="522" y="476" font-size="10" text-anchor="middle" fill="#14213d" font-weight="bold">ExecutionNode — frozen at insertion</text>
+  <line x1="380" y1="483" x2="664" y2="483" stroke="#2b3a67" stroke-width="0.8"/>
+  <text x="392" y="499" font-size="8.5" fill="#2b3a67" font-family="monospace">id · kind (process | expand) · label</text>
+  <text x="392" y="514" font-size="8.5" fill="#2b3a67" font-family="monospace">action (command, inputs, outputs)</text>
+
+  <line x1="522" y1="446" x2="522" y2="458" stroke="#7a83a0" stroke-width="1.2"/>
+  <polygon points="522,456 517,448 527,448" fill="#7a83a0"/>
+  <text x="534" y="455" font-size="8" fill="#5a5a72">contains</text>
+
+  <rect x="16" y="480" width="310" height="62" rx="5" fill="#f4f5f9" stroke="#7a83a0" stroke-width="1.3"/>
+  <text x="171" y="498" font-size="10" text-anchor="middle" fill="#2b3a67" font-weight="bold">Node state table  (scheduler-owned)</text>
+  <line x1="16" y1="505" x2="326" y2="505" stroke="#7a83a0" stroke-width="0.8"/>
+  <text x="28" y="521" font-size="8.5" fill="#2b3a67" font-family="monospace">node id → status, result</text>
+  <text x="28" y="535" font-size="8.5" fill="#2b3a67" font-family="monospace">pending → running → done|failed|skipped</text>
+
+  <line x1="171" y1="464" x2="171" y2="480" stroke="#7a83a0" stroke-width="1.2"/>
+  <polygon points="171,478 166,470 176,470" fill="#7a83a0"/>
+  <text x="183" y="476" font-size="8" fill="#5a5a72">owns</text>
+
+  <rect x="16" y="558" width="310" height="62" rx="5" fill="#fff" stroke="#2b3a67" stroke-width="1.3"/>
+  <text x="171" y="576" font-size="10" text-anchor="middle" fill="#14213d" font-weight="bold">ProcessResult</text>
+  <line x1="16" y1="583" x2="326" y2="583" stroke="#2b3a67" stroke-width="0.8"/>
+  <text x="28" y="599" font-size="8.5" fill="#2b3a67" font-family="monospace">command · exit code · stdout · stderr</text>
+  <text x="28" y="613" font-size="8.5" fill="#5a5a72" font-style="italic">the one currency every path produces (Fig. 2)</text>
+
+  <rect x="380" y="558" width="284" height="62" rx="5" fill="#fff" stroke="#2b3a67" stroke-width="1.3"/>
+  <text x="522" y="576" font-size="10" text-anchor="middle" fill="#14213d" font-weight="bold">NodeContext — passed to around_node</text>
+  <line x1="380" y1="583" x2="664" y2="583" stroke="#2b3a67" stroke-width="0.8"/>
+  <text x="392" y="599" font-size="8.5" fill="#2b3a67" font-family="monospace">workspace_root  # where inputs are read</text>
+  <text x="392" y="613" font-size="8.5" fill="#2b3a67" font-family="monospace">output_root     # where outputs land</text>
+
+  <text x="340" y="642" font-size="9.5" text-anchor="middle" fill="#5a5a72" font-style="italic">Nodes are frozen; everything that changes lives with the scheduler or inside a layer's own store.</text>
+</svg>
+<figcaption>Figure 4 — Class diagram. Builders are the user-facing shell; each contributes a layer; the scheduler owns the plan and all run-time state.</figcaption>
+</figure>
+
 <p>
-Walking one node through the full <code>atomic(cache(incremental(run)))</code> stack:
+Who does what, in one line each:
+</p>
+<table>
+  <tr><th>Class</th><th>Job</th></tr>
+  <tr><td><code>CleanBuilder</code></td><td>Turns the logical graph into an <code>ExecutionPlan</code> and runs it with an empty layer stack. Already implemented.</td></tr>
+  <tr><td><code>Incremental/Cache/AtomicBuilder</code></td><td>User-facing wrappers. Each one adds its concrete layer to the stack; the nesting order becomes the stack order.</td></tr>
+  <tr><td><code>BuildLayer</code></td><td>The four hooks from §4. A layer holds its own storage (metadata, cache dir, staging dir) and nothing else.</td></tr>
+  <tr><td><code>Scheduler</code></td><td>The only thing that mutates anything shared: picks ready nodes, applies the stack, records results, inserts and wires proposed nodes, cascades failures.</td></tr>
+  <tr><td><code>ExecutionPlan</code> / <code>ExecutionNode</code></td><td>The graph. Nodes are frozen at insertion; the plan only grows.</td></tr>
+  <tr><td>Node state table</td><td>Status and result per node, owned by the scheduler — the mutable half that keeps nodes immutable.</td></tr>
+  <tr><td><code>NodeContext</code></td><td>The knobs a layer may turn for one node's execution: where inputs are read, where outputs land (§9).</td></tr>
+  <tr><td><code>ProcessResult</code></td><td>What every node run produces, no matter how it was obtained.</td></tr>
+</table>
+
+<h2>6. One node, start to finish</h2>
+<p>
+Walking a single node through the full <code>atomic(cache(incremental(run)))</code> stack.
+The layers get their chance in order; the first one with an answer short-circuits the rest:
 </p>
 
 <figure>
@@ -364,60 +530,142 @@ Walking one node through the full <code>atomic(cache(incremental(run)))</code> s
   <rect x="60" y="406" width="280" height="36" rx="5" fill="#fff" stroke="#2b3a67" stroke-width="1.4"/>
   <text x="200" y="428" font-size="10" text-anchor="middle" fill="#2b3a67">result → scheduler: DONE / FAILED, cascade as usual</text>
 </svg>
-<figcaption>Figure 4 — One node's path through the stack. Green paths are shortcuts; all paths end at the same scheduler hand-off.</figcaption>
+<figcaption>Figure 5 — One node's path through the stack. Green paths are shortcuts; all paths end at the same scheduler hand-off.</figcaption>
 </figure>
 
 <p>
-Note the cross-layer couplings this makes explicit rather than hiding: the cache key and the
-incremental fingerprint are essentially <b>the same computation</b> (command template, tool
-identity, input content hashes), so they should share one fingerprint function. And because
-atomic is outermost, cache-restored outputs land in staging exactly like process-written
-outputs — the spec's requirement falls out of stack order instead of special-casing.
+Two couplings are deliberate here, not accidental. First, the cache key and the incremental
+fingerprint are computed from the same facts — command template, tool identity, input
+content hashes — so they should share one fingerprint function rather than drift apart.
+Second, because atomic is the <i>outermost</i> layer, outputs restored from the cache land
+in staging exactly like outputs written by a process. The spec's requirement falls out of
+stack order for free, with no special case.
 </p>
 
-<h2 class="break">6. What does not fit in around_node</h2>
+<h2>7. Where the bytes live</h2>
 <p>
-Two capability behaviors are not per-node decisions, which is why the interface has events
-beyond the middleware method.
+Each layer owns one piece of storage, and nothing else may touch it. The workspace — the
+user's actual files — is written by exactly one arrow in this whole picture: the atomic
+commit, which only happens if every node succeeded.
 </p>
 
-<h3>Build-scoped: the atomic commit</h3>
+<figure>
+<svg width="680" height="420" viewBox="0 0 680 420" xmlns="http://www.w3.org/2000/svg">
+  <!-- stores -->
+  <rect x="20" y="40" width="180" height="64" rx="8" fill="#f4f5f9" stroke="#7a83a0" stroke-width="1.4"/>
+  <text x="110" y="63" font-size="10.5" text-anchor="middle" fill="#14213d" font-weight="bold">Workspace</text>
+  <text x="110" y="79" font-size="8.5" text-anchor="middle" fill="#5a5a72">sources + committed outputs</text>
+  <text x="110" y="92" font-size="8.5" text-anchor="middle" fill="#5a5a72">(the user's real files)</text>
+
+  <rect x="480" y="40" width="180" height="64" rx="8" fill="#f4f5f9" stroke="#7a83a0" stroke-width="1.4"/>
+  <text x="570" y="63" font-size="10.5" text-anchor="middle" fill="#14213d" font-weight="bold">Staging dir</text>
+  <text x="570" y="79" font-size="8.5" text-anchor="middle" fill="#5a5a72">this build's outputs,</text>
+  <text x="570" y="92" font-size="8.5" text-anchor="middle" fill="#5a5a72">not yet committed  (atomic)</text>
+
+  <rect x="20" y="308" width="180" height="64" rx="8" fill="#f4f5f9" stroke="#7a83a0" stroke-width="1.4"/>
+  <text x="110" y="331" font-size="10.5" text-anchor="middle" fill="#14213d" font-weight="bold">Metadata store</text>
+  <text x="110" y="347" font-size="8.5" text-anchor="middle" fill="#5a5a72">fingerprints · membership</text>
+  <text x="110" y="360" font-size="8.5" text-anchor="middle" fill="#5a5a72">last results  (incremental)</text>
+
+  <rect x="480" y="308" width="180" height="64" rx="8" fill="#f4f5f9" stroke="#7a83a0" stroke-width="1.4"/>
+  <text x="570" y="331" font-size="10.5" text-anchor="middle" fill="#14213d" font-weight="bold">Cache dir</text>
+  <text x="570" y="347" font-size="8.5" text-anchor="middle" fill="#5a5a72">stored results + output files,</text>
+  <text x="570" y="360" font-size="8.5" text-anchor="middle" fill="#5a5a72">keyed by fingerprint  (cache)</text>
+
+  <!-- center pipeline -->
+  <rect x="240" y="164" width="200" height="88" rx="8" fill="#14213d"/>
+  <text x="340" y="188" font-size="10.5" text-anchor="middle" fill="#fff" font-weight="bold">running one node</text>
+  <text x="340" y="207" font-size="8.5" text-anchor="middle" fill="#c8ccda">fresh? → cached? → render via ctx</text>
+  <text x="340" y="222" font-size="8.5" text-anchor="middle" fill="#c8ccda">→ run process</text>
+  <text x="340" y="240" font-size="8.5" text-anchor="middle" fill="#c8ccda">(the around_node stack, Fig. 5)</text>
+
+  <!-- workspace -> node : reads inputs -->
+  <line x1="150" y1="104" x2="262" y2="164" stroke="#7a83a0" stroke-width="1.4"/>
+  <polygon points="268,167 258,167 262,158" fill="#7a83a0"/>
+  <text x="160" y="130" font-size="8.5" fill="#5a5a72">reads inputs</text>
+
+  <!-- node -> staging : writes outputs -->
+  <line x1="418" y1="164" x2="530" y2="104" stroke="#7a83a0" stroke-width="1.4"/>
+  <polygon points="536,101 528,108 524,99" fill="#7a83a0"/>
+  <text x="448" y="130" font-size="8.5" fill="#5a5a72">writes outputs</text>
+
+  <!-- staging -> workspace : commit -->
+  <line x1="480" y1="64" x2="206" y2="64" stroke="#2f7a3d" stroke-width="1.8"/>
+  <polygon points="200,64 210,59 210,69" fill="#2f7a3d"/>
+  <text x="340" y="30" font-size="9" text-anchor="middle" fill="#2f7a3d" font-weight="bold">on_build_end: commit — only if the whole build succeeded</text>
+
+  <!-- metadata <-> node -->
+  <line x1="110" y1="308" x2="262" y2="252" stroke="#7a83a0" stroke-width="1.4"/>
+  <polygon points="268,250 259,255 257,246" fill="#7a83a0"/>
+  <text x="112" y="272" font-size="8.5" fill="#5a5a72">is it fresh?</text>
+  <line x1="292" y1="252" x2="150" y2="326" stroke="#7a83a0" stroke-width="1.4" stroke-dasharray="5,3"/>
+  <polygon points="145,329 152,321 157,329" fill="#7a83a0"/>
+  <text x="212" y="300" font-size="8.5" fill="#5a5a72">record new fingerprints</text>
+  <text x="212" y="312" font-size="8.5" fill="#5a5a72">+ membership after success</text>
+
+  <!-- cache <-> node -->
+  <line x1="570" y1="308" x2="418" y2="252" stroke="#7a83a0" stroke-width="1.4"/>
+  <polygon points="412,250 422,247 420,256" fill="#7a83a0"/>
+  <text x="490" y="272" font-size="8.5" text-anchor="middle" fill="#5a5a72">hit: restore result</text>
+  <line x1="388" y1="252" x2="530" y2="326" stroke="#7a83a0" stroke-width="1.4" stroke-dasharray="5,3"/>
+  <polygon points="535,329 523,329 528,321" fill="#7a83a0"/>
+  <text x="422" y="300" font-size="8.5" fill="#5a5a72">miss: store result</text>
+  <text x="422" y="312" font-size="8.5" fill="#5a5a72">+ outputs after run</text>
+
+  <!-- cache restored outputs land in staging -->
+  <line x1="628" y1="308" x2="628" y2="110" stroke="#4a9a58" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <polygon points="628,104 623,113 633,113" fill="#4a9a58"/>
+  <text x="622" y="196" font-size="8" text-anchor="end" fill="#2f7a3d">restored outputs</text>
+  <text x="622" y="208" font-size="8" text-anchor="end" fill="#2f7a3d">land in staging too</text>
+
+  <text x="340" y="404" font-size="9.5" text-anchor="middle" fill="#5a5a72" font-style="italic">Solid arrows: reads and decision lookups. Dashed: writes after a node finishes. Green: success-only paths.</text>
+</svg>
+<figcaption>Figure 6 — Data flow with all three layers on. The workspace's outputs are touched by exactly one arrow: the commit.</figcaption>
+</figure>
+
 <p>
-Staged additions and deletions commit only if the whole build succeeds
-(<code>on_build_end</code>). If the build fails or crashes, real outputs remain untouched and
-the staged state stays inspectable for <code>status</code> and recovery
-(<code>on_build_begin</code> checks for it). Incremental metadata must be written in
-agreement with the commit: if the commit never happens, metadata must not claim the outputs
-exist — otherwise the <i>next</i> incremental build is silently wrong.
+This picture is also the crash-safety argument. If the build dies at any point, the
+workspace still holds the previous good state, staging holds a partial build you can
+inspect or resume (<code>on_build_begin</code> looks for it), and the metadata store was
+only updated in step with what actually happened — so the next build's freshness checks
+tell the truth.
 </p>
 
-<h3>Membership-scoped: deleted-source cleanup</h3>
+<h2>8. Work that layers add: cleanup</h2>
 <p>
-When a collection realizes, the incremental layer compares current membership against the
-previous build's persisted membership. A vanished member means its outputs must be deleted
-and downstream consumers rebuilt — file hashes alone can never detect this.
-</p>
-<p>
-The deletions themselves are schedulable work, so they enter the plan as <b>real nodes</b>:
-the layer's event handler proposes them, and the scheduler inserts and wires them exactly as
-it does expanded children. Node status buys them everything nodes get: <b>ordering</b> (the
-deletion gains an edge to consumers of the collection, so <code>link app</code> can never
-glob the stale <code>baz.o</code>), <b>staging</b> (the atomic layer's
-<code>around_node</code> applies to deletion nodes too — a staged <code>del</code> marker
-instead of an immediate <code>rm</code>, with no special-casing), <b>visibility</b>
-(<code>status</code> and dry-run can list planned deletions), and <b>failure handling</b>
-(a deletion that fails produces a structured result and cascades like anything else).
+Most of a layer's job fits in <code>around_node</code>. Two things don't, because they
+aren't decisions about a single node:
 </p>
 
-<h3>Failure-triggered cleanup: an edge-semantics extension</h3>
+<h3>A source file was deleted</h3>
 <p>
-Deleting the outputs of a <i>failed</i> action is also node-shaped work, with one twist: it
-must run <i>because</i> its trigger failed, which ordinary readiness forbids — failure
-cascades skip successors. The resolution is in edge semantics, not a layer bypass: edges
-gain a trigger mode, <b>on-success</b> (the default; cascade exactly as today) versus
-<b>on-completion</b> (fires whether the source succeeded or failed). Failure-cleanup nodes
-hang off their action with an on-completion edge; every ordinary data edge keeps today's
-behavior.
+Say <code>src/baz.cpp</code> existed last build and is gone now. No fingerprint check will
+ever notice — there's no node to check. The incremental layer catches it in
+<code>on_collection_realized</code>: when the collection's membership becomes known, compare
+it to last build's membership. <code>baz</code> vanished, so <code>build/obj/baz.o</code> is
+stale and must go, and the link must rerun.
+</p>
+<p>
+The deletion is real work, so it becomes a <b>real node</b>: the layer proposes it, the
+scheduler inserts and wires it — the same channel expansion uses. Being a node buys it
+everything nodes get:
+</p>
+<ul>
+  <li><b>Ordering</b> — an edge from the deletion to the link means the link can never see the stale <code>baz.o</code>.</li>
+  <li><b>Staging</b> — the atomic layer wraps deletion nodes like any other, so the "delete" is staged and only committed with the rest of the build.</li>
+  <li><b>Visibility</b> — dry-run and <code>status</code> can list planned deletions, because they're in the plan.</li>
+  <li><b>Failure handling</b> — a deletion that fails produces a normal result and cascades like anything else.</li>
+</ul>
+
+<h3>An action failed and left junk behind</h3>
+<p>
+Deleting the half-written outputs of a <i>failed</i> action is also node-shaped work, with
+one twist: it must run <i>because</i> its trigger failed — and normal readiness forbids
+that, since failure skips successors. The fix is a property of the <b>edge</b>, not a
+bypass of the rules: an edge has a trigger mode. <b>on-success</b> is the default and works
+exactly like today. <b>on-completion</b> fires whether the source succeeded or failed.
+Failure-cleanup nodes hang off their action with an on-completion edge; every ordinary
+edge keeps today's behavior.
 </p>
 
 <figure>
@@ -470,45 +718,64 @@ behavior.
   <text x="500" y="237" font-size="8.5" text-anchor="middle" fill="#a33327">insert node: rm build/obj/baz.o</text>
   <text x="500" y="251" font-size="8.5" text-anchor="middle" fill="#a33327">edge: deletion → link (rebuild)</text>
 </svg>
-<figcaption>Figure 5 — Lifecycle events, and the membership diff that per-node decisions can never see.</figcaption>
+<figcaption>Figure 7 — Lifecycle events, and the membership diff that no per-node check can ever see.</figcaption>
 </figure>
 
-<h2>7. The render context</h2>
+<h2>9. Logical addresses, physical places</h2>
 <p>
-Rendering currently resolves paths directly against the plan's workspace root. The atomic
-layer needs declared outputs to resolve into <code>build/staging/add/…</code> while inputs
-still resolve into real locations, then needs deletions expressed as staged markers. So the
-render step takes its roots from a small context object that layers may modify:
+A node declares that it writes <code>build/obj/foo.o</code>. With the atomic layer on, the
+file actually gets written under <code>build/staging/…</code>. Doesn't that mean the layer
+changed the node's outputs — breaking rule 2?
+</p>
+<p>
+No, and the distinction matters. <code>build/obj/foo.o</code> is the node's <b>logical</b>
+address: it's what dependency inference ran on, what the cache key hashes, and what
+membership diffs compare across builds. Rewrite it and the node's identity forks mid-build.
+So the node keeps its logical address forever, and the mapping to a <b>physical</b> place
+happens at the last moment — when the command is rendered — using the context:
 </p>
 <pre><code>class NodeContext:
-    workspace_root: Path      # where inputs are read and collections realize
-    output_root: Path         # where declared outputs are written (atomic: staging)
+    workspace_root: Path   # where inputs are read and collections realize
+    output_root: Path      # where declared outputs get written
+                           #   normally: the workspace
+                           #   under atomic: the staging dir
     # later: env, scratch dirs, per-node metadata handles</code></pre>
 <p>
-This is the one place a capability legitimately reaches "inside" node execution, and making
-it an explicit, layer-visible object keeps that reach narrow and testable. It is also a seam
-the Rust engine keeps: the context is plain data across the FFI boundary.
+The atomic layer just points <code>output_root</code> at staging. The compile writes there;
+the downstream link, rendered under the same context, reads from there; the commit at the
+end moves everything into place. No node ever knew. Think mount namespace, not
+<code>sed</code>: the addresses in the program never change — the layer changes what
+they're mounted onto.
+</p>
+<p>
+The context is also deliberately small and plain-data. It's the one sanctioned way a layer
+reaches inside a node's execution, and it crosses the future Rust FFI boundary as-is.
 </p>
 
-<h2>8. Validation plan</h2>
+<h2>10. Build order</h2>
+<p>
+The plan is to land this in five steps, each one proving the previous seams before adding
+risk:
+</p>
 <table>
   <tr><th>Step</th><th>What</th><th>What it proves</th></tr>
-  <tr><td>1</td><td>Introduce <code>BuildLayer</code>, <code>NodeContext</code>, and the stack in the executor; <code>CleanBuilder</code> runs with an empty stack.</td><td>The seams exist without changing behavior — full test suite stays green.</td></tr>
-  <tr><td>2</td><td>A trivial layer (logging or dry-run) threaded through the stack.</td><td>Composition works, including for runtime-expanded nodes; cheapest possible proof.</td></tr>
-  <tr><td>3</td><td>Persistent metadata + <code>TimeAndHashChangeDetector</code>; <code>IncrementalBuilder</code> as the first real layer.</td><td>Fingerprints, membership persistence, deleted-source and failed-output cleanup — the correctness core.</td></tr>
+  <tr><td>1</td><td>Add <code>BuildLayer</code>, <code>NodeContext</code>, and the stack to the executor. <code>CleanBuilder</code> runs with an empty stack.</td><td>The seams exist and change nothing — full test suite stays green.</td></tr>
+  <tr><td>2</td><td>A trivial layer: logging or dry-run.</td><td>Composition works, including for runtime-expanded nodes — the cheapest possible proof.</td></tr>
+  <tr><td>3</td><td>Persistent metadata + change detection; <code>IncrementalBuilder</code>.</td><td>Fingerprints, membership history, deleted-source and failed-output cleanup — the correctness core.</td></tr>
   <tr><td>4</td><td><code>CacheBuilder</code>, sharing the fingerprint function.</td><td>Result restore and failure replay through the same seam.</td></tr>
   <tr><td>5</td><td><code>AtomicBuilder</code>: staging via <code>ctx.output_root</code>, commit in <code>on_build_end</code>.</td><td>The most invasive capability lands last, on proven seams.</td></tr>
 </table>
 
-<h2>9. Spec design rules, preserved</h2>
+<h2>11. The rules, restated</h2>
 <ul>
-  <li><b>The logical graph is clean-build truth</b> — layers never touch user declarations; they intercept execution.</li>
-  <li><b>Capabilities layer around the graph</b> — builder nesting is honored; it becomes the middleware order.</li>
-  <li><b>ExpandAll expands into schedulable nodes</b> — unchanged, and layers apply to expanded nodes uniformly.</li>
-  <li><b>Cleanup is not user-authored</b> — stale/failed-output deletions are capability-inserted nodes, added at execution time through the same channel as expansion; the logical graph stays clean-build truth.</li>
-  <li><b>Failed results are real results</b> — a restored failure is just a <code>ProcessResult</code> with a nonzero exit; cascade behavior is identical.</li>
-  <li><b>Cache and atomicity are independent</b> — neither knows the other exists; stack order alone routes restored outputs through staging.</li>
-  <li><b>Rust eventually owns the engine</b> — scheduler, stack dispatch, fingerprints, metadata, and <code>NodeContext</code> are all below the DSL boundary; layers are engine policies, not user-language features.</li>
+  <li><b>The logical graph is clean-build truth</b> — layers never touch what the user declared; they intercept execution.</li>
+  <li><b>Nodes are effectively immutable</b> — the plan only grows, status only advances, definitions never change. Expansion refines, realization resolves, and atomic remaps logical paths at render time; none of them rewrite a node.</li>
+  <li><b>Builder nesting is the layer order</b> — the user's composition and the runtime stack are the same thing.</li>
+  <li><b>Every shortcut is a result obtained elsewhere</b> — up-to-date, cache hit, or process run all end in a <code>ProcessResult</code>; downstream can't tell the difference.</li>
+  <li><b>Cleanup is not user-authored</b> — stale and failed-output deletions are layer-proposed nodes, inserted at run time through the same channel as expansion.</li>
+  <li><b>Failed results are real results</b> — a cached failure replays as a failure and cascades normally.</li>
+  <li><b>Cache and atomic don't know about each other</b> — stack order alone routes restored outputs through staging.</li>
+  <li><b>Rust eventually owns the engine</b> — scheduler, stack dispatch, fingerprints, metadata, and <code>NodeContext</code> all live below the DSL boundary; layers are engine policy, not build-file features.</li>
 </ul>
 
 </body>

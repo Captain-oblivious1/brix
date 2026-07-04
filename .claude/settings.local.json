@@ -6,7 +6,16 @@
       "Bash(python3 examples/raw_cpp/brix.py)",
       "Bash(./examples/raw_cpp/build/bin/app)",
       "Bash(git add *)",
-      "Bash(git -c user.name=\"Duane Knesek\" -c user.email=\"duane.knesek@gmail.com\" commit -q --amend --no-edit)"
+      "Bash(git -c user.name=\"Duane Knesek\" -c user.email=\"duane.knesek@gmail.com\" commit -q --amend --no-edit)",
+      "Bash(/tmp/claude-1000/-home-duane-Projects-brix/f3a2358a-baf0-4793-a756-f4a5e9497932/scratchpad/pdfenv/bin/weasyprint /home/duane/Projects/brix/docs/build-layers.html /tmp/claude-1000/-home-duane-Projects-brix/f3a2358a-baf0-4793-a756-f4a5e9497932/scratchpad/check.pdf)",
+      "Bash(command -v chromium chromium-browser google-chrome-stable firefox rsvg-convert)",
+      "Bash(python3 -c \"import weasyprint; print\\('weasyprint ok'\\)\")",
+      "Bash(firefox --headless --screenshot full.png --window-size=760,6000 file:///home/duane/Projects/brix/docs/build-layers.html)",
+      "Bash(mkdir -p ffprof)",
+      "Bash(firefox --headless --profile ffprof --screenshot full.png --window-size=760,6200 file:///home/duane/Projects/brix/docs/build-layers.html)",
+      "Bash(python3 -)",
+      "Bash(rsvg-convert -b white -z 1.6 fig4-classes.svg -o fig4.png)",
+      "Bash(rsvg-convert -b white -z 1.6 fig6-dataflow.svg -o fig6.png)"
     ]
   }
 }
