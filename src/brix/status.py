@@ -66,10 +66,22 @@ class PendingDeletion:
 class StatusReport:
     actions: list[ActionStatus] = field(default_factory=list)
     pending_deletions: list[PendingDeletion] = field(default_factory=list)
+    # Atomic staging state (empty/False when no staging exists):
+    staged_files: list[str] = field(default_factory=list)
+    staged_deletions: list[str] = field(default_factory=list)
+    interrupted_commit: bool = False
+
+    @property
+    def has_staged_state(self) -> bool:
+        return bool(self.staged_files or self.staged_deletions or self.interrupted_commit)
 
     @property
     def is_clean(self) -> bool:
-        return not self.pending_deletions and all(a.is_fresh for a in self.actions)
+        return (
+            not self.pending_deletions
+            and not self.has_staged_state
+            and all(a.is_fresh for a in self.actions)
+        )
 
     @property
     def failures(self) -> list[ActionStatus]:
@@ -85,12 +97,22 @@ class StatusReport:
             lines.append(
                 f"{'pending deletion':>27}:  {paths}  (member {d.member!r} left {d.expansion})"
             )
+        for path in self.staged_files:
+            lines.append(f"{'staged, uncommitted':>27}:  {path}")
+        for path in self.staged_deletions:
+            lines.append(f"{'staged deletion':>27}:  {path}")
+        if self.interrupted_commit:
+            lines.append(
+                f"{'interrupted commit':>27}:  will be completed when the next build starts"
+            )
         counts: dict[str, int] = {}
         for a in self.actions:
             counts[a.state] = counts.get(a.state, 0) + 1
         summary = ", ".join(f"{n} {state}" for state, n in sorted(counts.items()))
         if self.pending_deletions:
             summary += f", {len(self.pending_deletions)} pending deletion(s)"
+        if self.has_staged_state:
+            summary += ", staged state present (failed or interrupted atomic build)"
         lines.append(summary if lines else "nothing to build")
         return "\n".join(lines)
 
@@ -117,6 +139,7 @@ def compute_status(
     graph_supplier,
     root: str | Path = ".",
     metadata_dir: str | Path = "build/.brix",
+    staging_dir: str | Path = "build/staging",
 ) -> StatusReport:
     graph: Graph = graph_supplier() if callable(graph_supplier) else graph_supplier
     root = Path(root).resolve()
@@ -127,6 +150,20 @@ def compute_status(
     ctx = NodeContext.for_root(root)
 
     report = StatusReport()
+    staging = root / staging_dir
+    if staging.exists():
+        from .atomic import COMMIT_MARKER
+
+        add_dir, del_dir = staging / "add", staging / "del"
+        if add_dir.exists():
+            report.staged_files = sorted(
+                p.relative_to(add_dir).as_posix() for p in add_dir.rglob("*") if p.is_file()
+            )
+        if del_dir.exists():
+            report.staged_deletions = sorted(
+                p.relative_to(del_dir).as_posix() for p in del_dir.rglob("*") if p.is_file()
+            )
+        report.interrupted_commit = (staging / COMMIT_MARKER).exists()
     node_entries: dict[int, list[int]] = {}  # plan node id -> indices in report.actions
     node_dirty: dict[int, bool] = {}
 

@@ -83,22 +83,26 @@ def action_fingerprint(
 
     def atom_fp(atom: DataAtom) -> list:
         if isinstance(atom, FileData):
-            return ["file", atom.path, detector.hash_file(ctx.workspace_root / atom.path)]
+            return ["file", atom.path, detector.hash_file(ctx.read_path(atom.path))]
         if isinstance(atom, GlobData):
-            found = atom.pattern.find(ctx.workspace_root)
             return [
                 "glob",
                 atom.pattern.template,
-                [[path, detector.hash_file(ctx.workspace_root / path)] for path, _ in found],
+                [
+                    [logical, detector.hash_file(physical)]
+                    for logical, physical, _ in ctx.find(atom.pattern)
+                ],
             ]
         if isinstance(atom, RegexData):
-            root = ctx.workspace_root
-            matched = sorted(
-                p.relative_to(root).as_posix()
-                for p in root.rglob("*")
-                if p.is_file() and atom.match(p.relative_to(root).as_posix()) is not None
-            )
-            return ["regex", atom.regex.pattern, [[m, detector.hash_file(root / m)] for m in matched]]
+            return [
+                "regex",
+                atom.regex.pattern,
+                [
+                    [logical, detector.hash_file(physical)]
+                    for logical, physical in ctx.iter_files()
+                    if atom.match(logical) is not None
+                ],
+            ]
         if isinstance(atom, ToolData):
             resolved = atom.name if "/" in atom.name else shutil.which(atom.name)
             if resolved is None:
@@ -120,9 +124,14 @@ def action_fingerprint(
 def outputs_intact(
     record: dict, ctx: NodeContext, detector: TimeAndHashChangeDetector
 ) -> bool:
-    """Do the recorded outputs still exist with their recorded content?"""
+    """Do the recorded outputs still exist with their recorded content?
+
+    Reads through the overlay: an output produced earlier in this build
+    lives in staging; one committed by a previous build lives in the
+    workspace. Either satisfies freshness.
+    """
     for path, stored in record.get("outputs", {}).items():
-        if detector.hash_file(ctx.output_root / path) != stored:
+        if detector.hash_file(ctx.read_path(path)) != stored:
             return False
     return True
 
@@ -134,10 +143,10 @@ def output_hashes(
     for expr in action.outputs.values():
         for atom in expr.atoms():
             if isinstance(atom, FileData) and atom.pattern.is_concrete:
-                hashes[atom.path] = detector.hash_file(ctx.output_root / atom.path)
+                hashes[atom.path] = detector.hash_file(ctx.read_path(atom.path))
             elif isinstance(atom, GlobData):
-                for path, _ in atom.pattern.find(ctx.output_root):
-                    hashes[path] = detector.hash_file(ctx.output_root / path)
+                for logical, physical, _ in ctx.find(atom.pattern):
+                    hashes[logical] = detector.hash_file(physical)
     return hashes
 
 

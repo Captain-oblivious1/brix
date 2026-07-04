@@ -86,20 +86,18 @@ def _wrap(layer: BuildLayer, node: ExecutionNode, inner: NodeRunner) -> NodeRunn
 
 
 def _collection_members(action: ExpandAll, ctx: NodeContext) -> list[str]:
-    """Realize the collection and return sorted unique element bindings."""
-    root = ctx.workspace_root
+    """Realize the collection (through the overlay) and return sorted
+    unique element bindings."""
     members: list[str] = []
     seen: set[str] = set()
     for atom in action.collection.atoms():
         if isinstance(atom, GlobData):
-            found = atom.pattern.find(root)
+            found = [(logical, bindings) for logical, _, bindings in ctx.find(atom.pattern)]
         elif isinstance(atom, RegexData):
             found = [
-                (rel, bindings)
-                for rel in sorted(
-                    p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
-                )
-                if (bindings := atom.match(rel)) is not None
+                (logical, bindings)
+                for logical, _ in ctx.iter_files()
+                if (bindings := atom.match(logical)) is not None
             ]
         else:
             continue

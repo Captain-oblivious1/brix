@@ -6,7 +6,8 @@ runtime ExpandAll expansion, and a clean builder.
 """
 
 from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
-from .builders import BuildResult, CleanBuilder, IncrementalBuilder
+from .atomic import AtomicLayer
+from .builders import AtomicBuilder, BuildResult, CleanBuilder, IncrementalBuilder
 from .data import DataExpr, DataFactory, DataUnion
 from .graph import Graph
 from .incremental import IncrementalLayer
@@ -28,6 +29,8 @@ from . import cli
 
 __all__ = [
     "ActionStatus",
+    "AtomicBuilder",
+    "AtomicLayer",
     "BuildLayer",
     "BuildMetadata",
     "BuildResult",

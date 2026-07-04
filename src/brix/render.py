@@ -64,25 +64,39 @@ def _render_expr(name: str, expr: DataExpr, ctx: NodeContext, is_output: bool) -
     if isinstance(expr, FileData):
         if not expr.pattern.is_concrete:
             raise RenderError(f"{name}: unresolved bindings in path {expr.path!r}")
-        return _output_path(ctx, expr.path) if is_output else expr.path
+        if is_output:
+            return _output_path(ctx, expr.path)
+        return _input_path(ctx, expr.path)
     if isinstance(expr, GlobData):
         if is_output:
             raise RenderError(
                 f"{name}: output collection {expr.pattern.template!r} cannot be "
                 "rendered into a command line; pass a directory value instead"
             )
-        return " ".join(path for path, _ in expr.pattern.find(ctx.workspace_root))
+        return " ".join(
+            _relative(ctx, physical) for _, physical, _ in ctx.find(expr.pattern)
+        )
     if isinstance(expr, RegexData):
         if is_output:
             raise RenderError(f"{name}: output regex collection cannot be rendered")
-        root = ctx.workspace_root
-        matches = sorted(
-            p.relative_to(root).as_posix()
-            for p in root.rglob("*")
-            if p.is_file() and expr.match(p.relative_to(root).as_posix()) is not None
+        return " ".join(
+            _relative(ctx, physical)
+            for logical, physical in ctx.iter_files()
+            if expr.match(logical) is not None
         )
-        return " ".join(matches)
     raise RenderError(f"{name}: cannot render {expr!r}")
+
+
+def _relative(ctx: NodeContext, physical: Path) -> str:
+    """Express a physical path relative to the command's cwd (workspace)."""
+    return os.path.relpath(physical, ctx.workspace_root)
+
+
+def _input_path(ctx: NodeContext, logical: str) -> str:
+    physical = ctx.read_path(logical)
+    if physical == ctx.workspace_root / logical:
+        return logical
+    return _relative(ctx, physical)
 
 
 def render_command(action: ExternalProcessAction, where: NodeContext | Path | str) -> str:

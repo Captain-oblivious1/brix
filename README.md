@@ -24,8 +24,8 @@ user-facing build language.
 
 Minimal prototype (spec steps 1–10 plus dependency inference), the
 build-layer seams, the full IncrementalBuilder (fingerprint skip +
-deleted-source cleanup), the reporter seam, and status reporting with a
-CLI are implemented and working. 79 tests pass.
+deleted-source cleanup), the reporter seam, status reporting with a CLI,
+and AtomicBuilder are implemented and working. 88 tests pass.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -56,24 +56,27 @@ CLI are implemented and working. 79 tests pass.
   failed last build / outdated upstream / pending deletions) without
   building; `brix.py errors` replays recorded failure diagnostics;
   `build`, `clean`, `graph` round out the CLI
+- `AtomicBuilder(inner, staging_dir=...)`: outputs and deletions stage
+  under `build/staging/` and commit only if the whole build succeeds; the
+  `NodeContext` overlay makes every read see the workspace as it will look
+  after commit; crash mid-commit is journaled (COMMIT marker) and finished
+  by the next build; failed-build staging is inspectable via status, then
+  discarded
 
-Not yet implemented: cache and atomic layers, typed language actions.
+Not yet implemented: cache layer, typed language actions.
 
 ## TODO (priority order)
 
 Duane's priority: differentiating features first — most build systems have
 caching; few have honest status inspection or atomic builds.
 
-1. **AtomicBuilder** — staging via `ctx.output_root`, commit in
-   `on_build_end`, crash recovery in `on_build_begin`. Includes making
-   downstream *inputs* resolve through staging (today only outputs map
-   through `ctx.output_root`), and extending `brix.py status` with
-   staged-but-uncommitted state and interrupted-build recovery.
-2. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
+1. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
    stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
-3. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
+   Atomic-outermost stack order routes restored outputs through staging
+   for free.
+2. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
    to the generic model (deferred by Duane as low-risk).
-4. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+3. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
 Further out (from the original spec, unscheduled): graph visualization,
@@ -145,7 +148,21 @@ in-memory and database-backed data expressions.
   `build [-j N] [--silent | --quiet-replays]`, `status` (exit 0 = clean),
   `errors` (replays recorded failure diagnostics without rebuilding),
   `clean`, `graph`. Failed results are now recorded in metadata (never
-  treated as fresh). Runnable demo: `examples/cli_demo/`. `ProcessResult.source` records how a
+  treated as fresh). Runnable demo: `examples/cli_demo/`.
+- **AtomicBuilder** (`src/brix/atomic.py`): staging under
+  `build/staging/add|del` with a build-scoped context redirection; the
+  `NodeContext` **overlay** (`read_path`/`find`/`iter_files`) makes
+  rendering, collection realization, and fingerprinting all see the
+  workspace as it will look after commit — staged outputs shadow committed
+  files, staged deletion markers hide them. Deletions stage as markers and
+  apply at commit. Commit is journaled (COMMIT marker written first, copy
+  is idempotent): a crash mid-commit is finished by the next build's
+  `on_build_begin`; failed-build staging stays inspectable
+  (`brix.py status` shows staged files/deletions and interrupted commits)
+  and is discarded when the next build starts. Composes with
+  IncrementalBuilder: unchanged rebuilds spawn nothing and stage nothing;
+  a failed build leaves the workspace byte-identical — even the successful
+  half of it. Builders gained `layers()` for wrapper composition. `ProcessResult.source` records how a
   result was obtained (`process` / `replayed`; `cache` reserved) — stamped
   by the producer, ignored by scheduling.
 

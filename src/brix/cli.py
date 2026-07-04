@@ -39,6 +39,7 @@ def main(
     root: str | Path = ".",
     argv: list[str] | None = None,
     metadata_dir: str | Path = "build/.brix",
+    staging_dir: str | Path = "build/staging",
 ) -> int:
     parser = argparse.ArgumentParser(prog="brix.py")
     commands = parser.add_subparsers(dest="command")
@@ -72,7 +73,9 @@ def main(
         return 0 if result.success else 1
 
     if command == "status":
-        report = compute_status(graph_supplier, root=root, metadata_dir=metadata_dir)
+        report = compute_status(
+            graph_supplier, root=root, metadata_dir=metadata_dir, staging_dir=staging_dir
+        )
         print(report.render())
         return 0 if report.is_clean else 1
 

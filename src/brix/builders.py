@@ -45,8 +45,11 @@ class CleanBuilder:
     def plan(self) -> ExecutionPlan:
         return plan_graph(self.graph, self.root)
 
+    def layers(self) -> list:
+        return []
+
     def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
-        return self.plan().run(jobs=jobs, layers=[], reporter=reporter)
+        return self.plan().run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
 class IncrementalBuilder:
@@ -71,12 +74,38 @@ class IncrementalBuilder:
     def plan(self) -> ExecutionPlan:
         return plan_graph(self._supplier(), self.root)
 
-    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
+    def layers(self) -> list:
         from .incremental import IncrementalLayer
         from .metadata import BuildMetadata, TimeAndHashChangeDetector
 
         metadata = BuildMetadata(self.root, self.metadata_dir)
         metadata.load()
         detector = TimeAndHashChangeDetector(self.root, metadata)
-        layer = IncrementalLayer(metadata, detector)
-        return self.plan().run(jobs=jobs, layers=[layer], reporter=reporter)
+        return [IncrementalLayer(metadata, detector)]
+
+    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
+        return self.plan().run(jobs=jobs, layers=self.layers(), reporter=reporter)
+
+
+class AtomicBuilder:
+    """Either the whole build lands, or nothing on disk changes.
+
+    Wraps another builder; its layer sits outermost, so process outputs
+    and (later) cache-restored outputs all pass through staging.
+    """
+
+    def __init__(self, inner, staging_dir: str | Path = "build/staging") -> None:
+        self.inner = inner
+        self.staging_dir = staging_dir
+        self.root: Path = inner.root
+
+    def plan(self) -> ExecutionPlan:
+        return self.inner.plan()
+
+    def layers(self) -> list:
+        from .atomic import AtomicLayer
+
+        return [*self.inner.layers(), AtomicLayer(self.staging_dir)]
+
+    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
+        return self.plan().run(jobs=jobs, layers=self.layers(), reporter=reporter)
