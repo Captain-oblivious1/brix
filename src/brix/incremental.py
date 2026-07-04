@@ -117,6 +117,40 @@ def action_fingerprint(
     return _digest(payload)
 
 
+def outputs_intact(
+    record: dict, ctx: NodeContext, detector: TimeAndHashChangeDetector
+) -> bool:
+    """Do the recorded outputs still exist with their recorded content?"""
+    for path, stored in record.get("outputs", {}).items():
+        if detector.hash_file(ctx.output_root / path) != stored:
+            return False
+    return True
+
+
+def output_hashes(
+    action: ExternalProcessAction, ctx: NodeContext, detector: TimeAndHashChangeDetector
+) -> dict:
+    hashes: dict[str, str | None] = {}
+    for expr in action.outputs.values():
+        for atom in expr.atoms():
+            if isinstance(atom, FileData) and atom.pattern.is_concrete:
+                hashes[atom.path] = detector.hash_file(ctx.output_root / atom.path)
+            elif isinstance(atom, GlobData):
+                for path, _ in atom.pattern.find(ctx.output_root):
+                    hashes[path] = detector.hash_file(ctx.output_root / path)
+    return hashes
+
+
+def remove_outputs(action: ExternalProcessAction, ctx: NodeContext) -> None:
+    for expr in action.outputs.values():
+        for atom in expr.atoms():
+            if isinstance(atom, FileData) and atom.pattern.is_concrete:
+                (ctx.output_root / atom.path).unlink(missing_ok=True)
+            elif isinstance(atom, GlobData):
+                for path, _ in atom.pattern.find(ctx.output_root):
+                    (ctx.output_root / path).unlink(missing_ok=True)
+
+
 class IncrementalLayer(BuildLayer):
     """Skip fresh nodes; record fingerprints and results after real runs."""
 
@@ -138,8 +172,9 @@ class IncrementalLayer(BuildLayer):
         record = self.metadata.action_record(key)
         if (
             record
+            and record.get("ok", True)
             and record.get("fingerprint") == fingerprint
-            and self._outputs_intact(record, ctx)
+            and outputs_intact(record, ctx, self.detector)
         ):
             replayed = dict(record["result"])
             replayed["source"] = "replayed"
@@ -149,15 +184,21 @@ class IncrementalLayer(BuildLayer):
             self.metadata.record_action(
                 key,
                 {
+                    "ok": True,
                     "fingerprint": fingerprint,
                     "result": asdict(result),
-                    "outputs": self._output_hashes(action, ctx),
+                    "outputs": output_hashes(action, ctx, self.detector),
                 },
             )
         else:
-            # A clean build would not have produced these outputs; neither may we.
-            self.metadata.forget_action(key)
-            self._remove_outputs(action, ctx)
+            # A clean build would not have produced these outputs; neither
+            # may we. The failure itself is recorded — never as fresh (a
+            # failed action always reruns), but status/errors can report it.
+            remove_outputs(action, ctx)
+            self.metadata.record_action(
+                key,
+                {"ok": False, "fingerprint": fingerprint, "result": asdict(result), "outputs": {}},
+            )
         return result
 
     # -- membership ------------------------------------------------------------
@@ -193,30 +234,3 @@ class IncrementalLayer(BuildLayer):
         self._pending_memberships.clear()
         self.metadata.save()
 
-    # -- helpers ---------------------------------------------------------------
-
-    def _outputs_intact(self, record: dict, ctx: NodeContext) -> bool:
-        for path, stored in record.get("outputs", {}).items():
-            if self.detector.hash_file(ctx.output_root / path) != stored:
-                return False
-        return True
-
-    def _output_hashes(self, action: ExternalProcessAction, ctx: NodeContext) -> dict:
-        hashes: dict[str, str | None] = {}
-        for expr in action.outputs.values():
-            for atom in expr.atoms():
-                if isinstance(atom, FileData) and atom.pattern.is_concrete:
-                    hashes[atom.path] = self.detector.hash_file(ctx.output_root / atom.path)
-                elif isinstance(atom, GlobData):
-                    for path, _ in atom.pattern.find(ctx.output_root):
-                        hashes[path] = self.detector.hash_file(ctx.output_root / path)
-        return hashes
-
-    def _remove_outputs(self, action: ExternalProcessAction, ctx: NodeContext) -> None:
-        for expr in action.outputs.values():
-            for atom in expr.atoms():
-                if isinstance(atom, FileData) and atom.pattern.is_concrete:
-                    (ctx.output_root / atom.path).unlink(missing_ok=True)
-                elif isinstance(atom, GlobData):
-                    for path, _ in atom.pattern.find(ctx.output_root):
-                        (ctx.output_root / path).unlink(missing_ok=True)

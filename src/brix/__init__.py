@@ -23,8 +23,11 @@ from .plan import (
 )
 from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
+from .status import ActionStatus, StatusReport, compute_status
+from . import cli
 
 __all__ = [
+    "ActionStatus",
     "BuildLayer",
     "BuildMetadata",
     "BuildResult",
@@ -51,5 +54,8 @@ __all__ = [
     "NodeStateTable",
     "ProcessResult",
     "Reporter",
+    "StatusReport",
     "TimeAndHashChangeDetector",
+    "cli",
+    "compute_status",
 ]

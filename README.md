@@ -24,8 +24,8 @@ user-facing build language.
 
 Minimal prototype (spec steps 1–10 plus dependency inference), the
 build-layer seams, the full IncrementalBuilder (fingerprint skip +
-deleted-source cleanup), and the reporter seam are implemented and
-working. 67 tests pass.
+deleted-source cleanup), the reporter seam, and status reporting with a
+CLI are implemented and working. 79 tests pass.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -38,7 +38,7 @@ working. 67 tests pass.
   over collections produced by generator actions during the same build
 - Structured `ProcessResult`s (stdout/stderr/exit/signal); failure cascades
   skip downstream nodes; cycle detection
-- `CleanBuilder(graph, root).plan()` / `.build(jobs, echo)`
+- `CleanBuilder(graph, root).plan()` / `.build(jobs, reporter)`
 - `BuildLayer` / `NodeContext` seams: per-node `around_node` middleware
   stack plus lifecycle events in the executor; scheduler-owned monotone
   `NodeStateTable` (node definitions are frozen)
@@ -51,31 +51,29 @@ working. 67 tests pass.
   and take a `Reporter` (`ConsoleReporter`, `ErrorsAtEndReporter`, or your
   own); `ProcessResult.source` carries provenance and replays are marked
   `(replayed)` by the console reporter
+- `compute_status()` + `brix.cli.main()`: `brix.py status` explains what
+  would build and why (never built / inputs changed / outputs missing /
+  failed last build / outdated upstream / pending deletions) without
+  building; `brix.py errors` replays recorded failure diagnostics;
+  `build`, `clean`, `graph` round out the CLI
 
-Not yet implemented: cache and atomic layers, status/errors CLI, typed
-language actions.
+Not yet implemented: cache and atomic layers, typed language actions.
 
 ## TODO (priority order)
 
 Duane's priority: differentiating features first — most build systems have
 caching; few have honest status inspection or atomic builds.
 
-1. **Status reporting + CLI** — `brix.py status` / `brix.py errors` read
-   persisted metadata (last results including failures) without building:
-   stale files/actions, missing outputs, membership-change staleness,
-   staged-but-uncommitted state, interrupted atomic build needing recovery.
-   Sits on the reporter seam and the metadata store. Plus CLI helpers:
-   `build`, `clean`, `graph`, alias→target mapping — separate from `Graph`
-   and builders.
-2. **AtomicBuilder** — staging via `ctx.output_root`, commit in
+1. **AtomicBuilder** — staging via `ctx.output_root`, commit in
    `on_build_end`, crash recovery in `on_build_begin`. Includes making
    downstream *inputs* resolve through staging (today only outputs map
-   through `ctx.output_root`).
-3. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
+   through `ctx.output_root`), and extending `brix.py status` with
+   staged-but-uncommitted state and interrupted-build recovery.
+2. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
    stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
-4. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
+3. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
    to the generic model (deferred by Duane as low-risk).
-5. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+4. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
 Further out (from the original spec, unscheduled): graph visualization,
@@ -113,8 +111,9 @@ in-memory and database-backed data expressions.
   a stat-validated file-hash cache (`TimeAndHashChangeDetector`); action
   identity keys (structure) vs fingerprints (content — command, tool
   identity, input hashes; the future cache key); fresh nodes complete with
-  their previous result, stdout/stderr replay included; failed actions are
-  forgotten and their outputs deleted (clean-build parity). Tests: rerun
+  their previous result, stdout/stderr replay included; failed actions
+  always rerun and their outputs are deleted (clean-build parity), with the
+  failure recorded for status/errors. Tests: rerun
   only what changed, byte-identical rerun keeps downstream fresh, value
   changes refingerprint, failures never replay as fresh.
 - **IncrementalBuilder part 2 — deleted-source cleanup**: membership
@@ -135,7 +134,18 @@ in-memory and database-backed data expressions.
   `result.success`); `ConsoleReporter` restores the live stream and marks
   non-process results (`ok: upper a (replayed)`), or with
   `show_replays=False` prints only real work (replayed failures still
-  print); `ErrorsAtEndReporter` prints failures only at completion. `ProcessResult.source` records how a
+  print); `ErrorsAtEndReporter` prints failures only at completion.
+- **Status reporting + CLI** (`src/brix/status.py`, `cli.py`):
+  `compute_status()` asks the incremental layer's freshness question
+  hypothetically — nothing executes — and reports per action: fresh /
+  never built / inputs changed / outputs missing / failed last build
+  (with the recorded result) / outdated (upstream will rebuild —
+  staleness propagates along plan edges), plus pending deletions from
+  membership diffs. `brix.cli.main(create_graph)` is the project CLI:
+  `build [-j N] [--silent | --quiet-replays]`, `status` (exit 0 = clean),
+  `errors` (replays recorded failure diagnostics without rebuilding),
+  `clean`, `graph`. Failed results are now recorded in metadata (never
+  treated as fresh). Runnable demo: `examples/cli_demo/`. `ProcessResult.source` records how a
   result was obtained (`process` / `replayed`; `cache` reserved) — stamped
   by the producer, ignored by scheduling.
 
@@ -530,6 +540,7 @@ python3 examples/hello_text/brix.py      # portable text-processing demo
 python3 examples/raw_cpp/brix.py         # compile+link demo (needs c++)
 python3 examples/layers_demo/brix.py     # watch the BuildLayer stack work
 python3 examples/incremental_demo/brix.py  # build/rebuild/edit/delete-a-source
+python3 examples/cli_demo/brix.py status   # project CLI: status/errors/build/clean
 ```
 
 A build file looks like:

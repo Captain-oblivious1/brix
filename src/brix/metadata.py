@@ -80,6 +80,9 @@ class BuildMetadata:
         with self._lock:
             self._data["actions"].pop(key, None)
 
+    def action_records(self) -> dict[str, dict]:
+        return dict(self._data["actions"])
+
     # -- collection membership ----------------------------------------------
 
     def membership(self, key: str) -> list[str] | None:
