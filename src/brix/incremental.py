@@ -17,9 +17,9 @@ import json
 import shutil
 from dataclasses import asdict
 
-from .actions import ExpandAll, ExternalProcessAction
+from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
 from .data import DataAtom, DataExpr, FileData, GlobData, RegexData, ToolData, ValueData
-from .layers import BuildLayer, NodeContext
+from .layers import BuildLayer, NodeContext, NodeProposal
 from .metadata import BuildMetadata, TimeAndHashChangeDetector
 from .process import ProcessResult
 
@@ -123,6 +123,9 @@ class IncrementalLayer(BuildLayer):
     def __init__(self, metadata: BuildMetadata, detector: TimeAndHashChangeDetector) -> None:
         self.metadata = metadata
         self.detector = detector
+        # Current-build membership, applied to metadata only if the build
+        # succeeds: a failed build must re-detect deletions next time.
+        self._pending_memberships: dict[str, list[str]] = {}
 
     # -- per-node ------------------------------------------------------------
 
@@ -155,7 +158,37 @@ class IncrementalLayer(BuildLayer):
             self._remove_outputs(action, ctx)
         return result
 
+    # -- membership ------------------------------------------------------------
+
+    def on_collection_realized(self, node, members, ctx):
+        action = node.action
+        if not isinstance(action, ExpandAll):
+            return None
+        key = membership_key(action)
+        previous = self.metadata.membership(key)
+        self._pending_memberships[key] = list(members)
+        if not previous:
+            return None
+        removed = sorted(set(previous) - set(members))
+        proposals: list[NodeProposal] = []
+        for member in removed:
+            vanished = action.child.substitute({action.element_name: member})
+            self.metadata.forget_action(action_key(vanished))
+            stale_outputs = [
+                atom.path
+                for expr in vanished.outputs.values()
+                for atom in expr.atoms()
+                if isinstance(atom, FileData) and atom.pattern.is_concrete
+            ]
+            if stale_outputs:
+                proposals.append(NodeProposal(DeleteFilesAction(stale_outputs)))
+        return proposals or None
+
     def on_build_end(self, result, ctx):
+        if result.success:
+            for key, members in self._pending_memberships.items():
+                self.metadata.set_membership(key, members)
+        self._pending_memberships.clear()
         self.metadata.save()
 
     # -- helpers ---------------------------------------------------------------

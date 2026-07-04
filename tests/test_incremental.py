@@ -217,6 +217,48 @@ def test_failed_action_outputs_removed_and_not_replayed(tmp_path):
     assert runs(tmp_path)["fail"] == 2  # failure was never treated as fresh
 
 
+def test_deleted_source_removes_stale_output_and_recombines(tmp_path):
+    write_workspace(tmp_path, {"a": "aa", "b": "bb", "c": "cc"})
+    builder = IncrementalBuilder(make_graph, root=tmp_path)
+    builder.build(echo=False)
+    assert (tmp_path / "build/all.txt").read_text() == "AABBCC"
+
+    (tmp_path / "src/c.txt").unlink()
+    result = builder.build(echo=False)
+    assert result.success
+    # The stale output is gone and the combined output matches a clean build.
+    assert not (tmp_path / "build/upper/c.txt").exists()
+    assert (tmp_path / "build/all.txt").read_text() == "AABB"
+    # The deletion was a real, visible node in the plan.
+    rm_nodes = [n for n in result.plan.nodes if n.label.startswith("rm ")]
+    assert len(rm_nodes) == 1
+    assert "build/upper/c.txt" in rm_nodes[0].label
+    # Surviving members stayed fresh; only the combine reran.
+    counts = runs(tmp_path)
+    assert counts["upper:src/a.txt"] == 1
+    assert counts["upper:src/b.txt"] == 1
+    assert counts["combine"] == 2
+
+    # Next build: membership history is settled, nothing to delete or run.
+    third = builder.build(echo=False)
+    assert third.success
+    assert not any(n.label.startswith("rm ") for n in third.plan.nodes)
+    assert runs(tmp_path) == counts
+
+
+def test_readded_source_rebuilds_without_deletion(tmp_path):
+    write_workspace(tmp_path, {"a": "aa", "b": "bb"})
+    builder = IncrementalBuilder(make_graph, root=tmp_path)
+    builder.build(echo=False)
+    (tmp_path / "src/b.txt").unlink()
+    builder.build(echo=False)
+    write_workspace(tmp_path, {"a": "aa", "b": "bb"})  # b comes back
+    result = builder.build(echo=False)
+    assert result.success
+    assert not any(n.label.startswith("rm ") for n in result.plan.nodes)
+    assert (tmp_path / "build/all.txt").read_text() == "AABB"
+
+
 def test_metadata_file_is_written(tmp_path):
     write_workspace(tmp_path, {"a": "x"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)

@@ -69,6 +69,26 @@ class ExternalProcessAction(Action):
         return f"ExternalProcessAction({self.label!r})"
 
 
+class DeleteFilesAction(Action):
+    """Deletion of stale outputs, executed natively by the scheduler.
+
+    Never user-authored: these nodes are proposed by capability layers
+    (e.g. incremental deleted-source cleanup) and inserted through the
+    scheduler's insertion channel. Paths are logical, workspace-relative,
+    and resolve through ``ctx.output_root`` like any declared output.
+    """
+
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = list(paths)
+
+    @property
+    def label(self) -> str:
+        return "rm " + " ".join(self.paths)
+
+    def __repr__(self) -> str:
+        return f"DeleteFilesAction({self.paths!r})"
+
+
 class ExpandAll(Action):
     """Repeated work over a data collection.
 

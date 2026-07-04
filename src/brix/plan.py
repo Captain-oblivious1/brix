@@ -38,6 +38,18 @@ class NodeState(enum.Enum):
     SKIPPED = "skipped"
 
 
+class EdgeTrigger(enum.Enum):
+    """When an edge lets its target proceed.
+
+    ON_SUCCESS is the default: the source must be DONE, and a failure
+    cascades a skip. ON_COMPLETION fires whether the source succeeded or
+    failed — for cleanup that must run *because* its trigger failed.
+    """
+
+    ON_SUCCESS = "on-success"
+    ON_COMPLETION = "on-completion"
+
+
 _STATE_RANK = {
     NodeState.PENDING: 0,
     NodeState.RUNNING: 1,
@@ -60,6 +72,7 @@ class ExecutionEdge:
     from_id: int
     to_id: int
     reason: str
+    trigger: EdgeTrigger = EdgeTrigger.ON_SUCCESS
 
 
 class NodeStateTable:
@@ -105,10 +118,19 @@ class ExecutionPlan:
         self.nodes.append(node)
         return node
 
-    def add_edge(self, from_id: int, to_id: int, reason: str) -> None:
-        edge = ExecutionEdge(from_id, to_id, reason)
+    def add_edge(
+        self,
+        from_id: int,
+        to_id: int,
+        reason: str,
+        trigger: EdgeTrigger = EdgeTrigger.ON_SUCCESS,
+    ) -> None:
+        edge = ExecutionEdge(from_id, to_id, reason, trigger)
         if edge not in self.edges:
             self.edges.append(edge)
+
+    def incoming(self, node_id: int) -> list[ExecutionEdge]:
+        return [e for e in self.edges if e.to_id == node_id]
 
     def predecessors(self, node_id: int) -> list[ExecutionNode]:
         return [self.nodes[e.from_id] for e in self.edges if e.to_id == node_id]

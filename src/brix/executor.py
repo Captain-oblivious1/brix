@@ -16,16 +16,46 @@ from __future__ import annotations
 import os
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
-from .actions import ExpandAll, ExternalProcessAction
+from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
 from .data import GlobData, RegexData
 from .layers import BuildLayer, NodeContext, NodeRunner
-from .plan import ExecutionNode, ExecutionPlan, NodeKind, NodeState, NodeStateTable
+from .plan import (
+    EdgeTrigger,
+    ExecutionNode,
+    ExecutionPlan,
+    NodeKind,
+    NodeState,
+    NodeStateTable,
+)
 from .process import ProcessResult, run_process
 from .render import RenderError, prepare_output_dirs, render_command
+
+_TERMINAL = {NodeState.DONE, NodeState.FAILED, NodeState.SKIPPED}
+
+
+def _run_delete(action: DeleteFilesAction, ctx: NodeContext) -> ProcessResult:
+    deleted: list[str] = []
+    try:
+        for rel in action.paths:
+            target = ctx.output_root / rel
+            if target.exists():
+                target.unlink()
+                deleted.append(rel)
+    except OSError as exc:
+        return ProcessResult(
+            action_name=action.label, command=action.label, exit_code=1,
+            stderr=f"brix: cannot delete: {exc}",
+        )
+    return ProcessResult(
+        action_name=action.label, command=action.label, exit_code=0,
+        stdout="".join(f"deleted {p}\n" for p in deleted),
+    )
 
 
 def _run_process_node(node: ExecutionNode, ctx: NodeContext) -> ProcessResult:
     action = node.action
+    if isinstance(action, DeleteFilesAction):
+        return _run_delete(action, ctx)
     assert isinstance(action, ExternalProcessAction)
     try:
         prepare_output_dirs(action, ctx)
@@ -127,10 +157,25 @@ def execute(
             print(message)
 
     def ready(node_id: int) -> bool:
-        return all(states.status(p.id) is NodeState.DONE for p in plan.predecessors(node_id))
+        for edge in plan.incoming(node_id):
+            status = states.status(edge.from_id)
+            if edge.trigger is EdgeTrigger.ON_COMPLETION:
+                if status not in (NodeState.DONE, NodeState.FAILED):
+                    return False
+            elif status is not NodeState.DONE:
+                return False
+        return True
+
+    def _success_successor_ids(node_id: int) -> list[int]:
+        return [
+            e.to_id
+            for e in plan.edges
+            if e.from_id == node_id and e.trigger is EdgeTrigger.ON_SUCCESS
+        ]
 
     def cascade_skip(from_id: int, why: str) -> None:
-        stack = [s.id for s in plan.successors(from_id)]
+        # Only on-success edges cascade; on-completion successors still run.
+        stack = _success_successor_ids(from_id)
         while stack:
             nid = stack.pop()
             if states.status(nid) is not NodeState.PENDING:
@@ -138,7 +183,19 @@ def execute(
             states.advance(nid, NodeState.SKIPPED)
             pending.discard(nid)
             say(f"skip: {plan.nodes[nid].label} ({why})")
-            stack.extend(s.id for s in plan.successors(nid))
+            stack.extend(_success_successor_ids(nid))
+
+    def insert_proposals(source: ExecutionNode, proposals) -> None:
+        """The insertion channel: the scheduler inserts and wires proposed
+        nodes, ordered before the source expansion's consumers."""
+        consumer_ids = [s.id for s in plan.successors(source.id)]
+        for proposal in proposals:
+            label = proposal.label or getattr(proposal.action, "label", repr(proposal.action))
+            new_node = plan.add_node(NodeKind.PROCESS, label, proposal.action)
+            for cid in consumer_ids:
+                plan.add_edge(new_node.id, cid, f"cleanup proposed at [{source.id}]")
+            pending.add(new_node.id)
+            say(f"insert: {label}")
 
     for layer in layers:
         layer.on_build_begin(plan, ctx)
@@ -162,10 +219,12 @@ def execute(
                         cascade_skip(nid, f"upstream failed: {node.label}")
                         continue
                     states.advance(nid, NodeState.DONE)
-                    for layer in layers:
-                        layer.on_collection_realized(node, members, ctx)
                     pending.update(c.id for c in children)
                     say(f"{node.label} -> {len(children)} action(s)")
+                    for layer in layers:
+                        proposals = layer.on_collection_realized(node, members, ctx)
+                        if proposals:
+                            insert_proposals(node, proposals)
                 else:
                     states.advance(nid, NodeState.RUNNING)
                     future = pool.submit(_stacked_runner(node, layers), ctx)
@@ -191,11 +250,23 @@ def execute(
                                 say(stream.rstrip("\n"))
                         cascade_skip(nid, f"upstream failed: {node.label}")
             elif not scheduled and pending:
+                # Judge every stuck node against the same snapshot: advancing
+                # one to SKIPPED must not soften the verdict on the next.
+                verdicts = {
+                    nid: all(
+                        states.status(e.from_id) in _TERMINAL for e in plan.incoming(nid)
+                    )
+                    for nid in pending
+                }
                 for nid in sorted(pending):
                     node = plan.nodes[nid]
                     states.advance(nid, NodeState.SKIPPED)
-                    errors.append(f"{node.label}: unreachable (dependency cycle?)")
-                    say(f"skip: {node.label} (unreachable — dependency cycle?)")
+                    if verdicts[nid]:
+                        # e.g. an on-completion successor of a skipped node
+                        say(f"skip: {node.label} (upstream skipped)")
+                    else:
+                        errors.append(f"{node.label}: unreachable (dependency cycle?)")
+                        say(f"skip: {node.label} (unreachable — dependency cycle?)")
                 pending.clear()
 
     success = not errors

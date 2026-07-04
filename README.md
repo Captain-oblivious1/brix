@@ -23,8 +23,8 @@ user-facing build language.
 ## Current state
 
 Minimal prototype (spec steps 1–10 plus dependency inference), the
-build-layer seams, and incremental fingerprint-skip are implemented and
-working. 55 tests pass.
+build-layer seams, and the full IncrementalBuilder (fingerprint skip +
+deleted-source cleanup) are implemented and working. 60 tests pass.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -41,29 +41,32 @@ working. 55 tests pass.
 - `BuildLayer` / `NodeContext` seams: per-node `around_node` middleware
   stack plus lifecycle events in the executor; scheduler-owned monotone
   `NodeStateTable` (node definitions are frozen)
+- `IncrementalBuilder`: fingerprint-fresh nodes complete with their previous
+  result (stdout replay included); deleted sources produce layer-proposed
+  `rm` nodes through the insertion channel; failed outputs are removed
+- Edge trigger modes: `on-success` (default, cascades skips) and
+  `on-completion` (fires after success *or* failure)
 
-Not yet implemented: the real layers (incremental/cache/atomic), status
-reporting, typed language actions, CLI helpers.
+Not yet implemented: cache and atomic layers, status reporting, typed
+language actions, CLI helpers.
 
 ## TODO (priority order)
 
-1. **IncrementalBuilder, part 2: cleanup** — membership history diffing,
-   layer-proposed deletion nodes through the scheduler's insertion channel,
-   `on-completion` edge trigger mode. (Part 1 — fingerprints and skip — is
-   done; see Completed.)
-2. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
+1. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
    stdout/stderr replay; cached-failure replay.
-3. **AtomicBuilder** — staging via `ctx.output_root`, commit in
-   `on_build_end`, crash recovery in `on_build_begin`.
-4. **Status reporting** — stale files/actions, missing outputs,
+2. **AtomicBuilder** — staging via `ctx.output_root`, commit in
+   `on_build_end`, crash recovery in `on_build_begin`. Includes making
+   downstream *inputs* resolve through staging (today only outputs map
+   through `ctx.output_root`).
+3. **Status reporting** — stale files/actions, missing outputs,
    membership-change staleness, staged-but-uncommitted state, interrupted
    atomic build needing recovery, cached failures. Build-state inspection,
    not a dry-run mode.
-5. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
+4. **Typed language actions** — `brix.cpp` / `brix.java` helpers that lower
    to the generic model (deferred by Duane as low-risk).
-6. **CLI helpers** — `build`, `status`, `clean`, `graph`; alias→target
+5. **CLI helpers** — `build`, `status`, `clean`, `graph`; alias→target
    mapping. Separate from `Graph` and builders.
-7. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+6. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
 Further out (from the original spec, unscheduled): graph visualization,
@@ -105,6 +108,14 @@ in-memory and database-backed data expressions.
   forgotten and their outputs deleted (clean-build parity). Tests: rerun
   only what changed, byte-identical rerun keeps downstream fresh, value
   changes refingerprint, failures never replay as fresh.
+- **IncrementalBuilder part 2 — deleted-source cleanup**: membership
+  history per collection (applied to metadata only on build success);
+  vanished members produce `DeleteFilesAction` nodes proposed by the layer
+  and inserted/wired by the scheduler (`NodeProposal` — the insertion
+  channel is real code now), ordered before the collection's consumers.
+  Edge trigger modes landed: `on-success` (default; cascades skips) vs
+  `on-completion` (fires after success or failure — for failure-triggered
+  cleanup). Deletions run through the layer stack like any node.
 
 ## Design rules
 
@@ -365,13 +376,12 @@ inputs/outputs; collections realize implicitly at expansion/render time.
 categories; whether data become first-class plan nodes is an open modeling
 question — the ground rules in design rule 4 cover them either way.)
 
-Current shape (per `docs/build-layers.html`; edge trigger modes are still
-to come with the incremental layer):
+Current shape (per `docs/build-layers.html`):
 
 ```text
 ExecutionPlan            # append-only
   nodes: [ExecutionNode] # definitions frozen at insertion
-  edges: from -> to, reason        # future: trigger on-success | on-completion
+  edges: from -> to, reason, trigger: on-success | on-completion
 
 NodeStateTable           # scheduler-owned
   node id -> status, result        # pending -> running -> done|failed|skipped

@@ -5,14 +5,15 @@ This is the minimal prototype: data expressions, generic process actions,
 runtime ExpandAll expansion, and a clean builder.
 """
 
-from .actions import ExpandAll, ExternalProcessAction
+from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
 from .builders import BuildResult, CleanBuilder, IncrementalBuilder
 from .data import DataExpr, DataFactory, DataUnion
 from .graph import Graph
 from .incremental import IncrementalLayer
-from .layers import BuildLayer, NodeContext
+from .layers import BuildLayer, NodeContext, NodeProposal
 from .metadata import BuildMetadata, TimeAndHashChangeDetector
 from .plan import (
+    EdgeTrigger,
     ExecutionEdge,
     ExecutionNode,
     ExecutionPlan,
@@ -30,6 +31,8 @@ __all__ = [
     "DataExpr",
     "DataFactory",
     "DataUnion",
+    "DeleteFilesAction",
+    "EdgeTrigger",
     "ExecutionEdge",
     "ExecutionNode",
     "ExecutionPlan",
@@ -40,6 +43,7 @@ __all__ = [
     "IncrementalLayer",
     "NodeContext",
     "NodeKind",
+    "NodeProposal",
     "NodeState",
     "NodeStateTable",
     "ProcessResult",

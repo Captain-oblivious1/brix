@@ -14,10 +14,24 @@ from typing import TYPE_CHECKING, Callable
 from .process import ProcessResult
 
 if TYPE_CHECKING:
+    from .actions import Action
     from .builders import BuildResult
     from .plan import ExecutionNode, ExecutionPlan
 
 NodeRunner = Callable[["NodeContext"], ProcessResult]
+
+
+@dataclass
+class NodeProposal:
+    """Work a layer proposes; the scheduler inserts and wires it.
+
+    This is the insertion channel from the layer side: layers never touch
+    plan structure. Proposals returned from ``on_collection_realized`` are
+    ordered before the collection's consumers.
+    """
+
+    action: "Action"
+    label: str | None = None
 
 
 @dataclass
@@ -57,8 +71,14 @@ class BuildLayer:
 
     def on_collection_realized(
         self, node: "ExecutionNode", members: list[str], ctx: NodeContext
-    ) -> None:
-        """An expansion point's membership just became known."""
+    ) -> "list[NodeProposal] | None":
+        """An expansion point's membership just became known.
+
+        May return node proposals (e.g. stale-output deletions); the
+        scheduler inserts them and orders them before the collection's
+        consumers.
+        """
+        return None
 
     def on_build_end(self, result: "BuildResult", ctx: NodeContext) -> None:
         """Build finished (e.g. commit staged outputs if everything succeeded)."""
