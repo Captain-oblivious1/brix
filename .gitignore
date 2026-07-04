@@ -5,3 +5,5 @@ __pycache__/
 dist/
 .venv/
 examples/*/build/
+examples/incremental_demo/runs.log
+examples/incremental_demo/src/

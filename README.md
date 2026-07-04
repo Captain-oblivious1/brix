@@ -116,6 +116,8 @@ in-memory and database-backed data expressions.
   Edge trigger modes landed: `on-success` (default; cascades skips) vs
   `on-completion` (fires after success or failure — for failure-triggered
   cleanup). Deletions run through the layer stack like any node.
+  Runnable demo: `examples/incremental_demo/` — four builds printing how
+  many processes actually spawned (4 / 0 / 2 / 1).
 
 ## Design rules
 
@@ -502,6 +504,7 @@ python3 -m pytest                        # run the test suite
 python3 examples/hello_text/brix.py      # portable text-processing demo
 python3 examples/raw_cpp/brix.py         # compile+link demo (needs c++)
 python3 examples/layers_demo/brix.py     # watch the BuildLayer stack work
+python3 examples/incremental_demo/brix.py  # build/rebuild/edit/delete-a-source
 ```
 
 A build file looks like:
