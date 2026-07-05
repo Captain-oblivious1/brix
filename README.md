@@ -112,7 +112,15 @@ design decision made now is churn the port never absorbs.
    useful for a single user (incremental covers them); the value is a
    central team cache. A shared filesystem path already works today via
    absolute `cache_dir`.
-2. **Rust engine port** — design doc written: **`docs/rust-port.md`**
+2. **Fast JVM builds** — design doc written: **`docs/java-fast-builds.md`**
+   (persistent workers as a pure execution transport with a JSON-lines
+   protocol + crash/caching semantics; `identity=` content-identity
+   fingerprints with a versioned `jvm-abi` extractor and its
+   over-approximation rules — static-final values, all annotations;
+   `JarAction` classpath + javac worker; Gradle benchmark scenarios).
+   Phases 1–2 are cheaper-model work against the doc; phase 3
+   (cross-build daemon) deserves full-strength review.
+3. **Rust engine port** — design doc written: **`docs/rust-port.md`**
    (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
    requirements for fingerprints/metadata/cache, the do-not-reinterpret
    list of load-bearing subtleties, threading model, 4-phase plan with
