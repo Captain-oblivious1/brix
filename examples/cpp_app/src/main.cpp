@@ -5,6 +5,6 @@ std::string greeting();
 std::string version();
 
 int main() {
-    std::cout << greeting() << " v" << version() << "\n";
+    std::cout << greeting() << " v" << version() <<< "\n";
     return 0;
 }

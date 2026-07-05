@@ -231,6 +231,12 @@ class IncrementalLayer(BuildLayer):
         proposals: list[NodeProposal] = []
         for member in removed:
             vanished = action.child.substitute({action.element_name: member})
+            if not isinstance(vanished, ExternalProcessAction):
+                # A vanished *nested expansion* (e.g. a whole removed video):
+                # its inner membership was keyed by the substituted collection,
+                # so recovering its outputs needs metadata archaeology we don't
+                # do yet. Known gap; the consumer still refingerprints.
+                continue
             self.metadata.forget_action(action_key(vanished))
             stale_outputs = [
                 atom.path

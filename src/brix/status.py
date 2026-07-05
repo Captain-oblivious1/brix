@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .actions import ExpandAll
 from .data import FileData
 from .graph import Graph
 from .incremental import (
@@ -167,34 +168,44 @@ def compute_status(
     node_entries: dict[int, list[int]] = {}  # plan node id -> indices in report.actions
     node_dirty: dict[int, bool] = {}
 
-    for node in plan.nodes:
+    def walk_expand(expand, label: str) -> tuple[list[int], bool]:
+        """Realize an expansion point as of right now, recursing into
+        nested expansion points; returns (action indices, dirty)."""
         indices: list[int] = []
         dirty = False
-        if node.kind is NodeKind.EXPAND:
-            expand = node.action
-            members = _collection_members(expand, ctx)
-            previous = metadata.membership(membership_key(expand)) or []
-            for member in sorted(set(previous) - set(members)):
-                vanished = expand.child.substitute({expand.element_name: member})
-                paths = [
-                    atom.path
-                    for expr in vanished.outputs.values()
-                    for atom in expr.atoms()
-                    if isinstance(atom, FileData) and atom.pattern.is_concrete
-                ]
-                report.pending_deletions.append(
-                    PendingDeletion(expansion=node.label, member=member, paths=paths)
-                )
-                dirty = True
-            for member in members:
-                concrete = expand.child.substitute({expand.element_name: member})
+        members = _collection_members(expand, ctx)
+        previous = metadata.membership(membership_key(expand)) or []
+        for member in sorted(set(previous) - set(members)):
+            vanished = expand.child.substitute({expand.element_name: member})
+            paths = [
+                atom.path
+                for expr in getattr(vanished, "outputs", {}).values()
+                for atom in expr.atoms()
+                if isinstance(atom, FileData) and atom.pattern.is_concrete
+            ]
+            report.pending_deletions.append(
+                PendingDeletion(expansion=label, member=member, paths=paths)
+            )
+            dirty = True
+        for member in members:
+            concrete = expand.child.substitute({expand.element_name: member})
+            if isinstance(concrete, ExpandAll):  # nested expansion point
+                sub_indices, sub_dirty = walk_expand(concrete, concrete.label)
+                indices.extend(sub_indices)
+                dirty = dirty or sub_dirty
+            else:
                 status = _action_status(concrete, ctx, detector, metadata)
                 indices.append(len(report.actions))
                 report.actions.append(status)
                 dirty = dirty or not status.is_fresh
+        return indices, dirty
+
+    for node in plan.nodes:
+        if node.kind is NodeKind.EXPAND:
+            indices, dirty = walk_expand(node.action, node.label)
         else:
             status = _action_status(node.action, ctx, detector, metadata)
-            indices.append(len(report.actions))
+            indices = [len(report.actions)]
             report.actions.append(status)
             dirty = not status.is_fresh
         node_entries[node.id] = indices
