@@ -79,7 +79,11 @@ end-to-end test that skips when no JDK is on PATH).
   `NodeContext` overlay makes every read see the workspace as it will look
   after commit; crash mid-commit is journaled (COMMIT marker) and finished
   by the next build; failed-build staging is inspectable via status, then
-  discarded
+  discarded. **Held staging**: `build --stage` (API: `build(hold=True)`)
+  builds fully but keeps outputs in staging for review — `status` shows
+  them awaiting commit (freshness read through the overlay), `commit`
+  applies, `discard` drops; a plain build on top composes and commits
+  everything
 - `CacheBuilder(inner, cache_dir=...)`: results shared across workspaces
   and clean checkouts, keyed by the same `action_fingerprint` incremental
   records; stdout/stderr replay, `source="cache"` provenance, cached-
@@ -98,16 +102,7 @@ end-to-end test that skips when no JDK is on PATH).
 Duane's priority: settle Python semantics before the Rust port — every
 design decision made now is churn the port never absorbs.
 
-1. **Held staging / review-before-commit** — `build --stage` builds fully
-   but leaves outputs in staging (workspace untouched); `status` reports
-   the held staging; `commit` runs the existing journaled commit step;
-   `discard` throws it away. Use case (Duane): review what an overnight
-   build produced before it replaces the good copies. Decision leaning:
-   a subsequent `build` builds *on top of* held staging (the NodeContext
-   overlay already reads through it) rather than refusing. Needs a marker
-   distinguishing held staging from failed-build leftovers, which
-   `on_build_begin` currently discards.
-2. **Pluggable cache store** — `CacheBuilder(inner, store=...)` accepting
+1. **Pluggable cache store** — `CacheBuilder(inner, store=...)` accepting
    any object with the three-method store protocol (`load` / `restore` /
    `store`) as an alternative to `cache_dir`; enables remote backends
    (Nexus/HTTP GET-PUT) and a two-tier store (local disk in front of
@@ -117,7 +112,7 @@ design decision made now is churn the port never absorbs.
    useful for a single user (incremental covers them); the value is a
    central team cache. A shared filesystem path already works today via
    absolute `cache_dir`.
-3. **Rust engine port** — design doc written: **`docs/rust-port.md`**
+2. **Rust engine port** — design doc written: **`docs/rust-port.md`**
    (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
    requirements for fingerprints/metadata/cache, the do-not-reinterpret
    list of load-bearing subtleties, threading model, 4-phase plan with
@@ -286,6 +281,18 @@ class tracking).
   `AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))`. Wired into the
   animation project (`cache_dir="output/.brix-cache"`; note `make clean`
   rm -rf's output/ and takes the cache with it — brix clean doesn't).
+- **Held staging / review-before-commit** (`atomic.py`, `builders.py`,
+  `status.py`, `cli.py`): `build --stage` / `AtomicBuilder.build(hold=True)`
+  writes a HELD marker instead of committing; `commit` (CLI or
+  `AtomicBuilder.commit()`) runs the journaled commit, `discard` drops
+  staging. Held staging survives `on_build_begin` and is built on top of
+  (the overlay reads it as if committed; status judges freshness the
+  same way). The HELD marker is *consumed* when a new build starts on
+  top — the new build's outcome decides re-held / committed / debris —
+  so a failed build's mixed tree can never commit (`commit` refuses
+  anything without a HELD or COMMIT marker; `discard` refuses an
+  interrupted commit, which must finish). Use case: review overnight
+  renders before they replace good copies.
 
 ## Design rules
 

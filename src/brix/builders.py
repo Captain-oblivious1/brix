@@ -148,11 +148,28 @@ class AtomicBuilder:
     def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
         return self.inner.plan(targets)
 
-    def layers(self) -> list:
+    def layers(self, hold: bool = False) -> list:
         from .atomic import AtomicLayer
 
-        return [*self.inner.layers(), AtomicLayer(self.staging_dir)]
+        return [*self.inner.layers(), AtomicLayer(self.staging_dir, hold=hold)]
 
     def build(self, jobs: int | None = None, reporter=None,
-              targets: list[str] | None = None) -> BuildResult:
-        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
+              targets: list[str] | None = None, hold: bool = False) -> BuildResult:
+        """``hold=True``: build fully but keep outputs in staging for
+        review — the workspace changes only at :meth:`commit`."""
+        return self.plan(targets).run(jobs=jobs, layers=self.layers(hold=hold), reporter=reporter)
+
+    def commit(self) -> tuple[int, int] | None:
+        """Apply held staging to the workspace. None if nothing is staged;
+        (files, deletions) otherwise. Raises ValueError on failed-build
+        staging, which must never reach the workspace."""
+        from .atomic import commit_staging
+
+        return commit_staging(self.root, self.root / self.staging_dir)
+
+    def discard(self) -> int | None:
+        """Throw staging away, workspace untouched. None if nothing is
+        staged; the number of files discarded otherwise."""
+        from .atomic import discard_staging
+
+        return discard_staging(self.root / self.staging_dir)

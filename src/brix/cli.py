@@ -8,11 +8,16 @@ metadata. A project's build file ends with:
 
 Commands (default: build):
 
-    brix.py [build] [-j N] [--silent | --quiet-replays]
+    brix.py [build] [-j N] [--silent | --quiet-replays] [--stage]
     brix.py status      exit 0 = everything fresh, 1 = work pending
     brix.py errors      replay last recorded failures; exit 1 if any
+    brix.py commit      apply staging held by `build --stage`
+    brix.py discard     throw held/failed staging away
     brix.py clean       delete built outputs and metadata
     brix.py graph       print the execution plan's structure
+
+`build --stage` builds fully but holds outputs in staging for review —
+the workspace changes only at `commit`. Requires an atomic builder.
 
 Projects can add build-then-act subcommands via ``commands=`` — each
 builds its targets first, then hands the built paths to a project
@@ -30,7 +35,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from .builders import IncrementalBuilder
+from .builders import AtomicBuilder, IncrementalBuilder
 from .data import FileData, GlobData
 from .metadata import BuildMetadata
 from .plan import NodeKind
@@ -73,10 +78,17 @@ def main(
             "--quiet-replays", action="store_true", help="print only real work"
         )
 
-    add_build_options(subparsers.add_parser("build", help="build (the default)"), "*")
+    build_parser = subparsers.add_parser("build", help="build (the default)")
+    add_build_options(build_parser, "*")
+    build_parser.add_argument(
+        "--stage", action="store_true",
+        help="hold outputs in staging for review; `commit` applies them",
+    )
     status_parser = subparsers.add_parser("status", help="what would build, and why")
     status_parser.add_argument("targets", nargs="*")
     subparsers.add_parser("errors", help="show last recorded failures")
+    subparsers.add_parser("commit", help="apply staging held by `build --stage`")
+    subparsers.add_parser("discard", help="throw held/failed staging away")
     subparsers.add_parser("clean", help="delete built outputs and metadata")
     subparsers.add_parser("graph", help="print the execution plan structure")
     for name in commands or {}:
@@ -107,9 +119,15 @@ def main(
             builder = builder_factory()
         else:
             builder = IncrementalBuilder(graph_supplier, root=root, metadata_dir=metadata_dir)
+        kwargs = {}
+        if getattr(args, "stage", False):
+            if not isinstance(builder, AtomicBuilder):
+                print("brix: --stage requires an AtomicBuilder (outermost)", file=sys.stderr)
+                return 2
+            kwargs["hold"] = True
         try:
             targets = resolve_targets()
-            result = builder.build(jobs=args.jobs, reporter=reporter, targets=targets)
+            result = builder.build(jobs=args.jobs, reporter=reporter, targets=targets, **kwargs)
         except ValueError as exc:
             print(f"brix: {exc}", file=sys.stderr)
             return 2
@@ -148,6 +166,25 @@ def main(
         if not failures:
             print("no recorded failures")
         return 1 if failures else 0
+
+    if command in ("commit", "discard"):
+        builder = builder_factory() if builder_factory is not None else None
+        if not isinstance(builder, AtomicBuilder):
+            print(f"brix: {command} requires an AtomicBuilder (outermost)", file=sys.stderr)
+            return 2
+        try:
+            outcome = builder.commit() if command == "commit" else builder.discard()
+        except ValueError as exc:
+            print(f"brix: {exc}", file=sys.stderr)
+            return 2
+        if outcome is None:
+            print("nothing staged")
+        elif command == "commit":
+            files, deletions = outcome
+            print(f"committed {files} file(s), {deletions} deletion(s)")
+        else:
+            print(f"discarded {outcome} staged file(s)")
+        return 0
 
     if command == "clean":
         removed = _clean(graph_supplier, root, metadata_dir)

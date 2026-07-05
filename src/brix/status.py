@@ -71,6 +71,7 @@ class StatusReport:
     staged_files: list[str] = field(default_factory=list)
     staged_deletions: list[str] = field(default_factory=list)
     interrupted_commit: bool = False
+    held: bool = False  # a successful build is staged, awaiting commit
 
     @property
     def has_staged_state(self) -> bool:
@@ -98,8 +99,9 @@ class StatusReport:
             lines.append(
                 f"{'pending deletion':>27}:  {paths}  (member {d.member!r} left {d.expansion})"
             )
+        staged_state = "staged, awaiting commit" if self.held else "staged, uncommitted"
         for path in self.staged_files:
-            lines.append(f"{'staged, uncommitted':>27}:  {path}")
+            lines.append(f"{staged_state:>27}:  {path}")
         for path in self.staged_deletions:
             lines.append(f"{'staged deletion':>27}:  {path}")
         if self.interrupted_commit:
@@ -112,7 +114,9 @@ class StatusReport:
         summary = ", ".join(f"{n} {state}" for state, n in sorted(counts.items()))
         if self.pending_deletions:
             summary += f", {len(self.pending_deletions)} pending deletion(s)"
-        if self.has_staged_state:
+        if self.held:
+            summary += ", held staging awaiting commit (`commit` to apply, `discard` to drop)"
+        elif self.has_staged_state:
             summary += ", staged state present (failed or interrupted atomic build)"
         lines.append(summary if lines else "nothing to build")
         return "\n".join(lines)
@@ -154,7 +158,7 @@ def compute_status(
     report = StatusReport()
     staging = root / staging_dir
     if staging.exists():
-        from .atomic import COMMIT_MARKER
+        from .atomic import COMMIT_MARKER, HELD_MARKER
 
         add_dir, del_dir = staging / "add", staging / "del"
         if add_dir.exists():
@@ -166,6 +170,12 @@ def compute_status(
                 p.relative_to(del_dir).as_posix() for p in del_dir.rglob("*") if p.is_file()
             )
         report.interrupted_commit = (staging / COMMIT_MARKER).exists()
+        report.held = (staging / HELD_MARKER).exists()
+        if report.held:
+            # Held staging is kept and built on top of, so freshness is
+            # asked the way the next build will: through the overlay.
+            ctx.output_root = add_dir
+            ctx.deletions_root = del_dir
     node_entries: dict[int, list[int]] = {}  # plan node id -> indices in report.actions
     node_dirty: dict[int, bool] = {}
 
