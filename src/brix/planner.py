@@ -80,9 +80,14 @@ def _node_label(action: Action) -> str:
     return label if label is not None else repr(action)
 
 
-def plan_graph(graph: Graph, root: Path) -> ExecutionPlan:
+def plan_graph(graph: Graph, root: Path, targets: list[str] | None = None) -> ExecutionPlan:
+    actions = graph.actions
+    if targets:
+        from .targets import select_actions
+
+        actions = select_actions(actions, targets)
     plan = ExecutionPlan(root=root)
-    for action in graph.actions:
+    for action in actions:
         kind = NodeKind.EXPAND if isinstance(action, ExpandAll) else NodeKind.PROCESS
         plan.add_node(kind, _node_label(action), action)
     for producer in plan.nodes:

@@ -145,8 +145,12 @@ class ExpandAll(Expandable):
     def label(self) -> str:
         return f"expand: {self.child.label}"
 
-    def substitute(self, bindings: dict[str, str]) -> ExpandAll:
-        """Apply *outer* bindings; this expansion's own element stays open."""
+    def substitute(self, bindings: dict[str, str]) -> Expandable:
+        """Apply outer bindings. If they bind this expansion's *own*
+        element (target selection does), the expansion collapses to its
+        substituted child — there is nothing left to expand over."""
+        if self.element_name in bindings:
+            return self.child.substitute(bindings)
         return ExpandAll(
             element_name=self.element_name,
             collection=_substitute_expr(self.collection, bindings),

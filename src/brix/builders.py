@@ -42,14 +42,15 @@ class CleanBuilder:
         self.graph = graph
         self.root = Path(root).resolve()
 
-    def plan(self) -> ExecutionPlan:
-        return plan_graph(self.graph, self.root)
+    def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
+        return plan_graph(self.graph, self.root, targets)
 
     def layers(self) -> list:
         return []
 
-    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
-        return self.plan().run(jobs=jobs, layers=self.layers(), reporter=reporter)
+    def build(self, jobs: int | None = None, reporter=None,
+              targets: list[str] | None = None) -> BuildResult:
+        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
 class IncrementalBuilder:
@@ -71,8 +72,8 @@ class IncrementalBuilder:
         self.root = Path(root).resolve()
         self.metadata_dir = metadata_dir
 
-    def plan(self) -> ExecutionPlan:
-        return plan_graph(self._supplier(), self.root)
+    def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
+        return plan_graph(self._supplier(), self.root, targets)
 
     def layers(self) -> list:
         from .incremental import IncrementalLayer
@@ -83,8 +84,9 @@ class IncrementalBuilder:
         detector = TimeAndHashChangeDetector(self.root, metadata)
         return [IncrementalLayer(metadata, detector)]
 
-    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
-        return self.plan().run(jobs=jobs, layers=self.layers(), reporter=reporter)
+    def build(self, jobs: int | None = None, reporter=None,
+              targets: list[str] | None = None) -> BuildResult:
+        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
 class AtomicBuilder:
@@ -99,13 +101,14 @@ class AtomicBuilder:
         self.staging_dir = staging_dir
         self.root: Path = inner.root
 
-    def plan(self) -> ExecutionPlan:
-        return self.inner.plan()
+    def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
+        return self.inner.plan(targets)
 
     def layers(self) -> list:
         from .atomic import AtomicLayer
 
         return [*self.inner.layers(), AtomicLayer(self.staging_dir)]
 
-    def build(self, jobs: int | None = None, reporter=None) -> BuildResult:
-        return self.plan().run(jobs=jobs, layers=self.layers(), reporter=reporter)
+    def build(self, jobs: int | None = None, reporter=None,
+              targets: list[str] | None = None) -> BuildResult:
+        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)

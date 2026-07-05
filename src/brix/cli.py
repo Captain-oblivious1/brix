@@ -41,22 +41,28 @@ def main(
     metadata_dir: str | Path = "build/.brix",
     staging_dir: str | Path = "build/staging",
     builder_factory=None,
+    aliases: dict[str, str | list[str]] | None = None,
 ) -> int:
     """``builder_factory`` (optional): zero-argument callable returning the
     builder to use for ``build`` — e.g. the full
     ``AtomicBuilder(IncrementalBuilder(...))`` stack. Defaults to a plain
-    ``IncrementalBuilder``."""
+    ``IncrementalBuilder``.
+
+    ``aliases`` (optional): target shorthands — ``{"wealth":
+    "output/videos/wealth.mpg"}`` lets users say ``build wealth``."""
     parser = argparse.ArgumentParser(prog="brix.py")
     commands = parser.add_subparsers(dest="command")
 
     build_parser = commands.add_parser("build", help="build (the default)")
+    build_parser.add_argument("targets", nargs="*", help="output paths or aliases; default: everything")
     build_parser.add_argument("-j", "--jobs", type=int, default=None)
     quietness = build_parser.add_mutually_exclusive_group()
     quietness.add_argument("--silent", action="store_true", help="no output; exit code only")
     quietness.add_argument(
         "--quiet-replays", action="store_true", help="print only real work"
     )
-    commands.add_parser("status", help="what would build, and why")
+    status_parser = commands.add_parser("status", help="what would build, and why")
+    status_parser.add_argument("targets", nargs="*")
     commands.add_parser("errors", help="show last recorded failures")
     commands.add_parser("clean", help="delete built outputs and metadata")
     commands.add_parser("graph", help="print the execution plan structure")
@@ -68,6 +74,13 @@ def main(
     command = args.command
     root = Path(root).resolve()
 
+    def resolve_targets() -> list[str] | None:
+        resolved: list[str] = []
+        for target in getattr(args, "targets", []):
+            expansion = (aliases or {}).get(target, target)
+            resolved.extend([expansion] if isinstance(expansion, str) else expansion)
+        return resolved or None
+
     if command == "build":
         if args.silent:
             reporter = None
@@ -77,13 +90,25 @@ def main(
             builder = builder_factory()
         else:
             builder = IncrementalBuilder(graph_supplier, root=root, metadata_dir=metadata_dir)
-        result = builder.build(jobs=args.jobs, reporter=reporter)
+        try:
+            result = builder.build(jobs=args.jobs, reporter=reporter, targets=resolve_targets())
+        except ValueError as exc:
+            print(f"brix: {exc}", file=sys.stderr)
+            return 2
         return 0 if result.success else 1
 
     if command == "status":
-        report = compute_status(
-            graph_supplier, root=root, metadata_dir=metadata_dir, staging_dir=staging_dir
-        )
+        try:
+            report = compute_status(
+                graph_supplier,
+                root=root,
+                metadata_dir=metadata_dir,
+                staging_dir=staging_dir,
+                targets=resolve_targets(),
+            )
+        except ValueError as exc:
+            print(f"brix: {exc}", file=sys.stderr)
+            return 2
         print(report.render())
         return 0 if report.is_clean else 1
 

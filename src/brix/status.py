@@ -141,10 +141,11 @@ def compute_status(
     root: str | Path = ".",
     metadata_dir: str | Path = "build/.brix",
     staging_dir: str | Path = "build/staging",
+    targets: list[str] | None = None,
 ) -> StatusReport:
     graph: Graph = graph_supplier() if callable(graph_supplier) else graph_supplier
     root = Path(root).resolve()
-    plan = plan_graph(graph, root)
+    plan = plan_graph(graph, root, targets)
     metadata = BuildMetadata(root, metadata_dir)
     metadata.load()
     detector = TimeAndHashChangeDetector(root, metadata)

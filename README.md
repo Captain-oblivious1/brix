@@ -64,6 +64,12 @@ end-to-end test that skips when no JDK is on PATH).
   failed last build / outdated upstream / pending deletions) without
   building; `brix.py errors` replays recorded failure diagnostics;
   `build`, `clean`, `graph` round out the CLI
+- Target selection: `build`/`status` take output paths or aliases
+  (`./brix.py build wealth`); demand-driven backward selection with
+  binding propagation constrains expansions (targeting one video never
+  realizes the others' scenes), make's shortest-stem rule resolves
+  ambiguous producers, and targeted builds share incremental records
+  with full builds
 - `AtomicBuilder(inner, staging_dir=...)`: outputs and deletions stage
   under `build/staging/` and commit only if the whole build succeeds; the
   `NodeContext` overlay makes every read see the workspace as it will look
@@ -210,8 +216,21 @@ class tracking).
   Project CLI flags need no brix feature: `parse_known_args()` in the
   project's brix.py, rest to `cli.main(argv=...)`, flags become
   fingerprinted `data.value` inputs. Still to come from that project:
-  pluggable change detectors and a post-run `DependencyScanner` hook
-  (gcc -MD style discovered dependencies).
+  pluggable change detectors, a post-run `DependencyScanner` hook
+  (gcc -MD style discovered dependencies; the scenes reference audio
+  files), and workspace-scan ignore rules (regex collections rglob venv/;
+  no-op animation rebuild spends ~15-20s fingerprinting).
+- **Target selection** (`src/brix/targets.py`): `select_actions` matches
+  target paths against output patterns, extracts bindings
+  (`output/videos/wealth.mpg` vs `{video}.mpg` → `video=wealth`), and
+  substitutes them backward through the graph — an ExpandAll whose own
+  element gets bound *collapses to its substituted child*. Ambiguity is
+  resolved by make's shortest-stem rule (without it, `{video}.mpg`
+  matching `wealth.raw.mpg` as `video=wealth.raw` manufactures an endless
+  `.raw.raw...` chain — found live on the animation project). CLI: `build`
+  and `status` accept targets and `aliases=`; unknown targets exit 2.
+  Verified on the animation project: `./brix.py build wealth` plans only
+  that video's 12-node chain and replays against full-build records.
 
 ## Design rules
 
