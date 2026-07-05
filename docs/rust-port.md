@@ -1,0 +1,296 @@
+# Rust engine port — design
+
+This document is the execution contract for porting the brix engine to
+Rust. It is written so that a model (or person) who did **not** design
+brix can carry out the port without reinterpreting anything. Read it with
+`README.md` (the spec) and treat `tests/` as the acceptance suite.
+
+**Prime directive: the Python test suite is the spec.** The tests run
+unchanged against the Python API throughout the port. If a behavior seems
+odd, it is load-bearing until proven otherwise — check the
+"do-not-reinterpret" list below before "fixing" anything. When Rust and
+this doc disagree with the tests, the tests win.
+
+## Goals and non-goals
+
+- One Rust core (`brix-core`) that the Python API wraps today and a JS/TS
+  API wraps later. Python remains the user-facing build language; project
+  `brix.py` files do not change at all.
+- Real parallelism: the scheduler and hashing escape the GIL.
+- Non-goal: changing any semantics. The port is a re-implementation of
+  fixed behavior, not a redesign. No new features ride along.
+- Non-goal (v1): supporting user-defined `Action`/`Expandable` subclasses
+  from Python. The library's action types (`ExternalProcessAction`,
+  `ExpandAll`, `DeleteFilesAction`) are the supported vocabulary;
+  `cpp.py`/`java.py` sugar already lowers to these in Python before the
+  boundary, so it keeps working unchanged.
+
+## Crate layout
+
+```
+rust/
+  brix-core/        pure Rust, no PyO3 anywhere (JS/TS reuse depends on this)
+    patterns.rs     PathPattern: match, substitute, overlaps, find
+    data.rs         atom types (File/Glob/Regex/Tool/Value), DataExpr, unions
+    actions.rs      ExternalProcessAction, ExpandAll, DeleteFilesAction,
+                    substitution (the Expandable behavior)
+    graph.rs        logical graph
+    planner.rs      dependency inference, plan lowering, input/output atoms
+    targets.rs      demand-driven selection, binding extraction, shortest stem
+    plan.rs         ExecutionPlan, nodes, edges, triggers, NodeStateTable
+    scheduler.rs    execute(): readiness, cascade, insertion channel, thread pool
+    context.rs      NodeContext overlay (read_path/find/iter_files)
+    layers.rs       BuildLayer trait + incremental / cache / atomic layers
+    fingerprint.rs  action_key, membership_key, action_fingerprint, hashing
+    metadata.rs     metadata.json load/store, TimeAndHashChangeDetector
+    process.rs      shlex split, spawn, capture, ProcessResult
+    render.rs       command/env rendering, output-dir preparation
+    status.rs       compute_status
+  brix-py/          PyO3 bindings only; compiles to the `brix._core` module
+```
+
+Python `src/brix/*.py` shrinks to: the unchanged public API surface
+(class names, constructor signatures, `build()`/`plan()`/`layers()`),
+delegating to `brix._core`. `cli.py`, `report.py` (the Reporter base and
+stock reporters), `cpp.py`, `java.py` stay pure Python.
+
+Use `maturin` for packaging; `pip install -e` must keep working for the
+animation project. Keep the pure-Python engine in-tree until the port is
+complete (see Phasing) — selected by `BRIX_ENGINE=py|rust` (default
+`rust` once phase 3 lands), so every pytest run can be executed against
+both engines during the transition.
+
+## The boundary contract
+
+The boundary is **coarse and data-shaped**, not object-shaped. Python
+never holds references into live Rust scheduler state.
+
+1. **Graph goes in as a value.** Users build the `Graph` with today's
+   Python classes; at `plan()`/`build()` time it lowers to a declarative
+   spec (actions with their name/command/inputs/outputs/env as plain
+   data; atoms tagged by kind). This is a one-way serialization — Rust
+   never calls back into Python to interrogate the graph.
+2. **Configuration goes in as a value.** The builder stack is described
+   by config (incremental: metadata_dir; cache: cache_dir or store
+   handle; atomic: staging_dir; jobs; targets), not by passing layer
+   objects. Builder *classes* stay in Python for API compatibility, but
+   `layers()` composition becomes "which core layers to enable, in what
+   order."
+3. **Results come out as values.** `BuildResult`, `ProcessResult`,
+   `StatusReport` cross as data and are rehydrated into today's Python
+   dataclasses.
+4. **Events stream out through one callback.** Rust emits the reporter
+   events (`build_begin`, `node_started`, `process_started`,
+   `node_completed`, `node_skipped`, `collection_realized`,
+   `node_inserted`, `build_end`) to a single boxed callback; `brix-py`
+   adapts that to the Python `Reporter` object, acquiring the GIL per
+   event. `process_started` is emitted from worker threads (see
+   subtleties); all other events from the scheduler loop. Reporter
+   exceptions must not kill the build: catch, report once to stderr,
+   continue.
+5. **Extension points cross as narrow traits with Python adapters.**
+   These are the only places Rust calls Python, each optional:
+   - `ChangeDetector` (future `IncrementalBuilder(detector=...)`),
+   - `CacheStore` (TODO #2 — `load`/`restore`/`store`; the filesystem
+     store is native Rust, a Python object implementing the three
+     methods gets wrapped),
+   - `DependencyScanner` (future post-run hook).
+   The general `BuildLayer` trait is **Rust-internal**; Python-defined
+   layers are not part of v1's contract.
+
+## What must be byte-compatible
+
+- **`metadata.json`**: same schema, `"version": 1`. Rust must read
+  Python-written metadata and vice versa during the transition. JSON
+  writing: keys sorted, `indent=1` is cosmetic (readers don't care).
+- **Fingerprints and keys are cross-machine cache keys** — this is the
+  hard compatibility requirement. `_digest` is
+  `sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")))`.
+  Rust must reproduce this **byte for byte**: same payload structure,
+  sorted keys, no spaces, and Python's `json` string escaping (escape
+  `"` `\` and control chars as `\uXXXX` for chars < 0x20; non-ASCII
+  passes through — `ensure_ascii=False`? **No**: Python's default is
+  `ensure_ascii=True`, so non-ASCII becomes `\uXXXX` escapes. Match it.)
+  All payload values are strings/lists/dicts/None — no floats, so no
+  float-formatting hazard. Write cross-language golden tests: a fixture
+  file of payloads with the Python-computed digests, asserted from Rust.
+- **Cache store layout**: `<fp[:2]>/<fp>/entry.json` + `files/<n>` blobs,
+  temp-dir-then-rename writes. A Rust build and a Python build sharing
+  one cache directory must interoperate.
+
+## Do not reinterpret (load-bearing subtleties)
+
+Ground rules (from the spec; the scheduler's correctness rests on these):
+
+- The plan is **append-only**; node definitions are frozen after
+  creation; the insertion channel is the *only* way structure grows.
+- `NodeStateTable` transitions are monotone:
+  pending→running→done|failed|skipped. The scheduler owns all state.
+- Layers never touch plan structure or node state; they return results,
+  adjust the context, and propose nodes (`NodeProposal`).
+
+Scheduler:
+
+- Layer stack order: list is innermost-first; the *last* layer wraps
+  outermost. Composition today: `[cache, incremental, atomic]`.
+- Edge triggers: `on-success` (default) cascades SKIPPED through
+  successors on failure; `on-completion` successors run after success
+  *or* failure. The cascade walks only on-success edges.
+- Stuck-node handling: when nothing is running and nothing schedulable,
+  judge **every** stuck node against the same state snapshot before
+  advancing any of them (advancing one to SKIPPED must not soften the
+  verdict on the next); all-terminal predecessors → quiet skip, else
+  "unreachable (dependency cycle?)" error.
+- Runtime expansion: an EXPAND node realizes its collection through the
+  overlay, creates children wired to the parent's predecessors and
+  successors; a nested `ExpandAll` child becomes another EXPAND node.
+  Members are the sorted unique bindings of `element_name`; a collection
+  atom that doesn't bind it is an error.
+- `process_started` fires at the **innermost** point of the stack — only
+  when a real process is about to spawn. A replaying/caching layer that
+  answers without calling inward must prevent the event. It fires on the
+  worker thread.
+- Layer proposals from `on_collection_realized` are inserted ordered
+  *before* the expansion's consumers.
+
+Patterns, targets, substitution:
+
+- Target binding extraction uses probe substitution: fill the need
+  pattern's binding names with `"\x00target\x00"`, match against the
+  producer's output pattern, drop any binding whose value contains the
+  probe. No match → `overlaps()` decides related-but-unprovable (`{}`).
+- **Shortest-stem rule** (make's): among candidate producers for a need,
+  keep only those with minimal total bound-text length; `{}` (unprovable)
+  is infinitely unspecific. Without this, suffix pipelines
+  (`{video}.mpg` vs `wealth.raw.mpg`) diverge into `.raw.raw...` loops.
+- `ExpandAll.substitute(bindings)`: if its own `element_name` is bound,
+  it **collapses to the substituted child** (not a one-element
+  expansion). Otherwise substitute collection + child and keep the
+  ExpandAll shape.
+- `RegexData.substitute`: replace each `(?P<name>...)` group with
+  `re.escape(value)` — the result is a *narrower regex*, not a literal.
+- Actions may be selected multiple times under different bindings (two
+  targets → two constrained instances); dedupe needs by `repr`-identity
+  of the atom, dedupe selections by (action index, sorted bindings).
+
+Fingerprints and incremental:
+
+- `action_key` (structural identity: command template, input/output
+  *shapes*, env shape) vs `action_fingerprint` (content: command, tool
+  identity, input hashes, env values, `ValueData` text). Records are
+  keyed by action_key; freshness compares fingerprints. `ValueData` text
+  is fingerprint material but **not** identity.
+- Tool fingerprint = resolved path (PATH lookup if no `/`) + stat
+  signature (mtime_ns, size), *not* content hash. Missing tool →
+  `[tool, name, None, None]`, still a valid fingerprint.
+- Hash cache: sha256 keyed by absolute path, validated by (mtime_ns,
+  size); persisted in metadata so unchanged files cost one stat.
+  Directories and missing files hash as None (never an error).
+- Freshness = record exists ∧ record.ok ∧ fingerprint equal ∧ recorded
+  output hashes still match **through the overlay** (`ctx.read_path`).
+- Failure handling: outputs of a failed action are **deleted**
+  (clean-build parity; directories left in place), the failure recorded
+  with `ok: false` — never fresh (always reruns) but reported by
+  status/errors with replayed diagnostics.
+- Collection membership is recorded per `membership_key` but applied to
+  metadata **only if the whole build succeeds**; a failed build must
+  re-detect deletions next time. Vanished members propose
+  `DeleteFilesAction` cleanup and forget the vanished action's record;
+  vanished *nested expansions* are skipped (documented gap).
+- Metadata saves at build end (success or failure), atomic
+  write-tmp-then-rename.
+
+Cache:
+
+- Cache layer answers **only stale** nodes (it sits inside incremental).
+  Store only results with `source == "process"`, a real `exit_code`, no
+  signal. Failures are cached with zero outputs and replay as failures.
+  Corrupt/partial entry → treat as miss and fall through to the process.
+  Restores go through `ctx.output_root` and use copy-with-mode (`copy2`)
+  so executables stay executable.
+- Cache and incremental share one change detector per build (hash each
+  file at most once). Cache and atomicity are independent — stack order
+  alone routes restored outputs through staging.
+
+Overlay and atomic:
+
+- Read order: `output_root` shadows `workspace_root`; a deletion marker
+  hides a file unless re-created in staging. `find` merges roots in that
+  order; `iter_files` excludes the staging tree's parent and any path
+  with a `.brix`-prefixed component.
+- Atomic: staging `add/` + `del/`; `DeleteFilesAction` is intercepted by
+  the atomic layer into deletion markers (no workspace touch). Commit:
+  write `COMMIT` marker, copy `add/` into workspace, unlink `del/`
+  targets, remove staging. On build begin: a `COMMIT` marker means a
+  crashed commit of a *successful* build — finish it; staging without a
+  marker is failed-build debris — discard it. (TODO #1, held staging,
+  will add a third state; don't preclude a "held" marker.)
+- Output-directory convention: directories a tool writes into are
+  declared as concrete `data.file` *outputs* (rendered through
+  output_root) and consumed as `data.file` *inputs* (overlay-resolved).
+
+Process execution:
+
+- Command lines are rendered strings split with **shlex rules** (the
+  `shlex` crate matches POSIX mode closely; golden-test the corner cases
+  used in tests: single-quoted `'...'` values containing spaces).
+  Empty/unsplittable command → failed ProcessResult with `brix:` stderr,
+  exit_code None (and therefore never cached).
+- `env=` entries extend and shadow the inherited environment. Negative
+  return code means killed-by-signal: `signal = -rc`, `exit_code = None`.
+- `prepare_output_dirs` creates parent dirs (and declared directory
+  outputs) under `output_root` before spawning.
+
+CLI/status stay in Python but depend on core answers:
+
+- status asks freshness *hypothetically* (never mutates), recursing
+  through nested expansion points; exit codes: status 0 clean / 1 work
+  pending; errors 1 if failures; build 0/1; ValueError (unknown target)
+  → message on stderr, exit 2.
+
+## Threading model
+
+- Scheduler loop on the calling thread; node execution on a worker pool
+  (`jobs` or `min(32, cpus)`). Process spawning is blocking per worker —
+  plain threads are fine (no async runtime needed; don't introduce one).
+- Metadata and cache-store writes happen from worker threads: keep the
+  same coarse-lock discipline (`Mutex` around metadata map; store writes
+  are temp-dir + rename, last-wins).
+- Python callback events: `process_started` originates on workers —
+  acquire the GIL per call in `brix-py`; core must not hold any lock
+  while emitting events (a slow reporter must not stall other workers,
+  and a reporter that calls back into brix must not deadlock).
+
+## Phasing (each phase lands green on the full pytest suite)
+
+1. **`brix-core` bottom layer + golden tests**: patterns, data atoms,
+   fingerprint digests, shlex split. Cross-language golden fixtures
+   (payload → digest; pattern → match/overlap results) generated by a
+   small Python script checked into `tests/golden/`.
+2. **Planner + targets**: graph spec deserialization, inference, target
+   selection. Python `plan_graph` gains the `BRIX_ENGINE` switch;
+   `plan.describe()` output must match (it's asserted in tests).
+3. **Scheduler + layers + context**: the big one. Python builders
+   delegate `build()` end-to-end; reporters and results cross the
+   boundary. All tests pass with `BRIX_ENGINE=rust`.
+4. **Flip the default**, keep `BRIX_ENGINE=py` working one release,
+   verify the animation project (full dryRun cycle, targeted builds,
+   clean-then-cache-restore, `view`), then delete the Python engine
+   internals, keeping the API wrappers.
+
+Phases 1–2 are safe for a cheaper model working alone against the golden
+tests. Phase 3 is where the do-not-reinterpret list matters most —
+review the scheduler and layer implementations against it line by line
+before trusting green tests, because several subtleties (event ordering,
+stuck-node snapshots, cascade rules) are only partially pinned by tests.
+
+## Open questions (settle before phase 3, not during)
+
+- Exact `Reporter` event **ordering guarantee** to document: today
+  everything but `process_started` is emitted from the scheduler thread
+  in scheduling order; keep that contract.
+- Windows: paths in metadata/cache use `/` (posix) logical paths
+  already; keep logical paths posix everywhere, convert at the
+  filesystem edge only.
+- Whether `status`/`clean` stay pure Python (they re-walk the graph) or
+  call core; recommendation: call core so freshness logic exists once.

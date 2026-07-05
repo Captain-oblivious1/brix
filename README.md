@@ -117,11 +117,14 @@ design decision made now is churn the port never absorbs.
    useful for a single user (incremental covers them); the value is a
    central team cache. A shared filesystem path already works today via
    absolute `cache_dir`.
-3. **Rust engine port** — after the Python API stabilizes; then the JS/TS
-   API on the same core. Plan: Fable writes a port design doc (crate
-   layout, PyO3 boundary contract, what stays Python vs. moves to Rust,
-   a "do not reinterpret" list of load-bearing subtleties); a cheaper
-   model executes against that doc plus the test suite.
+3. **Rust engine port** — design doc written: **`docs/rust-port.md`**
+   (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
+   requirements for fingerprints/metadata/cache, the do-not-reinterpret
+   list of load-bearing subtleties, threading model, 4-phase plan with
+   golden tests). A cheaper model executes against that doc plus the
+   test suite; phases 1–2 are safe solo, phase 3 needs line-by-line
+   review against the subtleties list. JS/TS API on the same core
+   afterward.
 
 Further out (from the original spec, unscheduled): graph visualization,
 modular/distributed graph loading for large projects, richer change
