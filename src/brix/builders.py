@@ -1,9 +1,14 @@
 """Builders: choose how the logical graph is built.
 
-`CleanBuilder` is the root builder for this prototype: it lowers the logical
-graph into an execution plan and runs it with an empty layer stack. Wrapper
-builders (incremental, cache, atomic) arrive in later milestones; each will
-contribute a `BuildLayer` to the stack rather than transforming plans.
+`CleanBuilder` and `IncrementalBuilder` are root builders; `CacheBuilder`
+and `AtomicBuilder` wrap another builder, each contributing a `BuildLayer`
+to the stack rather than transforming plans. The full stack:
+
+    AtomicBuilder(CacheBuilder(IncrementalBuilder(create_graph)))
+
+which stacks cache innermost, incremental around it, atomic outermost —
+fresh nodes replay without touching the cache, cache-restored outputs
+route through staging.
 """
 
 from __future__ import annotations
@@ -83,6 +88,45 @@ class IncrementalBuilder:
         metadata.load()
         detector = TimeAndHashChangeDetector(self.root, metadata)
         return [IncrementalLayer(metadata, detector)]
+
+    def build(self, jobs: int | None = None, reporter=None,
+              targets: list[str] | None = None) -> BuildResult:
+        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
+
+
+class CacheBuilder:
+    """Reuse results across workspaces and clean checkouts.
+
+    Wraps another builder; the cache layer sits innermost, keyed by the
+    same ``action_fingerprint`` the incremental layer records. ``cache_dir``
+    may be absolute (a cache shared between checkouts) or workspace-relative.
+    Keep a relative one under a ``.brix``-prefixed directory (the default)
+    so workspace scans ignore it.
+    """
+
+    def __init__(self, inner, cache_dir: str | Path = "build/.brix-cache") -> None:
+        self.inner = inner
+        self.cache_dir = cache_dir
+        self.root: Path = inner.root
+
+    def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
+        return self.inner.plan(targets)
+
+    def layers(self) -> list:
+        from .cache import CacheLayer, CacheStore
+        from .metadata import TimeAndHashChangeDetector
+
+        inner_layers = self.inner.layers()
+        # Share the incremental layer's detector when there is one, so no
+        # file is hashed twice per build (fingerprints are the cache key).
+        detector = next(
+            (layer.detector for layer in inner_layers if hasattr(layer, "detector")),
+            None,
+        ) or TimeAndHashChangeDetector(self.root)
+        directory = Path(self.cache_dir)
+        if not directory.is_absolute():
+            directory = self.root / directory
+        return [CacheLayer(CacheStore(directory), detector), *inner_layers]
 
     def build(self, jobs: int | None = None, reporter=None,
               targets: list[str] | None = None) -> BuildResult:

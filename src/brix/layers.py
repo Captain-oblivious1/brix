@@ -101,7 +101,9 @@ class NodeContext:
         merged: dict[str, Path] = {}
         for root in self.read_roots():
             for path in root.rglob("*"):
-                if not path.is_file() or ".brix" in path.parts:
+                # ".brix"-prefixed directories are brix's own storage
+                # (metadata, cache) — never part of the workspace.
+                if not path.is_file() or any(p.startswith(".brix") for p in path.parts):
                     continue
                 if any(path.is_relative_to(x) for x in exclude):
                     continue

@@ -15,7 +15,16 @@
       "Bash(firefox --headless --profile ffprof --screenshot full.png --window-size=760,6200 file:///home/duane/Projects/brix/docs/build-layers.html)",
       "Bash(python3 -)",
       "Bash(rsvg-convert -b white -z 1.6 fig4-classes.svg -o fig4.png)",
-      "Bash(rsvg-convert -b white -z 1.6 fig6-dataflow.svg -o fig6.png)"
+      "Bash(rsvg-convert -b white -z 1.6 fig6-dataflow.svg -o fig6.png)",
+      "Read(//home/duane/Projects/animation/**)",
+      "Bash(python -m pytest tests/test_cache.py -q)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(timeout 120 venv/bin/python brix.py --dryRun build wealth)",
+      "Bash(venv/bin/python brix.py clean)",
+      "Bash(time timeout 590 venv/bin/python brix.py --dryRun build --quiet-replays)",
+      "Bash(time timeout 590 venv/bin/python brix.py --dryRun build)",
+      "Bash(venv/bin/python brix.py status)",
+      "Bash(venv/bin/python brix.py --dryRun build wealth)"
     ]
   }
 }

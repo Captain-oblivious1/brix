@@ -80,24 +80,25 @@ end-to-end test that skips when no JDK is on PATH).
   after commit; crash mid-commit is journaled (COMMIT marker) and finished
   by the next build; failed-build staging is inspectable via status, then
   discarded
+- `CacheBuilder(inner, cache_dir=...)`: results shared across workspaces
+  and clean checkouts, keyed by the same `action_fingerprint` incremental
+  records; stdout/stderr replay, `source="cache"` provenance, cached-
+  failure replay; the layer sits innermost so fresh nodes never touch the
+  cache and restored outputs route through atomic staging; the store
+  survives `brix.py clean` (animation: full clean rebuild 1m46s → 16s,
+  zero processes)
 - `brix.cpp` typed actions (`CompileSourceAction`, `LinkApplicationAction`)
   and `brix.java` (`JarAction` — javac + jar, optional `entry_point`) that
   lower to the generic model in `Graph.add`; raw and typed forms compose
   in one graph (`examples/cpp_to_java/`: a C++ tool generates Java sources
   that feed a jar)
 
-Not yet implemented: cache layer.
-
 ## TODO (priority order)
 
-Duane's priority: differentiating features first — most build systems have
-caching; few have honest status inspection or atomic builds.
+Duane's priority: settle Python semantics before the Rust port — every
+design decision made now is churn the port never absorbs.
 
-1. **CacheBuilder** — result store/restore keyed by the shared fingerprint;
-   stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
-   Atomic-outermost stack order routes restored outputs through staging
-   for free.
-2. **Held staging / review-before-commit** — `build --stage` builds fully
+1. **Held staging / review-before-commit** — `build --stage` builds fully
    but leaves outputs in staging (workspace untouched); `status` reports
    the held staging; `commit` runs the existing journaled commit step;
    `discard` throws it away. Use case (Duane): review what an overnight
@@ -106,8 +107,11 @@ caching; few have honest status inspection or atomic builds.
    overlay already reads through it) rather than refusing. Needs a marker
    distinguishing held staging from failed-build leftovers, which
    `on_build_begin` currently discards.
-3. **Rust engine port** — after the Python API stabilizes; then the JS/TS
-   API on the same core.
+2. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+   API on the same core. Plan: Fable writes a port design doc (crate
+   layout, PyO3 boundary contract, what stays Python vs. moves to Rust,
+   a "do not reinterpret" list of load-bearing subtleties); a cheaper
+   model executes against that doc plus the test suite.
 
 Further out (from the original spec, unscheduled): graph visualization,
 modular/distributed graph loading for large projects, richer change
@@ -145,7 +149,7 @@ class tracking).
   (`src/brix/metadata.py`, `incremental.py`): persistent JSON metadata with
   a stat-validated file-hash cache (`TimeAndHashChangeDetector`); action
   identity keys (structure) vs fingerprints (content — command, tool
-  identity, input hashes; the future cache key); fresh nodes complete with
+  identity, input hashes; also the cache layer's key); fresh nodes complete with
   their previous result, stdout/stderr replay included; failed actions
   always rerun and their outputs are deleted (clean-build parity), with the
   failure recorded for status/errors. Tests: rerun
@@ -218,7 +222,7 @@ class tracking).
   boundary (no JDK installed): the generated `.java` files land in
   staging, javac fails cleanly, the workspace stays untouched, and
   status lists every staged artifact. `ProcessResult.source` records how a
-  result was obtained (`process` / `replayed`; `cache` reserved) — stamped
+  result was obtained (`process` / `replayed` / `cache`) — stamped
   by the producer, ignored by scheduling.
 
 - **Expandable interface + nested ExpandAll, env=, regex substitution**
@@ -254,6 +258,21 @@ class tracking).
   absolute paths (exit code honored; requires at least one target). The
   animation `view` command (makefile `%.mpg.view`, plays via parole) is
   three lines in its brix.py.
+- **CacheBuilder** (`src/brix/cache.py`): `CacheStore` is content-
+  addressed under one directory (`<fp[:2]>/<fp>/entry.json` + numbered
+  output blobs; temp-dir-then-rename writes make concurrent sharing
+  safe). `CacheLayer` sits *innermost* — incremental-fresh nodes never
+  reach it; on a stale node it computes the shared `action_fingerprint`
+  (reusing the incremental layer's detector so nothing hashes twice),
+  restores hits through `ctx.output_root` (atomic staging routes them),
+  stamps `source="cache"`, and populates the store after real runs.
+  Failures with a real exit code are cached and replayed (same inputs,
+  same failure); signal-killed runs are not. Workspace scans now ignore
+  any `.brix*`-prefixed directory, and `clean` leaves the cache intact —
+  clean-then-rebuild is the payoff case. Recommended stack:
+  `AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))`. Wired into the
+  animation project (`cache_dir="output/.brix-cache"`; note `make clean`
+  rm -rf's output/ and takes the cache with it — brix clean doesn't).
 
 ## Design rules
 
@@ -359,7 +378,7 @@ def create_builder():
                 change_set=change_set,
                 graph_supplier=create_graph,   # callable, so the builder
             ),                                 # decides how much graph to load
-            cache_dir="build/cache",
+            cache_dir="build/.brix-cache",
         ),
         staging_dir="build/staging",
     )
