@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass, field
@@ -38,16 +39,22 @@ class ProcessResult:
         return f"FAILED (did not run): {self.action_name}"
 
 
-def run_process(action_name: str, command: str, cwd: Path) -> ProcessResult:
-    """Run a rendered command line, capturing stdout/stderr/exit status."""
+def run_process(
+    action_name: str, command: str, cwd: Path, env: dict[str, str] | None = None
+) -> ProcessResult:
+    """Run a rendered command line, capturing stdout/stderr/exit status.
+
+    ``env`` entries extend (and shadow) the inherited environment.
+    """
     try:
         argv = shlex.split(command)
     except ValueError as exc:
         return ProcessResult(action_name, command, stderr=f"brix: bad command line: {exc}")
     if not argv:
         return ProcessResult(action_name, command, stderr="brix: empty command line")
+    full_env = {**os.environ, **env} if env else None
     try:
-        proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True)
+        proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=full_env)
     except OSError as exc:
         return ProcessResult(action_name, command, argv=argv, stderr=f"brix: cannot execute: {exc}")
     rc = proc.returncode

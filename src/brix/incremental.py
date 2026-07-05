@@ -60,6 +60,8 @@ def action_key(action: ExternalProcessAction) -> str:
         "inputs": {k: _expr_identity(v) for k, v in action.inputs.items()},
         "outputs": {k: _expr_identity(v) for k, v in action.outputs.items()},
     }
+    if action.env:
+        payload["env"] = {k: _expr_identity(v) for k, v in action.env.items()}
     return _digest(payload)
 
 
@@ -118,6 +120,8 @@ def action_fingerprint(
         "command": action.command_line,
         "inputs": {k: [atom_fp(a) for a in v.atoms()] for k, v in action.inputs.items()},
     }
+    if action.env:
+        payload["env"] = {k: [atom_fp(a) for a in v.atoms()] for k, v in action.env.items()}
     return _digest(payload)
 
 

@@ -83,6 +83,17 @@ class RegexData(DataAtom):
             return None
         return dict(m.groupdict())
 
+    def substitute(self, bindings: dict[str, str]) -> RegexData:
+        """Replace named groups with literal values, e.g. under expansion:
+        ``(?P<video>[^/]+)/(?P<scene>[0-9]\\S*)`` with video=intro becomes
+        ``intro/(?P<scene>[0-9]\\S*)``. Group bodies must not contain
+        nested groups."""
+        pattern = self.regex.pattern
+        for name, value in bindings.items():
+            group = rf"\(\?P<{re.escape(name)}>(?:[^()\\]|\\.)*\)"
+            pattern = re.sub(group, lambda _m: re.escape(value), pattern)
+        return RegexData(pattern) if pattern != self.regex.pattern else self
+
     def __repr__(self) -> str:
         return f"data.regex({self.regex.pattern!r})"
 

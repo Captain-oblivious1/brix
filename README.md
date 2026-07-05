@@ -25,9 +25,9 @@ user-facing build language.
 Minimal prototype (spec steps 1–10 plus dependency inference), the
 build-layer seams, the full IncrementalBuilder (fingerprint skip +
 deleted-source cleanup), the reporter seam, status reporting with a CLI,
-AtomicBuilder, and typed C++/Java actions are implemented and working.
-96 tests pass (plus a JDK end-to-end test that skips when no JDK is on
-PATH).
+AtomicBuilder, typed C++/Java actions, nested expansion, and per-action
+environments are implemented and working. 103 tests pass (plus a JDK
+end-to-end test that skips when no JDK is on PATH).
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -37,7 +37,13 @@ PATH).
 - Dependency inference from data-set intersections (conservative overlap)
 - Graph-shaped `ExecutionPlan` with a parallel thread-pool scheduler
 - `ExpandAll` as an unrealized plan node, expanded at runtime — including
-  over collections produced by generator actions during the same build
+  over collections produced by generator actions during the same build.
+  Children are any `Expandable` (process action *or another ExpandAll*),
+  so expansion nests: per video, per scene of that video. Regex
+  collections substitute outer bindings (named group → literal) and can
+  filter membership (e.g. numbered scene files only)
+- `env=` on `ExternalProcessAction`: per-action environment entries
+  (data expressions; fingerprinted like inputs)
 - Structured `ProcessResult`s (stdout/stderr/exit/signal); failure cascades
   skip downstream nodes; cycle detection
 - `CleanBuilder(graph, root).plan()` / `.build(jobs, reporter)`
@@ -195,6 +201,17 @@ class tracking).
   status lists every staged artifact. `ProcessResult.source` records how a
   result was obtained (`process` / `replayed`; `cache` reserved) — stamped
   by the producer, ignored by scheduling.
+
+- **Expandable interface + nested ExpandAll, env=, regex substitution**
+  (driven by the first real adoption target: Duane's `~/Projects/animation`
+  makefile — videos containing numbered scenes, `--lowRes`-style flags,
+  `PYTHONPATH`). `ExpandAll.child` is any `Expandable` (`substitute` +
+  `label`); a nested ExpandAll becomes an EXPAND node expanded in turn.
+  Project CLI flags need no brix feature: `parse_known_args()` in the
+  project's brix.py, rest to `cli.main(argv=...)`, flags become
+  fingerprinted `data.value` inputs. Still to come from that project:
+  pluggable change detectors and a post-run `DependencyScanner` hook
+  (gcc -MD style discovered dependencies).
 
 ## Design rules
 

@@ -30,9 +30,8 @@ def input_atoms(action: Action) -> list[PathAtom]:
     if isinstance(action, ExternalProcessAction):
         return list(_path_atoms(action.inputs.values()))
     if isinstance(action, ExpandAll):
-        atoms = list(_path_atoms([action.collection]))
-        atoms.extend(_path_atoms(action.child.inputs.values()))
-        return atoms
+        # Nested expansions contribute their collections and inputs too.
+        return list(_path_atoms([action.collection])) + input_atoms(action.child)
     raise TypeError(f"unknown action type: {action!r}")
 
 
@@ -40,7 +39,7 @@ def output_atoms(action: Action) -> list[PathAtom]:
     if isinstance(action, ExternalProcessAction):
         return list(_path_atoms(action.outputs.values()))
     if isinstance(action, ExpandAll):
-        return list(_path_atoms(action.child.outputs.values()))
+        return output_atoms(action.child)
     raise TypeError(f"unknown action type: {action!r}")
 
 
@@ -77,11 +76,8 @@ def _atom_text(atom: PathAtom) -> str:
 
 
 def _node_label(action: Action) -> str:
-    if isinstance(action, ExternalProcessAction):
-        return action.label
-    if isinstance(action, ExpandAll):
-        return f"expand: {action.child.label}"
-    return repr(action)
+    label = getattr(action, "label", None)
+    return label if label is not None else repr(action)
 
 
 def plan_graph(graph: Graph, root: Path) -> ExecutionPlan:

@@ -5,7 +5,7 @@ This is the minimal prototype: data expressions, generic process actions,
 runtime ExpandAll expansion, and a clean builder.
 """
 
-from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
+from .actions import DeleteFilesAction, ExpandAll, Expandable, ExternalProcessAction
 from .atomic import AtomicLayer
 from .builders import AtomicBuilder, BuildResult, CleanBuilder, IncrementalBuilder
 from .data import DataExpr, DataFactory, DataUnion
@@ -46,6 +46,7 @@ __all__ = [
     "ExecutionNode",
     "ExecutionPlan",
     "ExpandAll",
+    "Expandable",
     "ExternalProcessAction",
     "Graph",
     "IncrementalBuilder",

@@ -121,6 +121,17 @@ def render_command(action: ExternalProcessAction, where: NodeContext | Path | st
     return _PLACEHOLDER_RE.sub(repl, action.command_line)
 
 
+def render_env(
+    action: ExternalProcessAction, where: NodeContext | Path | str
+) -> dict[str, str]:
+    """Render the action's declared environment entries (inputs: overlay-resolved)."""
+    ctx = _context(where)
+    return {
+        key: _render_expr(f"env {key}", expr, ctx, is_output=False)
+        for key, expr in action.env.items()
+    }
+
+
 def prepare_output_dirs(action: ExternalProcessAction, where: NodeContext | Path | str) -> None:
     """Create parent directories for declared outputs under the output root."""
     ctx = _context(where)

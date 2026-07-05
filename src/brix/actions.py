@@ -14,7 +14,31 @@ class Action:
     """Base class for all logical actions."""
 
 
-class ExternalProcessAction(Action):
+class Expandable(Action):
+    """Anything an ExpandAll can instantiate per collection member.
+
+    Requires a diagnostic ``label`` and binding ``substitute``. Both
+    `ExternalProcessAction` and `ExpandAll` itself qualify — so expansion
+    points nest: an outer expansion over videos can instantiate an inner
+    expansion over each video's scenes.
+    """
+
+    @property
+    def label(self) -> str:
+        raise NotImplementedError
+
+    def substitute(self, bindings: dict[str, str]) -> Expandable:
+        raise NotImplementedError
+
+
+def _substitute_expr(expr: DataExpr, bindings: dict[str, str]) -> DataExpr:
+    if isinstance(expr, DataUnion):
+        return DataUnion(*(_substitute_expr(p, bindings) for p in expr.parts))
+    assert isinstance(expr, DataAtom)
+    return expr.substitute(bindings)
+
+
+class ExternalProcessAction(Expandable):
     """A generic external process.
 
     ``command_line`` is a template whose ``{placeholder}`` names refer to
@@ -35,11 +59,18 @@ class ExternalProcessAction(Action):
         command_line: str,
         inputs: dict[str, DataExpr] | None = None,
         outputs: dict[str, DataExpr] | None = None,
+        env: dict[str, DataExpr | str] | None = None,
     ) -> None:
+        from .data import ValueData
+
         self.name = name
         self.command_line = command_line
         self.inputs: dict[str, DataExpr] = dict(inputs or {})
         self.outputs: dict[str, DataExpr] = dict(outputs or {})
+        self.env: dict[str, DataExpr] = {
+            k: v if isinstance(v, DataExpr) else ValueData(v)
+            for k, v in (env or {}).items()
+        }
 
     @property
     def label(self) -> str:
@@ -47,13 +78,6 @@ class ExternalProcessAction(Action):
 
     def substitute(self, bindings: dict[str, str]) -> ExternalProcessAction:
         """Return a concrete copy with bindings applied to name and data paths."""
-
-        def sub_expr(expr: DataExpr) -> DataExpr:
-            if isinstance(expr, DataUnion):
-                return DataUnion(*(sub_expr(p) for p in expr.parts))
-            assert isinstance(expr, DataAtom)
-            return expr.substitute(bindings)
-
         name = self.name
         if name is not None:
             for key, value in bindings.items():
@@ -61,8 +85,9 @@ class ExternalProcessAction(Action):
         return ExternalProcessAction(
             name=name,
             command_line=self.command_line,
-            inputs={k: sub_expr(v) for k, v in self.inputs.items()},
-            outputs={k: sub_expr(v) for k, v in self.outputs.items()},
+            inputs={k: _substitute_expr(v, bindings) for k, v in self.inputs.items()},
+            outputs={k: _substitute_expr(v, bindings) for k, v in self.outputs.items()},
+            env={k: _substitute_expr(v, bindings) for k, v in self.env.items()},
         )
 
     def __repr__(self) -> str:
@@ -89,25 +114,44 @@ class DeleteFilesAction(Action):
         return f"DeleteFilesAction({self.paths!r})"
 
 
-class ExpandAll(Action):
+class ExpandAll(Expandable):
     """Repeated work over a data collection.
 
     Not an opaque loop: this is an unrealized expansion point in the
     execution plan. Once collection membership is known, it expands into
-    concrete sibling action nodes, one per binding of ``element_name``.
+    concrete sibling nodes, one per binding of ``element_name``.
+
+    The child is any `Expandable` — a process action, or another
+    `ExpandAll` for nested repetition (per video, per scene of that
+    video); use distinct element names per level.
     """
 
     def __init__(
         self,
         element_name: str,
         collection: DataExpr,
-        child: ExternalProcessAction,
+        child: Expandable,
     ) -> None:
-        if not isinstance(child, ExternalProcessAction):
-            raise TypeError("ExpandAll child must be an ExternalProcessAction")
+        if not isinstance(child, Expandable):
+            raise TypeError(
+                f"ExpandAll child must be Expandable "
+                f"(ExternalProcessAction or ExpandAll), got {child!r}"
+            )
         self.element_name = element_name
         self.collection = collection
         self.child = child
+
+    @property
+    def label(self) -> str:
+        return f"expand: {self.child.label}"
+
+    def substitute(self, bindings: dict[str, str]) -> ExpandAll:
+        """Apply *outer* bindings; this expansion's own element stays open."""
+        return ExpandAll(
+            element_name=self.element_name,
+            collection=_substitute_expr(self.collection, bindings),
+            child=self.child.substitute(bindings),
+        )
 
     def __repr__(self) -> str:
         return f"ExpandAll({self.element_name!r} over {self.collection!r})"

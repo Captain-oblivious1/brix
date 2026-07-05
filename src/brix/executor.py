@@ -28,7 +28,7 @@ from .plan import (
     NodeStateTable,
 )
 from .process import ProcessResult, run_process
-from .render import RenderError, prepare_output_dirs, render_command
+from .render import RenderError, prepare_output_dirs, render_command, render_env
 from .report import Reporter
 
 _TERMINAL = {NodeState.DONE, NodeState.FAILED, NodeState.SKIPPED}
@@ -61,9 +61,10 @@ def _run_process_node(node: ExecutionNode, ctx: NodeContext) -> ProcessResult:
     try:
         prepare_output_dirs(action, ctx)
         command = render_command(action, ctx)
+        env = render_env(action, ctx)
     except RenderError as exc:
         return ProcessResult(action_name=action.label, command="", stderr=f"brix: {exc}")
-    return run_process(action.label, command, cwd=ctx.workspace_root)
+    return run_process(action.label, command, cwd=ctx.workspace_root, env=env or None)
 
 
 def _stacked_runner(node: ExecutionNode, layers: list[BuildLayer]) -> NodeRunner:
@@ -125,7 +126,10 @@ def _expand(
     children: list[ExecutionNode] = []
     for value in members:
         concrete = action.child.substitute({action.element_name: value})
-        child_node = plan.add_node(NodeKind.PROCESS, concrete.label, concrete)
+        # A nested ExpandAll becomes another expansion point, which the
+        # scheduler will expand in turn once it is ready.
+        kind = NodeKind.EXPAND if isinstance(concrete, ExpandAll) else NodeKind.PROCESS
+        child_node = plan.add_node(kind, concrete.label, concrete)
         for pid in pred_ids:
             plan.add_edge(pid, child_node.id, f"expansion of [{node.id}]")
         for sid in succ_ids:
