@@ -14,6 +14,10 @@ Commands (default: build):
     brix.py clean       delete built outputs and metadata
     brix.py graph       print the execution plan's structure
 
+Projects can add build-then-act subcommands via ``commands=`` — each
+builds its targets first, then hands the built paths to a project
+function (``brix.py view wealth`` → build wealth's video, then play it).
+
 The engine never prints; this module is a client, so printing here is
 fine — it is the client.
 """
@@ -23,6 +27,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from .builders import IncrementalBuilder
@@ -42,6 +47,7 @@ def main(
     staging_dir: str | Path = "build/staging",
     builder_factory=None,
     aliases: dict[str, str | list[str]] | None = None,
+    commands: dict[str, Callable[[list[Path]], int | None]] | None = None,
 ) -> int:
     """``builder_factory`` (optional): zero-argument callable returning the
     builder to use for ``build`` — e.g. the full
@@ -49,23 +55,34 @@ def main(
     ``IncrementalBuilder``.
 
     ``aliases`` (optional): target shorthands — ``{"wealth":
-    "output/videos/wealth.mpg"}`` lets users say ``build wealth``."""
-    parser = argparse.ArgumentParser(prog="brix.py")
-    commands = parser.add_subparsers(dest="command")
+    "output/videos/wealth.mpg"}`` lets users say ``build wealth``.
 
-    build_parser = commands.add_parser("build", help="build (the default)")
-    build_parser.add_argument("targets", nargs="*", help="output paths or aliases; default: everything")
-    build_parser.add_argument("-j", "--jobs", type=int, default=None)
-    quietness = build_parser.add_mutually_exclusive_group()
-    quietness.add_argument("--silent", action="store_true", help="no output; exit code only")
-    quietness.add_argument(
-        "--quiet-replays", action="store_true", help="print only real work"
-    )
-    status_parser = commands.add_parser("status", help="what would build, and why")
+    ``commands`` (optional): build-then-act subcommands — ``{"view": fn}``
+    adds ``brix.py view <target>...``, which builds the targets (aliases
+    apply) and, on success, calls ``fn(paths)`` with their absolute
+    ``Path``s. ``fn`` may return an exit code."""
+    parser = argparse.ArgumentParser(prog="brix.py")
+    subparsers = parser.add_subparsers(dest="command")
+
+    def add_build_options(sub, targets_nargs: str) -> None:
+        sub.add_argument("targets", nargs=targets_nargs, help="output paths or aliases")
+        sub.add_argument("-j", "--jobs", type=int, default=None)
+        quietness = sub.add_mutually_exclusive_group()
+        quietness.add_argument("--silent", action="store_true", help="no output; exit code only")
+        quietness.add_argument(
+            "--quiet-replays", action="store_true", help="print only real work"
+        )
+
+    add_build_options(subparsers.add_parser("build", help="build (the default)"), "*")
+    status_parser = subparsers.add_parser("status", help="what would build, and why")
     status_parser.add_argument("targets", nargs="*")
-    commands.add_parser("errors", help="show last recorded failures")
-    commands.add_parser("clean", help="delete built outputs and metadata")
-    commands.add_parser("graph", help="print the execution plan structure")
+    subparsers.add_parser("errors", help="show last recorded failures")
+    subparsers.add_parser("clean", help="delete built outputs and metadata")
+    subparsers.add_parser("graph", help="print the execution plan structure")
+    for name in commands or {}:
+        add_build_options(
+            subparsers.add_parser(name, help=f"build target(s), then {name} them"), "+"
+        )
 
     argv = list(sys.argv[1:]) if argv is None else list(argv)
     if not argv:
@@ -81,7 +98,7 @@ def main(
             resolved.extend([expansion] if isinstance(expansion, str) else expansion)
         return resolved or None
 
-    if command == "build":
+    if command == "build" or command in (commands or {}):
         if args.silent:
             reporter = None
         else:
@@ -91,11 +108,17 @@ def main(
         else:
             builder = IncrementalBuilder(graph_supplier, root=root, metadata_dir=metadata_dir)
         try:
-            result = builder.build(jobs=args.jobs, reporter=reporter, targets=resolve_targets())
+            targets = resolve_targets()
+            result = builder.build(jobs=args.jobs, reporter=reporter, targets=targets)
         except ValueError as exc:
             print(f"brix: {exc}", file=sys.stderr)
             return 2
-        return 0 if result.success else 1
+        if not result.success:
+            return 1
+        if command == "build":
+            return 0
+        code = commands[command]([root / t for t in targets])
+        return int(code or 0)
 
     if command == "status":
         try:

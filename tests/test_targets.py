@@ -145,3 +145,35 @@ def test_cli_targets_and_aliases(tmp_path, capsys):
     # Unknown target: clear error, exit 2.
     assert cli.main(make_graph, root=tmp_path, argv=["build", "nope.bin"]) == 2
     assert "no action produces" in capsys.readouterr().err
+
+
+def test_cli_custom_command_builds_then_acts(tmp_path, capsys):
+    """commands={'view': fn}: build the targets, then call fn with the
+    built absolute paths."""
+    write_workspace(tmp_path, {"a": "x", "b": "y"})
+    viewed = []
+    commands = {"view": lambda paths: viewed.extend(paths)}
+    aliases = {"a": "build/upper/a.txt"}
+
+    code = cli.main(
+        make_graph, root=tmp_path, argv=["view", "--silent", "a"],
+        aliases=aliases, commands=commands,
+    )
+    assert code == 0
+    assert viewed == [tmp_path / "build/upper/a.txt"]
+    assert viewed[0].exists()  # built before acting
+
+    # A failed build never reaches the command function.
+    (tmp_path / "tools/upper.py").write_text("import sys; sys.exit(3)\n")
+    viewed.clear()
+    code = cli.main(
+        make_graph, root=tmp_path, argv=["view", "--silent", "a"],
+        aliases=aliases, commands=commands,
+    )
+    assert code == 1
+    assert viewed == []
+
+    # Custom commands require a target; argparse rejects a bare invocation.
+    with pytest.raises(SystemExit):
+        cli.main(make_graph, root=tmp_path, argv=["view"], commands=commands)
+    assert "required" in capsys.readouterr().err

@@ -58,12 +58,16 @@ end-to-end test that skips when no JDK is on PATH).
 - Reporter seam: the engine never prints; builders are silent by default
   and take a `Reporter` (`ConsoleReporter`, `ErrorsAtEndReporter`, or your
   own); `ProcessResult.source` carries provenance and replays are marked
-  `(replayed)` by the console reporter
+  `(replayed)` by the console reporter; `process_started` fires only when
+  a real process spawns (never for replays) so long-running builds show
+  liveness (`run: render wealth/03`)
 - `compute_status()` + `brix.cli.main()`: `brix.py status` explains what
   would build and why (never built / inputs changed / outputs missing /
   failed last build / outdated upstream / pending deletions) without
   building; `brix.py errors` replays recorded failure diagnostics;
-  `build`, `clean`, `graph` round out the CLI
+  `build`, `clean`, `graph` round out the CLI; `commands=` adds project
+  build-then-act subcommands (`./brix.py view wealth` builds the video,
+  then hands the built paths to the project's function)
 - Target selection: `build`/`status` take output paths or aliases
   (`./brix.py build wealth`); demand-driven backward selection with
   binding propagation constrains expansions (targeting one video never
@@ -231,6 +235,16 @@ class tracking).
   and `status` accept targets and `aliases=`; unknown targets exit 2.
   Verified on the animation project: `./brix.py build wealth` plans only
   that video's 12-node chain and replays against full-build records.
+- **Liveness reporting + custom subcommands** (`report.py`, `executor.py`,
+  `cli.py`): new `Reporter.process_started` event emitted at the innermost
+  point of the layer stack — only when a process actually spawns, so
+  replays never fire it and `--quiet-replays` stays quiet;
+  `ConsoleReporter` prints `run: <label>` so long renders visibly start.
+  `cli.main(commands={"view": fn})` adds build-then-act subcommands: build
+  the named targets (aliases apply), then call `fn` with the built
+  absolute paths (exit code honored; requires at least one target). The
+  animation `view` command (makefile `%.mpg.view`, plays via parole) is
+  three lines in its brix.py.
 
 ## Design rules
 

@@ -27,6 +27,11 @@ class Reporter:
     def node_started(self, node: "ExecutionNode") -> None:
         """A process node was handed to the layer stack."""
 
+    def process_started(self, node: "ExecutionNode") -> None:
+        """An actual process is being spawned for this node — fires past
+        every layer, so replayed/cached results never emit it. This is the
+        liveness signal: something real is running right now."""
+
     def node_completed(
         self,
         node: "ExecutionNode",
@@ -70,6 +75,9 @@ class ConsoleReporter(Reporter):
 
     def collection_realized(self, node, members, children) -> None:
         self._say(f"{node.label} -> {len(children)} action(s)")
+
+    def process_started(self, node) -> None:
+        self._say(f"run: {node.label}")
 
     def node_inserted(self, node, reason) -> None:
         self._say(f"insert: {node.label}")

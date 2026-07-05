@@ -67,10 +67,16 @@ def _run_process_node(node: ExecutionNode, ctx: NodeContext) -> ProcessResult:
     return run_process(action.label, command, cwd=ctx.workspace_root, env=env or None)
 
 
-def _stacked_runner(node: ExecutionNode, layers: list[BuildLayer]) -> NodeRunner:
+def _stacked_runner(
+    node: ExecutionNode, layers: list[BuildLayer], reporter: Reporter
+) -> NodeRunner:
     """Wrap the process run in each layer's around_node, innermost first."""
 
     def base(ctx: NodeContext) -> ProcessResult:
+        # Innermost of all: only reached when a real process is about to
+        # spawn (a replaying layer returns before this), so the reporter's
+        # liveness signal is exact. Runs on a worker thread.
+        reporter.process_started(node)
         return _run_process_node(node, ctx)
 
     call = base
@@ -230,7 +236,7 @@ def execute(
                 else:
                     states.advance(nid, NodeState.RUNNING)
                     reporter.node_started(node)
-                    future = pool.submit(_stacked_runner(node, layers), ctx)
+                    future = pool.submit(_stacked_runner(node, layers, reporter), ctx)
                     running[future] = nid
 
             if running:

@@ -144,6 +144,41 @@ def test_console_reporter_can_hide_replays(tmp_path):
     assert "BUILD OK" in text
 
 
+def test_process_started_fires_only_for_real_processes(tmp_path):
+    """The liveness signal: emitted when a process actually spawns, so a
+    fully-replayed build stays quiet even about starts."""
+    class Spawns(Reporter):
+        def __init__(self):
+            self.labels = []
+
+        def process_started(self, node):
+            self.labels.append(node.label)
+
+    _write_workspace(tmp_path)
+    builder = IncrementalBuilder(_upper_graph, root=tmp_path)
+    fresh = Spawns()
+    assert builder.build(reporter=fresh).success
+    assert fresh.labels == ["upper a"]
+
+    replay = Spawns()
+    assert builder.build(reporter=replay).success
+    assert replay.labels == []
+
+
+def test_console_reporter_prints_run_lines_for_real_work(tmp_path):
+    _write_workspace(tmp_path)
+    builder = IncrementalBuilder(_upper_graph, root=tmp_path)
+
+    out1 = io.StringIO()
+    assert builder.build(reporter=ConsoleReporter(stream=out1)).success
+    assert "run: upper a\n" in out1.getvalue()
+
+    # Replays never show a run line — not even in the default chatty mode.
+    out2 = io.StringIO()
+    assert builder.build(reporter=ConsoleReporter(stream=out2)).success
+    assert "run:" not in out2.getvalue()
+
+
 def test_result_provenance(tmp_path):
     _write_workspace(tmp_path)
     builder = IncrementalBuilder(_upper_graph, root=tmp_path)
