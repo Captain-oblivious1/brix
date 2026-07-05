@@ -97,7 +97,16 @@ caching; few have honest status inspection or atomic builds.
    stdout/stderr replay; cached-failure replay (stamps `source="cache"`).
    Atomic-outermost stack order routes restored outputs through staging
    for free.
-2. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+2. **Held staging / review-before-commit** — `build --stage` builds fully
+   but leaves outputs in staging (workspace untouched); `status` reports
+   the held staging; `commit` runs the existing journaled commit step;
+   `discard` throws it away. Use case (Duane): review what an overnight
+   build produced before it replaces the good copies. Decision leaning:
+   a subsequent `build` builds *on top of* held staging (the NodeContext
+   overlay already reads through it) rather than refusing. Needs a marker
+   distinguishing held staging from failed-build leftovers, which
+   `on_build_begin` currently discards.
+3. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core.
 
 Further out (from the original spec, unscheduled): graph visualization,
