@@ -107,7 +107,17 @@ design decision made now is churn the port never absorbs.
    overlay already reads through it) rather than refusing. Needs a marker
    distinguishing held staging from failed-build leftovers, which
    `on_build_begin` currently discards.
-2. **Rust engine port** — after the Python API stabilizes; then the JS/TS
+2. **Pluggable cache store** — `CacheBuilder(inner, store=...)` accepting
+   any object with the three-method store protocol (`load` / `restore` /
+   `store`) as an alternative to `cache_dir`; enables remote backends
+   (Nexus/HTTP GET-PUT) and a two-tier store (local disk in front of
+   remote, so team-cache hits don't cost a round-trip each). Baked into
+   the *layer*, not each store: an unreachable remote degrades to a cache
+   miss — never fails the build. Context (Duane): a local cache is barely
+   useful for a single user (incremental covers them); the value is a
+   central team cache. A shared filesystem path already works today via
+   absolute `cache_dir`.
+3. **Rust engine port** — after the Python API stabilizes; then the JS/TS
    API on the same core. Plan: Fable writes a port design doc (crate
    layout, PyO3 boundary contract, what stays Python vs. moves to Rust,
    a "do not reinterpret" list of load-bearing subtleties); a cheaper
