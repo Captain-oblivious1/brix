@@ -324,7 +324,10 @@ class tracking).
   promoted* into the front, and writes populate the front with best-effort
   back so a down remote never blocks local caching. A concrete Nexus/HTTP
   leaf backend is deferred (see Further out); a shared filesystem path
-  already works today via an absolute `cache_dir` or `CacheStore`.
+  already works today via an absolute `cache_dir` or `CacheStore`. Runnable
+  demo: `examples/cache_store_demo/` — simulates four builds across two
+  machines (seed team cache, back-hit + promote, warm-front no round-trip,
+  team cache down still succeeds).
 
 ## Design rules
 
@@ -716,6 +719,7 @@ python3 examples/layers_demo/brix.py     # watch the BuildLayer stack work
 python3 examples/incremental_demo/brix.py  # build/rebuild/edit/delete-a-source
 python3 examples/cli_demo/brix.py status   # project CLI: status/errors/build/clean
 python3 examples/cpp_app/brix.py           # real C++, typed actions, all layers
+python3 examples/cache_store_demo/brix.py  # pluggable/two-tier team cache across machines
 ```
 
 A build file looks like:
