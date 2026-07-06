@@ -15,11 +15,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .graph import Graph
 from .plan import ExecutionPlan, NodeState, NodeStateTable
 from .planner import plan_graph
 from .process import ProcessResult
+
+if TYPE_CHECKING:
+    from .cache import CacheStoreProtocol
 
 
 @dataclass
@@ -98,15 +102,35 @@ class CacheBuilder:
     """Reuse results across workspaces and clean checkouts.
 
     Wraps another builder; the cache layer sits innermost, keyed by the
-    same ``action_fingerprint`` the incremental layer records. ``cache_dir``
-    may be absolute (a cache shared between checkouts) or workspace-relative.
-    Keep a relative one under a ``.brix``-prefixed directory (the default)
-    so workspace scans ignore it.
+    same ``action_fingerprint`` the incremental layer records.
+
+    Backing store, pick one:
+
+    - ``cache_dir`` (default) — the built-in local `CacheStore` under this
+      directory. Absolute for a cache shared between checkouts, or
+      workspace-relative; keep a relative one under a ``.brix``-prefixed
+      directory (the default) so workspace scans ignore it.
+    - ``store`` — any object with the `CacheStoreProtocol` three methods: a
+      remote team cache, or a `TwoTierCacheStore` fronting one with local
+      disk. An unreachable store degrades to a cache miss (handled in the
+      layer), never a failed build.
+
+    Passing both is an error.
     """
 
-    def __init__(self, inner, cache_dir: str | Path = "build/.brix-cache") -> None:
+    def __init__(
+        self,
+        inner,
+        cache_dir: str | Path | None = None,
+        store: CacheStoreProtocol | None = None,
+    ) -> None:
+        if store is not None and cache_dir is not None:
+            raise ValueError("CacheBuilder takes cache_dir or store, not both")
         self.inner = inner
-        self.cache_dir = cache_dir
+        self._store = store
+        self.cache_dir = (
+            "build/.brix-cache" if (store is None and cache_dir is None) else cache_dir
+        )
         self.root: Path = inner.root
 
     def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
@@ -123,10 +147,13 @@ class CacheBuilder:
             (layer.detector for layer in inner_layers if hasattr(layer, "detector")),
             None,
         ) or TimeAndHashChangeDetector(self.root)
-        directory = Path(self.cache_dir)
-        if not directory.is_absolute():
-            directory = self.root / directory
-        return [CacheLayer(CacheStore(directory), detector), *inner_layers]
+        store = self._store
+        if store is None:
+            directory = Path(self.cache_dir)
+            if not directory.is_absolute():
+                directory = self.root / directory
+            store = CacheStore(directory)
+        return [CacheLayer(store, detector), *inner_layers]
 
     def build(self, jobs: int | None = None, reporter=None,
               targets: list[str] | None = None) -> BuildResult:

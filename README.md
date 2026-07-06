@@ -19,6 +19,9 @@ user-facing build language.
 2. [docs/build-layers.html](docs/build-layers.html) — the agreed design for
    the next phase (incremental / cache / atomic layers). Open in a browser;
    it has class and data-flow diagrams.
+3. [docs/class-diagrams.md](docs/class-diagrams.md) — class diagrams for
+   every class in `src/brix/` (48 classes, five grouped diagrams: data
+   model, actions, execution plan, builders & layers, support).
 
 ## Current state
 
@@ -102,17 +105,7 @@ end-to-end test that skips when no JDK is on PATH).
 Duane's priority: settle Python semantics before the Rust port — every
 design decision made now is churn the port never absorbs.
 
-1. **Pluggable cache store** — `CacheBuilder(inner, store=...)` accepting
-   any object with the three-method store protocol (`load` / `restore` /
-   `store`) as an alternative to `cache_dir`; enables remote backends
-   (Nexus/HTTP GET-PUT) and a two-tier store (local disk in front of
-   remote, so team-cache hits don't cost a round-trip each). Baked into
-   the *layer*, not each store: an unreachable remote degrades to a cache
-   miss — never fails the build. Context (Duane): a local cache is barely
-   useful for a single user (incremental covers them); the value is a
-   central team cache. A shared filesystem path already works today via
-   absolute `cache_dir`.
-2. **Fast JVM builds** — design doc written: **`docs/java-fast-builds.md`**
+1. **Fast JVM builds** — design doc written: **`docs/java-fast-builds.md`**
    (persistent workers as a pure execution transport with a JSON-lines
    protocol + crash/caching semantics; `identity=` content-identity
    fingerprints with a versioned `jvm-abi` extractor and its
@@ -120,7 +113,7 @@ design decision made now is churn the port never absorbs.
    `JarAction` classpath + javac worker; Gradle benchmark scenarios).
    Phases 1–2 are cheaper-model work against the doc; phase 3
    (cross-build daemon) deserves full-strength review.
-3. **Rust engine port** — design docs written: **`docs/rust-port.md`**
+2. **Rust engine port** — design docs written: **`docs/rust-port.md`**
    (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
    requirements for fingerprints/metadata/cache, the do-not-reinterpret
    list of load-bearing subtleties, threading model, 4-phase plan with
@@ -130,13 +123,16 @@ design decision made now is churn the port never absorbs.
    against). A cheaper model executes against those docs plus the test
    suite; phases 1–2 are safe solo, phase 3 needs line-by-line review
    against the subtleties list.
-4. **JS/TS API** — mirror API on the same core, specced in the second
+3. **JS/TS API** — mirror API on the same core, specced in the second
    half of `docs/boundary-schema.md`: the Python API transliterated,
    with exactly three sanctioned deviations (mechanical camelCase,
    async `build()`, reporters as plain objects). Buildable by a cheaper
    model once the Rust core exists.
 
-Further out (from the original spec, unscheduled): graph visualization,
+Further out (from the original spec, unscheduled): a concrete remote cache
+backend (Nexus/HTTP GET-PUT `CacheStoreProtocol` store — the protocol and
+`TwoTierCacheStore` to front it already exist; this is the leaf backend and
+its wire decisions: auth, retries, PUT idempotency), graph visualization,
 modular/distributed graph loading for large projects, richer change
 detectors (filesystem watcher, source-control based, remote metadata),
 in-memory and database-backed data expressions,
@@ -308,6 +304,27 @@ class tracking).
   anything without a HELD or COMMIT marker; `discard` refuses an
   interrupted commit, which must finish). Use case: review overnight
   renders before they replace good copies.
+- **Class diagrams** (`docs/class-diagrams.md`): Mermaid `classDiagram`
+  source plus rendered SVGs for all 48 classes in `src/brix/`, grouped
+  into five diagrams (data model, actions, execution plan, builders &
+  layers, support). Rendered with `@mermaid-js/mermaid-cli`; verified by
+  rendering straight to PNG with `mmdc` (not `rsvg-convert`, which drops
+  Mermaid's `foreignObject`-based text silently — see the gotcha noted at
+  the bottom of the doc). Headless Vivaldi hung on this machine during
+  verification; mmdc's own bundled Chromium was used instead.
+- **Pluggable cache store** (`cache.py`, `builders.py`): `CacheBuilder(inner,
+  store=...)` takes any object with the `CacheStoreProtocol` three methods
+  (`load` / `restore` / `store`) as an alternative to `cache_dir` (passing
+  both is a `ValueError`). Degradation now lives in `CacheLayer`: any store
+  exception — unreachable remote, permission error, malformed entry — is a
+  cache miss or a skipped populate, never a failed build, so a leaf store
+  may let its I/O errors propagate. `TwoTierCacheStore(front, back)` puts a
+  fast local store in front of a slow shared one: reads check the front
+  first (a local hit costs no round-trip), a back hit is served *and
+  promoted* into the front, and writes populate the front with best-effort
+  back so a down remote never blocks local caching. A concrete Nexus/HTTP
+  leaf backend is deferred (see Further out); a shared filesystem path
+  already works today via an absolute `cache_dir` or `CacheStore`.
 
 ## Design rules
 
@@ -663,15 +680,12 @@ arguments) stays out of `Graph` and builders.
 
 ## Class inventory
 
-Implemented: `Graph`, `DataFactory`, `DataExpr`/`DataAtom`/`DataUnion`,
-`ExternalProcessAction`, `ExpandAll`, `CleanBuilder`, `ExecutionPlan`,
-`ExecutionNode`, `ExecutionEdge`, `ProcessResult`, `BuildResult`,
-`PathPattern`.
-
-Planned: `BuildLayer`, `NodeContext`, `IncrementalBuilder`, `CacheBuilder`,
-`AtomicBuilder`, `ChangeSet`, `TimeAndHashChangeDetector`;
-`brix.cpp.CompileSourceAction` / `LinkApplicationAction` /
-`CompileApplicationAction`, `brix.java.JarAction`.
+Superseded by [docs/class-diagrams.md](docs/class-diagrams.md), which
+diagrams all 48 classes currently in `src/brix/` (grouped: data model,
+actions, execution plan, builders & layers, support) and is kept current
+going forward. Still planned and not yet in a diagram: `ChangeSet` (a
+pluggable change-detector abstraction — see TODO) and
+`brix.cpp.CompileApplicationAction`.
 
 ---
 

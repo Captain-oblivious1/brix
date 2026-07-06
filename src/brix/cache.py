@@ -13,7 +13,17 @@ staging like any process output. Restored results carry
 replayed too (same inputs, same failure); signal-killed or never-started
 runs are not — those aren't the action's deterministic answer.
 
-Store layout (safe for concurrent builds sharing one directory):
+The store is pluggable. `CacheStore` is the built-in local one; any object
+with the three-method protocol (`load` / `restore` / `store`, see
+`CacheStoreProtocol`) can back the layer instead — a remote team cache, or
+a `TwoTierCacheStore` putting a fast local store in front of a slow shared
+one. Robustness against an unreachable store is the *layer's* job, not each
+store's: `CacheLayer` treats any store exception as a cache miss (or a
+skipped populate), so a down remote degrades to running the work, never a
+failed build. A leaf store may therefore let its I/O errors propagate.
+
+Store layout of the built-in `CacheStore` (safe for concurrent builds
+sharing one directory):
 
     <cache_dir>/<fp[:2]>/<fp>/entry.json   result + logical output paths
     <cache_dir>/<fp[:2]>/<fp>/files/<n>    output content blobs
@@ -30,6 +40,7 @@ import shutil
 import uuid
 from dataclasses import asdict
 from pathlib import Path
+from typing import Protocol
 
 from .actions import ExternalProcessAction
 from .data import FileData, GlobData
@@ -39,6 +50,25 @@ from .process import ProcessResult
 
 _ENTRY = "entry.json"
 _FILES = "files"
+
+
+class CacheStoreProtocol(Protocol):
+    """What `CacheLayer` requires of a store. Structural — a store need not
+    subclass this, only match the three methods.
+
+    An ``entry`` is an opaque dict a store returns from `load` and receives
+    back in `restore`; the layer only reads ``entry["result"]`` (a
+    ``ProcessResult`` as a dict) from it. Everything else in the entry is
+    the store's private business. `restore` copies the entry's cached
+    outputs to ``ctx.output_root`` and returns whether it fully succeeded;
+    a store may let I/O errors propagate — the layer catches them.
+    """
+
+    def load(self, fingerprint: str) -> dict | None: ...
+    def restore(self, fingerprint: str, entry: dict, ctx: NodeContext) -> bool: ...
+    def store(
+        self, fingerprint: str, result: ProcessResult, outputs: dict[str, Path]
+    ) -> None: ...
 
 
 def _output_files(action: ExternalProcessAction, ctx: NodeContext) -> dict[str, Path]:
@@ -112,10 +142,78 @@ class CacheStore:
             shutil.rmtree(tmp, ignore_errors=True)  # another build won the race
 
 
-class CacheLayer(BuildLayer):
-    """Answer stale nodes from the store; populate it after real runs."""
+class TwoTierCacheStore:
+    """A fast local store in front of a slower shared one.
 
-    def __init__(self, store: CacheStore, detector: TimeAndHashChangeDetector) -> None:
+    A read checks the ``front`` first, so a local hit costs no round-trip to
+    the ``back`` (typically a remote/team cache). A ``back`` hit is served
+    and then *promoted* into the front, so the next build on this machine
+    hits locally. A write populates the front and best-effort the back — a
+    write to an unreachable back never blocks local caching.
+
+    Both tiers must share the entry shape used here: ``entry["result"]`` (a
+    ``ProcessResult`` dict) and ``entry["outputs"]`` (an iterable of the
+    logical output paths). The built-in `CacheStore` satisfies this; so does
+    any store modeled on it. Promotion never touches a tier's internal blob
+    layout — it re-stores from the files `restore` just wrote — so the two
+    tiers need not share physical storage, only that entry shape.
+    """
+
+    def __init__(self, front: CacheStoreProtocol, back: CacheStoreProtocol) -> None:
+        self.front = front
+        self.back = back
+
+    def load(self, fingerprint: str) -> dict | None:
+        entry = self.front.load(fingerprint)
+        if entry is not None:
+            entry["_tier"] = "front"
+            return entry
+        entry = self.back.load(fingerprint)  # may raise; the layer degrades
+        if entry is not None:
+            entry["_tier"] = "back"
+        return entry
+
+    def restore(self, fingerprint: str, entry: dict, ctx: NodeContext) -> bool:
+        tier = self.back if entry.get("_tier") == "back" else self.front
+        if not tier.restore(fingerprint, entry, ctx):
+            return False
+        if tier is self.back:
+            self._promote(fingerprint, entry, ctx)
+        return True
+
+    def store(self, fingerprint: str, result: ProcessResult, outputs: dict[str, Path]) -> None:
+        self.front.store(fingerprint, result, outputs)
+        try:
+            self.back.store(fingerprint, result, outputs)
+        except Exception:
+            pass  # a down back must never stop local caching
+
+    def _promote(self, fingerprint: str, entry: dict, ctx: NodeContext) -> None:
+        """Copy a back-tier hit into the front, using the files `restore`
+        just wrote to the output root. Best-effort: a promotion failure must
+        not turn a valid back hit into a miss."""
+        try:
+            result = ProcessResult(**entry["result"])
+            outputs = {
+                logical: ctx.output_root / logical
+                for logical in entry.get("outputs", {})
+            }
+            self.front.store(fingerprint, result, outputs)
+        except Exception:
+            pass
+
+
+class CacheLayer(BuildLayer):
+    """Answer stale nodes from the store; populate it after real runs.
+
+    All three store operations are guarded: an exception from `load`,
+    `restore`, or `store` — an unreachable remote, a permission error, a
+    malformed entry — degrades to a cache miss or a skipped populate, never
+    a failed build. This is why a leaf store may stay dumb and let its I/O
+    errors propagate; the resilience lives here.
+    """
+
+    def __init__(self, store: CacheStoreProtocol, detector: TimeAndHashChangeDetector) -> None:
         self.store = store
         self.detector = detector
 
@@ -126,11 +224,9 @@ class CacheLayer(BuildLayer):
         if not isinstance(action, ExternalProcessAction):
             return inner(ctx)
         fingerprint = action_fingerprint(action, ctx, self.detector)
-        entry = self.store.load(fingerprint)
-        if entry is not None and self.store.restore(fingerprint, entry, ctx):
-            restored = dict(entry["result"])
-            restored["source"] = "cache"
-            return ProcessResult(**restored)
+        hit = self._try_hit(fingerprint, ctx)
+        if hit is not None:
+            return hit
         result = inner(ctx)
         cacheable = (
             result.source == "process"
@@ -139,5 +235,21 @@ class CacheLayer(BuildLayer):
         )
         if cacheable:
             outputs = _output_files(action, ctx) if result.ok else {}
-            self.store.store(fingerprint, result, outputs)
+            try:
+                self.store.store(fingerprint, result, outputs)
+            except Exception:
+                pass  # best-effort populate; a store failure never fails the build
         return result
+
+    def _try_hit(self, fingerprint: str, ctx: NodeContext) -> ProcessResult | None:
+        """A cache hit as a ready ProcessResult, or None to run the work.
+        Any store error (unreachable, corrupt entry) is a miss."""
+        try:
+            entry = self.store.load(fingerprint)
+            if entry is None or not self.store.restore(fingerprint, entry, ctx):
+                return None
+            restored = dict(entry["result"])
+            restored["source"] = "cache"
+            return ProcessResult(**restored)
+        except Exception:
+            return None

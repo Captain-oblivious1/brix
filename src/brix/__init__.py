@@ -8,7 +8,7 @@ runtime ExpandAll expansion, and a clean builder.
 from .actions import DeleteFilesAction, ExpandAll, Expandable, ExternalProcessAction
 from .atomic import AtomicLayer
 from .builders import AtomicBuilder, BuildResult, CacheBuilder, CleanBuilder, IncrementalBuilder
-from .cache import CacheLayer, CacheStore
+from .cache import CacheLayer, CacheStore, CacheStoreProtocol, TwoTierCacheStore
 from .data import DataExpr, DataFactory, DataUnion
 from .graph import Graph
 from .incremental import IncrementalLayer
@@ -38,6 +38,7 @@ __all__ = [
     "CacheBuilder",
     "CacheLayer",
     "CacheStore",
+    "CacheStoreProtocol",
     "CleanBuilder",
     "ConsoleReporter",
     "DataExpr",
@@ -64,6 +65,7 @@ __all__ = [
     "Reporter",
     "StatusReport",
     "TimeAndHashChangeDetector",
+    "TwoTierCacheStore",
     "cli",
     "compute_status",
     "cpp",
