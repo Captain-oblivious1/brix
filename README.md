@@ -120,14 +120,21 @@ design decision made now is churn the port never absorbs.
    `JarAction` classpath + javac worker; Gradle benchmark scenarios).
    Phases 1–2 are cheaper-model work against the doc; phase 3
    (cross-build daemon) deserves full-strength review.
-3. **Rust engine port** — design doc written: **`docs/rust-port.md`**
+3. **Rust engine port** — design docs written: **`docs/rust-port.md`**
    (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
    requirements for fingerprints/metadata/cache, the do-not-reinterpret
    list of load-bearing subtleties, threading model, 4-phase plan with
-   golden tests). A cheaper model executes against that doc plus the
-   test suite; phases 1–2 are safe solo, phase 3 needs line-by-line
-   review against the subtleties list. JS/TS API on the same core
-   afterward.
+   golden tests; former open questions are now settled decisions) and
+   **`docs/boundary-schema.md`** (the exact wire schema — graph spec,
+   config, event stream, extension traits — that phase 2 builds
+   against). A cheaper model executes against those docs plus the test
+   suite; phases 1–2 are safe solo, phase 3 needs line-by-line review
+   against the subtleties list.
+4. **JS/TS API** — mirror API on the same core, specced in the second
+   half of `docs/boundary-schema.md`: the Python API transliterated,
+   with exactly three sanctioned deviations (mechanical camelCase,
+   async `build()`, reporters as plain objects). Buildable by a cheaper
+   model once the Rust core exists.
 
 Further out (from the original spec, unscheduled): graph visualization,
 modular/distributed graph loading for large projects, richer change

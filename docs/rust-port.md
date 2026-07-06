@@ -63,7 +63,10 @@ both engines during the transition.
 ## The boundary contract
 
 The boundary is **coarse and data-shaped**, not object-shaped. Python
-never holds references into live Rust scheduler state.
+never holds references into live Rust scheduler state. The exact wire
+schema (graph spec, config, event stream, extension-trait call shapes)
+is pinned in **`docs/boundary-schema.md`** — build phase 2 against that
+document, not against prose.
 
 1. **Graph goes in as a value.** Users build the `Graph` with today's
    Python classes; at `plan()`/`build()` time it lowers to a declarative
@@ -284,13 +287,16 @@ review the scheduler and layer implementations against it line by line
 before trusting green tests, because several subtleties (event ordering,
 stuck-node snapshots, cascade rules) are only partially pinned by tests.
 
-## Open questions (settle before phase 3, not during)
+## Decisions (were open questions; settled — do not reopen during the port)
 
-- Exact `Reporter` event **ordering guarantee** to document: today
-  everything but `process_started` is emitted from the scheduler thread
-  in scheduling order; keep that contract.
-- Windows: paths in metadata/cache use `/` (posix) logical paths
-  already; keep logical paths posix everywhere, convert at the
-  filesystem edge only.
-- Whether `status`/`clean` stay pure Python (they re-walk the graph) or
-  call core; recommendation: call core so freshness logic exists once.
+- **Event ordering**: all events except `process_started` are emitted
+  from the scheduler thread in scheduling order; `process_started`
+  comes from worker threads and may interleave, but always between its
+  own node's `node_started` and `node_completed`. Full contract in
+  `docs/boundary-schema.md`.
+- **Paths**: logical paths are POSIX (`/`) everywhere — metadata, cache
+  entries, specs, events — on every platform; conversion to native
+  separators happens only at the filesystem edge inside the core.
+- **`status` and `clean` call the core.** Freshness logic exists once;
+  the Python `compute_status`/`_clean` become thin clients over core
+  calls, same as `build`. (CLI rendering and exit codes stay Python.)
