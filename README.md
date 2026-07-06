@@ -105,14 +105,15 @@ end-to-end test that skips when no JDK is on PATH).
 Duane's priority: settle Python semantics before the Rust port — every
 design decision made now is churn the port never absorbs.
 
-1. **Fast JVM builds** — design doc written: **`docs/java-fast-builds.md`**
-   (persistent workers as a pure execution transport with a JSON-lines
-   protocol + crash/caching semantics; `identity=` content-identity
-   fingerprints with a versioned `jvm-abi` extractor and its
-   over-approximation rules — static-final values, all annotations;
-   `JarAction` classpath + javac worker; Gradle benchmark scenarios).
-   Phases 1–2 are cheaper-model work against the doc; phase 3
-   (cross-build daemon) deserves full-strength review.
+1. **Fast JVM builds** — design doc: **`docs/java-fast-builds.md`**.
+   **Phase 1 (content-identity / ABI fingerprints) is done** — see the
+   Completed log. Remaining: **phase 2** (persistent workers as a pure
+   execution transport with a JSON-lines protocol + crash/caching
+   semantics; the in-process javac worker; `JarAction` `classpath=`
+   routing through it; the Gradle benchmark scenarios) — cheaper-model
+   work against the doc — and **phase 3** (cross-build daemon), which
+   deserves full-strength review. Phase 2 is where the *edit-compile
+   loop* speedup lands; phase 1 already delivers compile avoidance.
 2. **Rust engine port** — design docs written: **`docs/rust-port.md`**
    (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
    requirements for fingerprints/metadata/cache, the do-not-reinterpret
@@ -328,6 +329,29 @@ class tracking).
   demo: `examples/cache_store_demo/` — simulates four builds across two
   machines (seed team cache, back-hit + promote, warm-front no round-trip,
   team cache down still succeeds).
+- **JVM fast builds, phase 1 — content-identity / ABI fingerprints**
+  (`identity.py`, `jvmabi.py`, `data.py`, `incremental.py`, `metadata.py`):
+  `data.file(path, identity="jvm-abi")` makes a file contribute an ABI
+  digest to fingerprints instead of its byte hash, so a dependent
+  recompiles on a dependency's *API* change but not an implementation-only
+  one (compile avoidance). `ContentIdentity` is a registered plugin
+  (`name` / `version` / `digest(path)`); the versioned tag `jvm-abi@1` is
+  part of the fingerprint payload, so bumping a plugin cleanly invalidates
+  everything it fingerprinted. `jvmabi.py` is a pure-Python class-file/jar
+  parser (no JVM needed) that over-approximates the ABI — class/member
+  signatures, `static final` constant values, all annotations (runtime-
+  visible and CLASS-retention), throws clauses, nest/sealed structure;
+  excludes method bodies, private members, debug info, and bytecode
+  version — and is deterministic (constant-pool references resolved, no
+  text-encoding or float-formatting hazard) so the eventual Rust `jvm-abi`
+  can reproduce it against the checked-in golden fixtures. A file the
+  plugin can't interpret falls back to a byte hash under a `:raw` tag
+  (a cross-machine disagreement can only miss, never make a stale hit);
+  an unknown identity name is a loud error. Per-identity digests cache in
+  the metadata alongside the byte hash, validated by the same stat
+  signature. Fixtures + golden digests under `tests/fixtures/jvmabi/`
+  (regenerate with its `regenerate.sh`). Phases 2–3 (workers, daemon)
+  remain; `brix.java` is untouched until phase 2 wires `classpath=`.
 
 ## Design rules
 
@@ -684,11 +708,13 @@ arguments) stays out of `Graph` and builders.
 ## Class inventory
 
 Superseded by [docs/class-diagrams.md](docs/class-diagrams.md), which
-diagrams all 48 classes currently in `src/brix/` (grouped: data model,
-actions, execution plan, builders & layers, support) and is kept current
-going forward. Still planned and not yet in a diagram: `ChangeSet` (a
-pluggable change-detector abstraction — see TODO) and
-`brix.cpp.CompileApplicationAction`.
+diagrams the engine's classes in `src/brix/` (grouped: data model,
+actions, execution plan, builders & layers, support). Not yet in a
+diagram: the JVM phase 1 additions (`identity.ContentIdentity` /
+`JvmAbiIdentity`, `jvmabi`), plus still-planned `ChangeSet` (a pluggable
+change-detector abstraction — see TODO) and
+`brix.cpp.CompileApplicationAction`. A `content identity` diagram group
+is a good small follow-up.
 
 ---
 

@@ -26,7 +26,7 @@ from .plan import (
 from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 from .status import ActionStatus, StatusReport, compute_status
-from . import cli, cpp, java
+from . import cli, cpp, identity, java, jvmabi
 
 __all__ = [
     "ActionStatus",
@@ -69,5 +69,7 @@ __all__ = [
     "cli",
     "compute_status",
     "cpp",
+    "identity",
     "java",
+    "jvmabi",
 ]

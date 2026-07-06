@@ -74,6 +74,24 @@ def membership_key(action: ExpandAll) -> str:
     return _digest(payload)
 
 
+def _identity_material(identity_name: str, physical, detector) -> list:
+    """The fingerprint tail for a file carrying a content identity:
+    ``[tag, digest]`` (e.g. ``["jvm-abi@1", "<hex>"]``), or ``[tag:raw,
+    byte_hash]`` when the plugin cannot interpret the file. Deterministic for
+    the same bytes, so a cross-machine disagreement can only miss, never make a
+    stale hit. An unknown identity name raises loudly (before the fallback)."""
+    from .identity import get
+    from .identity import tag as identity_tag
+
+    identity = get(identity_name)
+    tag = identity_tag(identity)
+    try:
+        digest = detector.identity_digest(physical, identity)
+    except Exception:
+        return [f"{tag}:raw", detector.hash_file(physical)]
+    return [tag, digest]
+
+
 def action_fingerprint(
     action: ExternalProcessAction, ctx: NodeContext, detector: TimeAndHashChangeDetector
 ) -> str:
@@ -85,8 +103,20 @@ def action_fingerprint(
 
     def atom_fp(atom: DataAtom) -> list:
         if isinstance(atom, FileData):
-            return ["file", atom.path, detector.hash_file(ctx.read_path(atom.path))]
+            physical = ctx.read_path(atom.path)
+            if atom.identity is not None:
+                return ["file", atom.path, *_identity_material(atom.identity, physical, detector)]
+            return ["file", atom.path, detector.hash_file(physical)]
         if isinstance(atom, GlobData):
+            if atom.identity is not None:
+                return [
+                    "glob",
+                    atom.pattern.template,
+                    [
+                        [logical, *_identity_material(atom.identity, physical, detector)]
+                        for logical, physical, _ in ctx.find(atom.pattern)
+                    ],
+                ]
             return [
                 "glob",
                 atom.pattern.template,

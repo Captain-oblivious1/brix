@@ -56,16 +56,42 @@ class BuildMetadata:
         tmp.replace(self.path)
 
     # -- file-hash cache ---------------------------------------------------
+    #
+    # One entry per absolute path, validated by (mtime_ns, size). It holds the
+    # byte hash under "sha256" and any content-identity digests under their
+    # versioned tag (e.g. "jvm-abi@1") — same stat validation, so an unchanged
+    # file costs one stat whether it is byte- or identity-hashed.
+
+    def _entry_for(self, path_key: str, signature: list[int]) -> dict:
+        """The sig-keyed entry for a path, reset if the signature changed
+        (a changed file invalidates its byte hash and every identity digest)."""
+        entry = self._data["files"].get(path_key)
+        if entry is None or entry.get("sig") != signature:
+            entry = {"sig": signature}
+            self._data["files"][path_key] = entry
+        return entry
 
     def cached_hash(self, path_key: str, signature: list[int]) -> str | None:
         entry = self._data["files"].get(path_key)
-        if entry and entry["sig"] == signature:
-            return entry["sha256"]
+        if entry and entry.get("sig") == signature:
+            return entry.get("sha256")
         return None
 
     def store_hash(self, path_key: str, signature: list[int], digest: str) -> None:
         with self._lock:
-            self._data["files"][path_key] = {"sig": signature, "sha256": digest}
+            self._entry_for(path_key, signature)["sha256"] = digest
+
+    def cached_identity(self, path_key: str, signature: list[int], tag: str) -> str | None:
+        entry = self._data["files"].get(path_key)
+        if entry and entry.get("sig") == signature:
+            return entry.get(tag)
+        return None
+
+    def store_identity(
+        self, path_key: str, signature: list[int], tag: str, digest: str
+    ) -> None:
+        with self._lock:
+            self._entry_for(path_key, signature)[tag] = digest
 
     # -- action records ----------------------------------------------------
 
@@ -126,4 +152,25 @@ class TimeAndHashChangeDetector:
             return cached
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         self.metadata.store_hash(key, signature, digest)
+        return digest
+
+    def identity_digest(self, path: Path, identity) -> str | None:
+        """The content-identity digest of a file, cached like `hash_file` and
+        validated by the same stat signature. None if missing or not a regular
+        file. Propagates the plugin's error on a file it cannot interpret — the
+        caller decides the fallback."""
+        from .identity import tag as identity_tag
+
+        if not path.is_file():
+            return None
+        signature = self.stat_signature(path)
+        if signature is None:
+            return None
+        key = str(path)
+        tag = identity_tag(identity)
+        cached = self.metadata.cached_identity(key, signature, tag)
+        if cached is not None:
+            return cached
+        digest = identity.digest(path)  # may raise; caller falls back to :raw
+        self.metadata.store_identity(key, signature, tag, digest)
         return digest

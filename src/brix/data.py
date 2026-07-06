@@ -37,32 +37,47 @@ class DataAtom(DataExpr):
 
 
 class FileData(DataAtom):
-    """One logical path. It need not exist yet."""
+    """One logical path. It need not exist yet.
 
-    def __init__(self, path: str) -> None:
+    ``identity`` names a registered content-identity plugin (e.g.
+    ``"jvm-abi"``): the file contributes that plugin's digest to fingerprints
+    instead of its byte hash. Default ``None`` is byte hashing.
+    """
+
+    def __init__(self, path: str, identity: str | None = None) -> None:
         self.pattern = PathPattern(path)
+        self.identity = identity
 
     @property
     def path(self) -> str:
         return self.pattern.template
 
     def substitute(self, bindings: dict[str, str]) -> FileData:
-        return FileData(self.pattern.substitute(bindings))
+        return FileData(self.pattern.substitute(bindings), self.identity)
 
     def __repr__(self) -> str:
+        if self.identity is not None:
+            return f"data.file({self.path!r}, identity={self.identity!r})"
         return f"data.file({self.path!r})"
 
 
 class GlobData(DataAtom):
-    """A path set with optional named bindings, e.g. ``src/{name}.cpp``."""
+    """A path set with optional named bindings, e.g. ``src/{name}.cpp``.
 
-    def __init__(self, pattern: str) -> None:
+    ``identity`` applies the named content-identity plugin to every matched
+    file (see `FileData`); default ``None`` is byte hashing.
+    """
+
+    def __init__(self, pattern: str, identity: str | None = None) -> None:
         self.pattern = PathPattern(pattern)
+        self.identity = identity
 
     def substitute(self, bindings: dict[str, str]) -> GlobData:
-        return GlobData(self.pattern.substitute(bindings))
+        return GlobData(self.pattern.substitute(bindings), self.identity)
 
     def __repr__(self) -> str:
+        if self.identity is not None:
+            return f"data.glob({self.pattern.template!r}, identity={self.identity!r})"
         return f"data.glob({self.pattern.template!r})"
 
 
@@ -144,11 +159,11 @@ class DataUnion(DataExpr):
 class DataFactory:
     """Constructor namespace exposed as ``graph.data``."""
 
-    def file(self, path: str) -> FileData:
-        return FileData(path)
+    def file(self, path: str, identity: str | None = None) -> FileData:
+        return FileData(path, identity)
 
-    def glob(self, pattern: str) -> GlobData:
-        return GlobData(pattern)
+    def glob(self, pattern: str, identity: str | None = None) -> GlobData:
+        return GlobData(pattern, identity)
 
     def regex(self, pattern: str) -> RegexData:
         return RegexData(pattern)
