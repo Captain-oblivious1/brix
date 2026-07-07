@@ -152,6 +152,16 @@ def action_fingerprint(
     }
     if action.env:
         payload["env"] = {k: [atom_fp(a) for a in v.atoms()] for k, v in action.env.items()}
+    if action.worker is not None:
+        # The worker is part of the toolchain (its jar/interpreter determine the
+        # output), so its identity joins the fingerprint with the same atom_fp
+        # rules: a JDK upgrade or a rebuilt worker jar invalidates everything
+        # this worker built, exactly like a compiler change.
+        spec = action.worker
+        payload["worker"] = {
+            "command": spec.command_line,
+            "inputs": {k: [atom_fp(a) for a in v.atoms()] for k, v in spec.inputs.items()},
+        }
     return _digest(payload)
 
 

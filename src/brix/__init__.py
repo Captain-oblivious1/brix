@@ -26,6 +26,7 @@ from .plan import (
 from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 from .status import ActionStatus, StatusReport, compute_status
+from .workers import WorkerSpec
 from . import cli, cpp, identity, java, jvmabi
 
 __all__ = [
@@ -66,6 +67,7 @@ __all__ = [
     "StatusReport",
     "TimeAndHashChangeDetector",
     "TwoTierCacheStore",
+    "WorkerSpec",
     "cli",
     "compute_status",
     "cpp",

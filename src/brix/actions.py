@@ -7,7 +7,12 @@ are applied by planning layers, never declared here.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .data import DataAtom, DataExpr, DataUnion
+
+if TYPE_CHECKING:
+    from .workers import WorkerSpec
 
 
 class Action:
@@ -60,6 +65,7 @@ class ExternalProcessAction(Expandable):
         inputs: dict[str, DataExpr] | None = None,
         outputs: dict[str, DataExpr] | None = None,
         env: dict[str, DataExpr | str] | None = None,
+        worker: "WorkerSpec | None" = None,
     ) -> None:
         from .data import ValueData
 
@@ -71,6 +77,9 @@ class ExternalProcessAction(Expandable):
             k: v if isinstance(v, DataExpr) else ValueData(v)
             for k, v in (env or {}).items()
         }
+        # A worker executes this action as a request instead of spawning it;
+        # None spawns a process. Purely an execution transport (see workers.py).
+        self.worker = worker
 
     @property
     def label(self) -> str:
@@ -88,6 +97,7 @@ class ExternalProcessAction(Expandable):
             inputs={k: _substitute_expr(v, bindings) for k, v in self.inputs.items()},
             outputs={k: _substitute_expr(v, bindings) for k, v in self.outputs.items()},
             env={k: _substitute_expr(v, bindings) for k, v in self.env.items()},
+            worker=self.worker,
         )
 
     def __repr__(self) -> str:

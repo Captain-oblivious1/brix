@@ -28,7 +28,13 @@ def _path_atoms(exprs) -> Iterator[PathAtom]:
 
 def input_atoms(action: Action) -> list[PathAtom]:
     if isinstance(action, ExternalProcessAction):
-        return list(_path_atoms(action.inputs.values()))
+        atoms = list(_path_atoms(action.inputs.values()))
+        if action.worker is not None:
+            # The worker's own inputs (e.g. a bootstrap-built worker jar) are
+            # inputs this action needs present, so they create dependency edges
+            # like any other input — the worker jar's producer must run first.
+            atoms += list(_path_atoms(action.worker.inputs.values()))
+        return atoms
     if isinstance(action, ExpandAll):
         # Nested expansions contribute their collections and inputs too.
         return list(_path_atoms([action.collection])) + input_atoms(action.child)

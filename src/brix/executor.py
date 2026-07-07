@@ -14,6 +14,7 @@ each collection realization, and at the end.
 from __future__ import annotations
 
 import os
+import shlex
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
 from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
@@ -53,11 +54,21 @@ def _run_delete(action: DeleteFilesAction, ctx: NodeContext) -> ProcessResult:
     )
 
 
-def _run_process_node(node: ExecutionNode, ctx: NodeContext) -> ProcessResult:
+def _run_process_node(node: ExecutionNode, ctx: NodeContext, workers) -> ProcessResult:
     action = node.action
     if isinstance(action, DeleteFilesAction):
         return _run_delete(action, ctx)
     assert isinstance(action, ExternalProcessAction)
+    if action.worker is not None:
+        # Same rendering as a spawn (overlay output-redirection included), but
+        # the argv is dispatched to a worker instead of spawned. Env is not
+        # part of the worker protocol; worker actions do not use env= in v1.
+        try:
+            prepare_output_dirs(action, ctx)
+            args = shlex.split(render_command(action, ctx))
+        except (RenderError, ValueError) as exc:
+            return ProcessResult(action_name=action.label, command="", stderr=f"brix: {exc}")
+        return workers.run(action.worker, action.label, args, ctx)
     try:
         prepare_output_dirs(action, ctx)
         command = render_command(action, ctx)
@@ -68,16 +79,17 @@ def _run_process_node(node: ExecutionNode, ctx: NodeContext) -> ProcessResult:
 
 
 def _stacked_runner(
-    node: ExecutionNode, layers: list[BuildLayer], reporter: Reporter
+    node: ExecutionNode, layers: list[BuildLayer], reporter: Reporter, workers
 ) -> NodeRunner:
     """Wrap the process run in each layer's around_node, innermost first."""
 
     def base(ctx: NodeContext) -> ProcessResult:
         # Innermost of all: only reached when a real process is about to
-        # spawn (a replaying layer returns before this), so the reporter's
-        # liveness signal is exact. Runs on a worker thread.
+        # spawn or a worker request is about to dispatch (a replaying layer
+        # returns before this), so the reporter's liveness signal is exact.
+        # Runs on a worker thread.
         reporter.process_started(node)
-        return _run_process_node(node, ctx)
+        return _run_process_node(node, ctx, workers)
 
     call = base
     for layer in layers:
@@ -151,11 +163,13 @@ def execute(
     reporter: Reporter | None = None,
 ):
     from .builders import BuildResult
+    from .workers import WorkerRegistry
 
     layers = list(layers or [])
     reporter = reporter if reporter is not None else Reporter()
     states = NodeStateTable()
     ctx = NodeContext.for_root(plan.root)
+    workers = WorkerRegistry()
     max_workers = jobs or min(32, os.cpu_count() or 4)
     pending: set[int] = {n.id for n in plan.nodes}
     running: dict[Future[ProcessResult], int] = {}
@@ -236,7 +250,9 @@ def execute(
                 else:
                     states.advance(nid, NodeState.RUNNING)
                     reporter.node_started(node)
-                    future = pool.submit(_stacked_runner(node, layers, reporter), ctx)
+                    future = pool.submit(
+                        _stacked_runner(node, layers, reporter, workers), ctx
+                    )
                     running[future] = nid
 
             if running:
@@ -274,6 +290,8 @@ def execute(
                         reporter.node_skipped(node, "unreachable — dependency cycle?")
                 pending.clear()
 
+    # Scheduler owns worker lifecycles: all terminated at build end (v1).
+    workers.terminate_all()
     success = not errors
     build_result = BuildResult(
         success=success, plan=plan, states=states, process_results=results, errors=errors

@@ -29,14 +29,98 @@ collections — future work.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from .actions import Action, ExternalProcessAction
-from .data import DataExpr, FileData, GlobData, ToolData, ValueData
+from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+
+if TYPE_CHECKING:
+    from .graph import Graph
+    from .workers import WorkerSpec
+
+_WORKER_SOURCE = Path(__file__).parent / "_java" / "JavacWorker.java"
 
 
 def _options_expr(options: list[str] | DataExpr | None) -> DataExpr:
     if isinstance(options, DataExpr):
         return options
     return ValueData(" ".join(options or []))
+
+
+def _classpath_union(classpath: list[DataExpr]) -> DataExpr:
+    """Flatten classpath entries into one expression, defaulting each file to
+    ``identity="jvm-abi"`` — the whole point is that a dependency recompiles a
+    dependent only on an API change."""
+    atoms: list = []
+    for expr in classpath:
+        for atom in expr.atoms():
+            if isinstance(atom, FileData) and atom.identity is None:
+                atoms.append(FileData(atom.path, identity="jvm-abi"))
+            elif isinstance(atom, GlobData) and atom.identity is None:
+                atoms.append(GlobData(atom.pattern.template, identity="jvm-abi"))
+            else:
+                atoms.append(atom)
+    return DataUnion(*atoms)
+
+
+def javac_worker(
+    graph: "Graph",
+    *,
+    java: ToolData | None = None,
+    javac: ToolData | None = None,
+    jar_tool: ToolData | None = None,
+    work_dir: str = "build/.brix-java",
+) -> "WorkerSpec":
+    """Add the javac worker bootstrap to ``graph`` and return its `WorkerSpec`.
+
+    The worker is a small in-process ``JavaCompiler`` wrapper shipped with brix;
+    it is compiled and jarred by two plain (spawned) nodes here, so the worker
+    jar is itself a fingerprinted, cacheable build product. Pass the returned
+    spec to ``JarAction(javac_worker=...)`` to route module compilation through
+    the warm worker.
+
+    Idempotent: called more than once on a graph, it adds the bootstrap only
+    once and returns the same spec, so many `JarAction`s share one worker jar.
+    """
+    from .workers import WorkerSpec
+
+    cached = getattr(graph, "_brix_javac_worker", None)
+    if cached is not None:
+        return cached
+
+    java = java if java is not None else ToolData("java")
+    javac = javac if javac is not None else ToolData("javac")
+    jar_tool = jar_tool if jar_tool is not None else ToolData("jar")
+    classes_dir = f"{work_dir}/worker-classes"
+    worker_jar = f"{work_dir}/javac-worker.jar"
+    classes = GlobData(f"{classes_dir}/{{name}}.class")
+
+    graph.add(
+        ExternalProcessAction(
+            name="javac-worker: compile",
+            command_line="{javac} -d {classes_dir} {source}",
+            inputs={"javac": javac, "source": FileData(str(_WORKER_SOURCE.resolve()))},
+            outputs={"classes_dir": FileData(classes_dir), "classes": classes},
+        ),
+        ExternalProcessAction(
+            name="javac-worker: jar",
+            command_line="{jar} cfe {out} JavacWorker -C {classes_dir} .",
+            inputs={
+                "jar": jar_tool,
+                "classes_dir": FileData(classes_dir),
+                "classes": GlobData(f"{classes_dir}/{{name}}.class"),
+            },
+            outputs={"out": FileData(worker_jar)},
+        ),
+    )
+    spec = WorkerSpec(
+        name="javac",
+        command_line="{java} -jar {worker_jar}",
+        inputs={"java": java, "worker_jar": FileData(worker_jar)},
+    )
+    graph._brix_javac_worker = spec  # type: ignore[attr-defined]
+    return spec
 
 
 class JarAction(Action):
@@ -52,6 +136,8 @@ class JarAction(Action):
         options: list[str] | DataExpr | None = None,
         classes_dir: str = "build/classes",
         entry_point: str | None = None,
+        classpath: list[DataExpr] | None = None,
+        javac_worker: "WorkerSpec | None" = None,
     ) -> None:
         self.source_files = source_files
         self.output_file = output_file
@@ -60,22 +146,53 @@ class JarAction(Action):
         self.options = options
         self.classes_dir = classes_dir
         self.entry_point = entry_point
+        self.classpath = classpath
+        # When set, the compile step routes through the warm javac worker (see
+        # java.javac_worker); otherwise it spawns javac. classpath= currently
+        # rides the worker (the wrapper joins entries with the path separator).
+        self.javac_worker = javac_worker
+        if classpath and javac_worker is None:
+            raise ValueError(
+                "JarAction: classpath= currently requires javac_worker= "
+                "(java.javac_worker(graph)); pass one, or drop classpath"
+            )
 
     def lower(self) -> list[Action]:
         classes = GlobData(f"{self.classes_dir}/{{name}}.class")
-        compile_java = ExternalProcessAction(
-            name=f"javac -> {self.classes_dir}",
-            command_line="{javac} {options} -d {classes_dir} {sources}",
-            inputs={
-                "javac": self.javac,
+        if self.javac_worker is not None:
+            inputs: dict[str, DataExpr] = {
                 "options": _options_expr(self.options),
                 "sources": self.source_files,
-            },
-            outputs={
-                "classes_dir": FileData(self.classes_dir),
-                "classes": classes,
-            },
-        )
+            }
+            parts = []
+            if self.classpath:
+                inputs["classpath"] = _classpath_union(self.classpath)
+                parts.append("--classpath {classpath}")
+            parts += ["--options {options}", "-d {classes_dir}", "--sources {sources}"]
+            compile_java = ExternalProcessAction(
+                name=f"javac(worker) -> {self.classes_dir}",
+                worker=self.javac_worker,
+                command_line=" ".join(parts),
+                inputs=inputs,
+                outputs={
+                    "classes_dir": FileData(self.classes_dir),
+                    "classes": classes,
+                },
+            )
+        else:
+            compile_java = ExternalProcessAction(
+                name=f"javac -> {self.classes_dir}",
+                command_line="{javac} {options} -d {classes_dir} {sources}",
+                inputs={
+                    "javac": self.javac,
+                    "options": _options_expr(self.options),
+                    "sources": self.source_files,
+                },
+                outputs={
+                    "classes_dir": FileData(self.classes_dir),
+                    "classes": classes,
+                },
+            )
         if self.entry_point:
             jar_command = "{jar} cfe {output} {entry_point} -C {classes_dir} ."
             jar_inputs = {"entry_point": ValueData(self.entry_point)}

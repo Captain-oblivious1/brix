@@ -106,14 +106,14 @@ Duane's priority: settle Python semantics before the Rust port — every
 design decision made now is churn the port never absorbs.
 
 1. **Fast JVM builds** — design doc: **`docs/java-fast-builds.md`**.
-   **Phase 1 (content-identity / ABI fingerprints) is done** — see the
-   Completed log. Remaining: **phase 2** (persistent workers as a pure
-   execution transport with a JSON-lines protocol + crash/caching
-   semantics; the in-process javac worker; `JarAction` `classpath=`
-   routing through it; the Gradle benchmark scenarios) — cheaper-model
-   work against the doc — and **phase 3** (cross-build daemon), which
-   deserves full-strength review. Phase 2 is where the *edit-compile
-   loop* speedup lands; phase 1 already delivers compile avoidance.
+   **Phases 1 and 2 are done** (see the Completed log): content-identity /
+   ABI fingerprints; persistent workers as a pure execution transport; the
+   in-process javac worker and `JarAction` `classpath=` routing through it;
+   the Gradle acceptance benchmark (`benchmarks/jvm/`, phase-2 brix wins 4
+   of 5 scenarios). Remaining: **phase 3** (the cross-build daemon — keep
+   workers warm *between* builds, which flips the last benchmark scenario
+   and is the "faster than Gradle" claim), which deserves full-strength
+   review.
 2. **Rust engine port** — design docs written: **`docs/rust-port.md`**
    (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
    requirements for fingerprints/metadata/cache, the do-not-reinterpret
@@ -352,6 +352,34 @@ class tracking).
   signature. Fixtures + golden digests under `tests/fixtures/jvmabi/`
   (regenerate with its `regenerate.sh`). Phases 2–3 (workers, daemon)
   remain; `brix.java` is untouched until phase 2 wires `classpath=`.
+- **JVM fast builds, phase 2 — persistent workers + javac worker**
+  (`workers.py`, `executor.py`, `actions.py`, `planner.py`, `java.py`,
+  `src/brix/_java/JavacWorker.java`): a worker is a long-lived process that
+  executes many actions over a JSON-lines protocol, amortizing startup
+  (a cold JVM is the motivating cost). `worker=` on `ExternalProcessAction`
+  routes the rendered argv to a `WorkerSpec`'s pool instead of spawning —
+  indistinguishable in results, provenance (`source="process"`),
+  `process_started`, caching, and staging (overlay output-redirection is
+  preserved). The scheduler owns worker lifecycles (lazy start, all
+  terminated at build end); a crash or startup failure fails the request
+  with `exit_code=None` (never cached, worker discarded) with **no** silent
+  fallback to spawning. The worker's identity joins the action fingerprint,
+  so a JDK/wrapper change invalidates worker-built actions; the planner
+  treats a worker's inputs (e.g. a bootstrap-built worker jar) as
+  dependency edges. `java.javac_worker(graph)` adds an idempotent bootstrap
+  (a plain spawned javac+jar of the shipped `JavacWorker.java`, itself a
+  cacheable build product) and returns the spec; `JarAction` grows
+  `classpath=` (entries default to `identity="jvm-abi"`) and `javac_worker=`
+  to route its compile step through the warm in-process `JavaCompiler`.
+  Multi-module payoff proven end-to-end (`tests/test_java_worker.py`): a
+  dependency's implementation-only change does not recompile its dependent;
+  an API change does. Worker transport tested with a Python protocol worker
+  (`tests/test_workers.py`). Acceptance benchmark vs Gradle in
+  `benchmarks/jvm/` (`bench.py` + methodology): phase-2 brix wins 4 of 5
+  scenarios (cold clean, warm cache, no-op, single-module impl change) and
+  loses only the multi-module API-change recompile to Gradle's warm daemon —
+  the case phase 3's cross-build daemon is meant to flip. Remaining: phase 3
+  (cross-build daemon), reserved for full-strength review.
 
 ## Design rules
 
@@ -710,11 +738,12 @@ arguments) stays out of `Graph` and builders.
 Superseded by [docs/class-diagrams.md](docs/class-diagrams.md), which
 diagrams the engine's classes in `src/brix/` (grouped: data model,
 actions, execution plan, builders & layers, support). Not yet in a
-diagram: the JVM phase 1 additions (`identity.ContentIdentity` /
-`JvmAbiIdentity`, `jvmabi`), plus still-planned `ChangeSet` (a pluggable
+diagram: the JVM phase 1–2 additions (`identity.ContentIdentity` /
+`JvmAbiIdentity`, `jvmabi`, `workers.WorkerSpec` / `Worker` / `WorkerPool`
+/ `WorkerRegistry`), plus still-planned `ChangeSet` (a pluggable
 change-detector abstraction — see TODO) and
-`brix.cpp.CompileApplicationAction`. A `content identity` diagram group
-is a good small follow-up.
+`brix.cpp.CompileApplicationAction`. A `content identity` + `workers`
+diagram group is a good small follow-up.
 
 ---
 
