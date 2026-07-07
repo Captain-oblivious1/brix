@@ -97,7 +97,8 @@ document, not against prose.
    - `CacheStore` (TODO #2 — `load`/`restore`/`store`; the filesystem
      store is native Rust, a Python object implementing the three
      methods gets wrapped),
-   - `DependencyScanner` (future post-run hook).
+   - `DependencyScanner` (post-run hook; **implemented Python-side** — see
+     the discovered-deps note under Fingerprints below).
    The general `BuildLayer` trait is **Rust-internal**; Python-defined
    layers are not part of v1's contract.
 
@@ -190,6 +191,19 @@ Fingerprints and incremental:
   identity, input hashes, env values, `ValueData` text). Records are
   keyed by action_key; freshness compares fingerprints. `ValueData` text
   is fingerprint material but **not** identity.
+- **Discovered dependencies** (`DependencyScanner`, e.g. C/C++ headers from a
+  compiler depfile): after a run, an action carrying a `depfile` marker has its
+  emitted Makefile-format depfile scanned (`scan_depfile`), and the reported
+  paths are recorded in metadata under `deps` keyed by action_key. On the next
+  build `action_fingerprint` appends a `"deps"` map (`{path: hash}`, sorted) to
+  the payload — so the Rust port must reproduce this component byte-for-byte or
+  cache keys diverge. It is absent on the first build and for actions with no
+  depfile, so it never perturbs an existing fingerprint. Both layers read the
+  deps via the shared detector's metadata, so the *cache* key includes them too
+  (no stale-header hits); after a run the fingerprint is recomputed with deps
+  folded in (record is dep-aware immediately → next build fresh), and the scan
+  also runs after a cache hit (a cache-fed machine still learns the headers).
+  Not identity: `depfile` and discovered deps never enter `action_key`.
 - Tool fingerprint = resolved path (PATH lookup if no `/`) + stat
   signature (mtime_ns, size), *not* content hash. Missing tool →
   `[tool, name, None, None]`, still a valid fingerprint.

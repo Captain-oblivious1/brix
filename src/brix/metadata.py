@@ -23,7 +23,7 @@ _VERSION = 1
 
 
 def _fresh() -> dict:
-    return {"version": _VERSION, "files": {}, "actions": {}, "memberships": {}}
+    return {"version": _VERSION, "files": {}, "actions": {}, "memberships": {}, "deps": {}}
 
 
 class BuildMetadata:
@@ -105,6 +105,21 @@ class BuildMetadata:
     def forget_action(self, key: str) -> None:
         with self._lock:
             self._data["actions"].pop(key, None)
+            self._data.get("deps", {}).pop(key, None)
+
+    # -- discovered (scanned) dependencies ---------------------------------
+    #
+    # Extra input paths a tool reported reading at build time (e.g. C/C++
+    # headers from a compiler depfile) that the graph did not declare. Keyed by
+    # action_key and folded into the action's fingerprint on the next build, so
+    # editing one of them re-stales the action.
+
+    def discovered_deps(self, key: str) -> list[str] | None:
+        return self._data.get("deps", {}).get(key)
+
+    def set_discovered_deps(self, key: str, paths: list[str]) -> None:
+        with self._lock:
+            self._data.setdefault("deps", {})[key] = sorted(paths)
 
     def action_records(self) -> dict[str, dict]:
         return dict(self._data["actions"])

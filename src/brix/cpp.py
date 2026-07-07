@@ -71,19 +71,30 @@ class CompileSourceAction(Action):
 
     def lower(self) -> list[Action]:
         name = self._binding
+        obj_template = self.object_files.pattern.template
+        depfile = f"{obj_template}.d"
         return [
             ExpandAll(
                 element_name=name,
                 collection=self.source_files,
                 child=ExternalProcessAction(
                     name=f"compile {{{name}}}",
-                    command_line="{compiler} {options} -c {source} -o {object}",
+                    # -MMD writes user-header (not system-header) prerequisites;
+                    # -MF puts the depfile where the incremental layer scans it,
+                    # so editing an #included header re-stales this compile.
+                    command_line=(
+                        "{compiler} {options} -MMD -MF {depfile} -c {source} -o {object}"
+                    ),
                     inputs={
                         "compiler": self.compiler,
                         "options": _options_expr(self.compile_options),
                         "source": FileData(self.source_files.pattern.template),
                     },
-                    outputs={"object": FileData(self.object_files.pattern.template)},
+                    outputs={
+                        "object": FileData(obj_template),
+                        "depfile": FileData(depfile),
+                    },
+                    depfile=depfile,
                 ),
             )
         ]

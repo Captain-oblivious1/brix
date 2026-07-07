@@ -16,6 +16,7 @@ import hashlib
 import json
 import shutil
 from dataclasses import asdict
+from pathlib import Path
 
 from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
 from .data import DataAtom, DataExpr, FileData, GlobData, RegexData, ToolData, ValueData
@@ -162,7 +163,43 @@ def action_fingerprint(
             "command": spec.command_line,
             "inputs": {k: [atom_fp(a) for a in v.atoms()] for k, v in spec.inputs.items()},
         }
+    # Discovered (scanned) dependencies — inputs the tool reported reading last
+    # build that the graph didn't declare, e.g. C/C++ headers from a compiler
+    # depfile. Content-hashed like any input, so editing one re-stales the
+    # action. Absent on the first build (nothing scanned yet) and for actions
+    # that emit no depfile, so it never perturbs an existing fingerprint.
+    metadata = getattr(detector, "metadata", None)
+    deps = metadata.discovered_deps(action_key(action)) if metadata is not None else None
+    if deps:
+        payload["deps"] = {
+            path: detector.hash_file(ctx.read_path(path)) for path in sorted(deps)
+        }
     return _digest(payload)
+
+
+def scan_depfile(path: Path) -> list[str]:
+    """Parse a Makefile-format dependency file (as emitted by ``cc -MMD -MF``)
+    into the list of prerequisite paths. ``target: prereq1 prereq2 \\`` with
+    line continuations and backslash-escaped spaces. Missing/unreadable → ``[]``.
+
+    Assumes a single rule with no phony ``-MP`` targets (brix uses ``-MMD``, not
+    ``-MP``). Only relative paths are kept: absolute prerequisites are system /
+    toolchain files, already covered by the tool's own fingerprint, and would
+    not resolve through the workspace overlay."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return []
+    text = text.replace("\\\n", " ")  # join line continuations
+    _, sep, rhs = text.partition(":")  # drop the "target:" head
+    if not sep:
+        return []
+    deps: list[str] = []
+    for token in rhs.replace("\\ ", "\0").split():
+        dep = token.replace("\0", " ")
+        if dep and not dep.startswith("/"):
+            deps.append(dep)
+    return deps
 
 
 def outputs_intact(
@@ -236,6 +273,16 @@ class IncrementalLayer(BuildLayer):
             return ProcessResult(**replayed)
         result = inner(ctx)
         if result.ok:
+            if action.depfile is not None:
+                # Fold the tool's reported inputs (e.g. C/C++ headers) into the
+                # fingerprint, then recompute it so this same build's record is
+                # already dep-aware — the next unchanged build is fresh, with no
+                # spurious extra rebuild. Runs after a cache hit too (the depfile
+                # is a restored output), so a cache-fed machine also learns them.
+                self.metadata.set_discovered_deps(
+                    key, scan_depfile(ctx.read_path(action.depfile))
+                )
+                fingerprint = action_fingerprint(action, ctx, self.detector)
             self.metadata.record_action(
                 key,
                 {

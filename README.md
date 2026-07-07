@@ -139,24 +139,13 @@ design decision made now is churn the port never absorbs.
    async `build()`, reporters as plain objects). Buildable by a cheaper
    model once the Rust core exists.
 
-**Near-term (Opus, Fable-independent):**
-
-- **Automatic C/C++ header (`#include`) dependency tracking.** Today
-  `cpp.CompileSourceAction` declares only the `.cpp` as an input, so editing a
-  header does *not* rebuild the translation units that include it — the classic
-  make `.d`-file gap, and Duane's original incremental-build pain. Fix the
-  correct way (make/ninja/gradle-native approach): compile with the compiler's
-  depfile flag (`-MMD -MF`), read the emitted `.d` listing every header the TU
-  actually opened, record it, and feed those headers back as inputs so the next
-  build is exact. First build (or a new/edited-includes TU) compiles
-  conservatively; every build after is precise. This is the C/C++ counterpart
-  to `jvm-abi` and the design's reserved `DependencyScanner` seam (a post-run
-  hook; see `docs/rust-port.md` extension points and
-  `docs/java-fast-builds.md`). **Driver:** Duane is providing a C++ project to
-  onboard (write its `brix.py`); this is the gating feature for trustworthy
-  incremental C/C++ builds there. Other ready Opus items (see the session
-  discussion): `brix init` / a standalone `brix` command, a git-status change
-  detector, graph visualization, and the affected-target reverse index.
+**Near-term (Opus, Fable-independent):** C/C++ header dependency tracking is
+**done** (see the Completed log). Other ready Opus items (see the session
+discussion): `brix init` / a standalone `brix` command, a git-status change
+detector, graph visualization, TS/JS transitive-import tracking, and the
+affected-target reverse index. **Pending driver:** Duane will hand over a C++
+project to onboard (write its `brix.py`) — header tracking is already in place
+for it.
 
 Further out (from the original spec, unscheduled): graph visualization,
 modular/distributed graph loading for large projects (the monorepo
@@ -429,6 +418,28 @@ class tracking).
   over-approximate a change, never miss one. Non-text files fall back to
   `:raw` like `jvm-abi`. Unit + engine-wiring tests in
   `tests/test_ts_dts_identity.py`.
+- **Automatic C/C++ header (`#include`) dependency tracking**
+  (`cpp.py`, `actions.py`, `incremental.py`, `metadata.py`): editing a header
+  now rebuilds exactly the translation units that include it — the classic make
+  `.d`-file gap, and Duane's original incremental pain, closed the correct way.
+  `cpp.CompileSourceAction` compiles with `-MMD -MF {depfile}` (user headers,
+  not system); the incremental layer scans the emitted depfile after a run
+  (`scan_depfile`) and records the reported headers per action; `action_fingerprint`
+  folds those recorded deps in (content-hashed like any input) so a header edit
+  re-stales the compile. This is the design's reserved **`DependencyScanner`**
+  seam, now implemented on the Python side, and the general mechanism (an
+  `ExternalProcessAction.depfile` marker + `BuildMetadata` deps store) works for
+  any depfile-emitting tool, not just C/C++. Because both layers share one
+  detector (which carries the metadata), the discovered deps reach the *cache*
+  key too, so a shared-cache hit can't serve a `.o` compiled against a stale
+  header. After a run the fingerprint is recomputed with the deps folded in, so
+  the next unchanged build is fresh (no spurious extra rebuild), and the scan
+  also runs after a cache hit so a cache-fed machine learns the headers.
+  Real-compiler test (`test_header_change_rebuilds_only_dependent_object`) +
+  depfile-parser unit test. Narrow documented edge: a *fresh* machine's very
+  first build uses a header-blind key until it has built once — inherent to
+  depfile-based tracking under a content-addressed cache (Bazel avoids it only
+  by requiring declared headers).
 - **JVM fast builds, phase 2 — persistent workers + javac worker**
   (`workers.py`, `executor.py`, `actions.py`, `planner.py`, `java.py`,
   `src/brix/_java/JavacWorker.java`): a worker is a long-lived process that

@@ -66,6 +66,7 @@ class ExternalProcessAction(Expandable):
         outputs: dict[str, DataExpr] | None = None,
         env: dict[str, DataExpr | str] | None = None,
         worker: "WorkerSpec | None" = None,
+        depfile: str | None = None,
     ) -> None:
         from .data import ValueData
 
@@ -80,6 +81,12 @@ class ExternalProcessAction(Expandable):
         # A worker executes this action as a request instead of spawning it;
         # None spawns a process. Purely an execution transport (see workers.py).
         self.worker = worker
+        # Logical path of a Makefile-format depfile this action emits (e.g. a
+        # compiler's `-MMD -MF`). If set, the incremental layer scans it after a
+        # run and folds the reported inputs (headers) into the fingerprint, so
+        # editing one re-stales this action. Not part of identity/fingerprint
+        # itself — just a marker telling the scanner where to look.
+        self.depfile = depfile
 
     @property
     def label(self) -> str:
@@ -91,6 +98,10 @@ class ExternalProcessAction(Expandable):
         if name is not None:
             for key, value in bindings.items():
                 name = name.replace("{" + key + "}", value)
+        depfile = self.depfile
+        if depfile is not None:
+            for key, value in bindings.items():
+                depfile = depfile.replace("{" + key + "}", value)
         return ExternalProcessAction(
             name=name,
             command_line=self.command_line,
@@ -98,6 +109,7 @@ class ExternalProcessAction(Expandable):
             outputs={k: _substitute_expr(v, bindings) for k, v in self.outputs.items()},
             env={k: _substitute_expr(v, bindings) for k, v in self.env.items()},
             worker=self.worker,
+            depfile=depfile,
         )
 
     def __repr__(self) -> str:

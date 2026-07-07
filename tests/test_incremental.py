@@ -324,6 +324,26 @@ def test_tool_change_invalidates_everything_it_built(tmp_path):
     assert counts["combine"] == 1  # outputs unchanged -> downstream stayed fresh
 
 
+def test_scan_depfile_parses_make_format(tmp_path):
+    """The compiler-depfile parser feeding header dependency tracking."""
+    from brix.incremental import scan_depfile
+
+    d = tmp_path / "main.o.d"
+    # Line continuation, a system (absolute) header that must be dropped, and a
+    # backslash-escaped space in a path.
+    d.write_text(
+        "build/obj/main.o: src/main.cpp include/util.h \\\n"
+        "  include/other.h /usr/include/stdio.h src/a\\ b.h\n"
+    )
+    assert scan_depfile(d) == [
+        "src/main.cpp",
+        "include/util.h",
+        "include/other.h",
+        "src/a b.h",
+    ]
+    assert scan_depfile(tmp_path / "missing.d") == []  # unreadable -> empty
+
+
 def test_command_line_change_refingerprints(tmp_path):
     """The command template is fingerprint material: changing it re-stales the
     action even when every declared input is byte-identical."""

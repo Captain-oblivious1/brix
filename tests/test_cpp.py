@@ -123,3 +123,47 @@ def test_compile_link_run_with_all_layers(tmp_path):
     third = builder().build()
     assert third.success
     assert not (tmp_path / "build/obj/lib.o").exists()
+
+
+@needs_cxx
+def test_header_change_rebuilds_only_dependent_object(tmp_path):
+    """Editing a header rebuilds exactly the translation units that #include it
+    — the classic make .d gap, closed via compiler depfiles. `main.cpp`
+    includes `util.h`; `other.cpp` does not."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "include").mkdir()
+    (tmp_path / "include/util.h").write_text("inline int val() { return 1; }\n")
+    (tmp_path / "src/main.cpp").write_text(
+        '#include "util.h"\nint main() { return val(); }\n'
+    )
+    (tmp_path / "src/other.cpp").write_text("int other() { return 0; }\n")
+
+    def create_graph():
+        graph = Graph()
+        d = graph.data
+        graph.add(
+            cpp.CompileSourceAction(
+                source_files=d.glob("src/{name}.cpp"),
+                object_files=d.glob("build/obj/{name}.o"),
+                compile_options=["-I", "include"],
+            )
+        )
+        return graph
+
+    def builder():
+        return IncrementalBuilder(create_graph, root=tmp_path)
+
+    assert builder().build().success
+    # Second build settles: discovered headers are folded into the fingerprint,
+    # so with nothing changed everything replays (no spurious extra rebuild).
+    second = builder().build()
+    assert all(r.source == "replayed" for r in second.process_results), [
+        (r.action_name, r.source) for r in second.process_results
+    ]
+
+    # Edit the header -> only main (which includes it) recompiles.
+    (tmp_path / "include/util.h").write_text("inline int val() { return 2; }\n")
+    third = builder().build()
+    assert third.success
+    ran = sorted(r.action_name for r in third.process_results if r.source == "process")
+    assert ran == ["compile main"]  # not "compile other"
