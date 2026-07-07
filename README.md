@@ -139,6 +139,25 @@ design decision made now is churn the port never absorbs.
    async `build()`, reporters as plain objects). Buildable by a cheaper
    model once the Rust core exists.
 
+**Near-term (Opus, Fable-independent):**
+
+- **Automatic C/C++ header (`#include`) dependency tracking.** Today
+  `cpp.CompileSourceAction` declares only the `.cpp` as an input, so editing a
+  header does *not* rebuild the translation units that include it — the classic
+  make `.d`-file gap, and Duane's original incremental-build pain. Fix the
+  correct way (make/ninja/gradle-native approach): compile with the compiler's
+  depfile flag (`-MMD -MF`), read the emitted `.d` listing every header the TU
+  actually opened, record it, and feed those headers back as inputs so the next
+  build is exact. First build (or a new/edited-includes TU) compiles
+  conservatively; every build after is precise. This is the C/C++ counterpart
+  to `jvm-abi` and the design's reserved `DependencyScanner` seam (a post-run
+  hook; see `docs/rust-port.md` extension points and
+  `docs/java-fast-builds.md`). **Driver:** Duane is providing a C++ project to
+  onboard (write its `brix.py`); this is the gating feature for trustworthy
+  incremental C/C++ builds there. Other ready Opus items (see the session
+  discussion): `brix init` / a standalone `brix` command, a git-status change
+  detector, graph visualization, and the affected-target reverse index.
+
 Further out (from the original spec, unscheduled): graph visualization,
 modular/distributed graph loading for large projects (the monorepo
 scaling lever — see the long-term-goal memory), affected-target CI
