@@ -100,61 +100,86 @@ end-to-end test that skips when no JDK is on PATH).
   in one graph (`examples/cpp_to_java/`: a C++ tool generates Java sources
   that feed a jar)
 
-## TODO (priority order)
+## TODO
 
 Duane's priority: settle Python semantics before the Rust port — every
 design decision made now is churn the port never absorbs.
 
-1. **Fast JVM builds** — design doc: **`docs/java-fast-builds.md`**.
-   **Phases 1 and 2 are done** (see the Completed log): content-identity /
-   ABI fingerprints; persistent workers as a pure execution transport; the
-   in-process javac worker and `JarAction` `classpath=` routing through it;
-   the Gradle acceptance benchmark (`benchmarks/jvm/`, phase-2 brix wins 4
-   of 5 scenarios). Remaining: **phase 3** (the cross-build daemon — keep
-   workers warm *between* builds, which flips the last benchmark scenario
-   and is the "faster than Gradle" claim), which deserves full-strength
-   review.
-2. **Rust engine port** — design docs: **`docs/rust-port.md`** +
-   **`docs/boundary-schema.md`**. **Phases 1 and 2 are done** — see the
-   Completed log: `rust/brix-core` with the byte-compatible fingerprint
-   digest, `PathPattern`, shlex, plus graph-spec deserialization,
-   dependency inference, target selection (shortest-stem), and
-   `plan.describe()` parity — all pinned by cross-language golden fixtures.
-   **Phase 2's deferred pieces are also done** (parts 1, 2a, 2b in the
-   Completed log): the structural fingerprint keys, `RegexData` matching +
-   substitution (so `atoms_overlap` is faithful), and the full **content
-   fingerprint** — `PathPattern::find`, the change detector, `NodeContext`
-   overlay reads, and `action_fingerprint` over file/glob/regex/value atoms,
-   pinned to real Python against a committed fixture tree. Remaining:
-   **phase 3** (scheduler + layers + context, then flip the default via
-   `BRIX_ENGINE`), where the do-not-reinterpret list matters most and which
-   needs line-by-line review at full strength. Also a small fingerprint
-   *tail* the port intentionally errors on rather than guessing: `tool`
-   atoms (PATH + stat signature), `identity=` content-identity plugins
-   (`jvm-abi`), and the `worker` toolchain leg — each pulled in by phase 3
-   or the identity-plugin port.
-3. **JS/TS API** — mirror API on the same core, specced in the second
-   half of `docs/boundary-schema.md`: the Python API transliterated,
-   with exactly three sanctioned deviations (mechanical camelCase,
-   async `build()`, reporters as plain objects). Buildable by a cheaper
-   model once the Rust core exists.
+**Ownership.** *Opus* = the everyday model, for self-contained, test-guarded,
+Fable-independent work. *Fable* = the expensive model, reserved for
+full-strength, line-by-line review of the load-bearing scheduler/daemon
+subtleties (the "do-not-reinterpret" list). Items are tagged below.
 
-**Near-term (Opus, Fable-independent):** C/C++ header dependency tracking is
-**done** (see the Completed log). Other ready Opus items (see the session
-discussion): `brix init` / a standalone `brix` command, a git-status change
-detector, graph visualization, TS/JS transitive-import tracking, and the
-affected-target reverse index. **Pending driver:** Duane will hand over a C++
-project to onboard (write its `brix.py`) — header tracking is already in place
-for it.
+### Three strategic tracks
 
-Further out (from the original spec, unscheduled): graph visualization,
-modular/distributed graph loading for large projects (the monorepo
-scaling lever — see the long-term-goal memory), affected-target CI
-determination (a reverse index), richer change
-detectors (filesystem watcher, source-control based, remote metadata),
-in-memory and database-backed data expressions,
-`cpp.CompileApplicationAction`, regex output collections (packaged Java
-class tracking).
+1. **Fast JVM builds** — `docs/java-fast-builds.md`. Phases 1–2 done (Completed
+   log: ABI fingerprints, persistent workers, javac worker, the Gradle
+   benchmark). **Remaining: phase 3 — the cross-build daemon** (keep workers
+   warm *between* builds; the "faster than Gradle" claim). **[Fable]**
+2. **Rust engine port** — `docs/rust-port.md` + `docs/boundary-schema.md`.
+   Phases 1–2 **and** all deferred fingerprint pieces done (Completed log:
+   digest/patterns/shlex, planner/targets/`describe()`, fingerprint keys,
+   `RegexData`, the full content fingerprint incl. `deps`). **Remaining: phase 3
+   — scheduler + layers + context, then flip the default via `BRIX_ENGINE`**
+   (plus the small fingerprint tail the port errors on today: `tool` atoms,
+   `identity=` plugins, the `worker` leg). **[Fable]** — do-not-reinterpret list
+   matters most here.
+3. **JS/TS API** — the Python API transliterated on the same core
+   (`docs/boundary-schema.md`: camelCase, async `build()`, plain-object
+   reporters). **[Blocked]** — waits on the Rust core (track 2).
+
+### Opus queue (ready now — Fable-independent, test-guarded)
+
+*Correctness fixes (from the "gaps" analysis):*
+- TS/JS transitive import & bundle dependency tracking (the header-tracking
+  fix's counterpart for the JS/TS half)
+- Java packaged-class output tracking (nested package dirs, not just default)
+- "Run B after A" ordering edges (dependencies with no shared file)
+- Warn/error when two actions declare the same output
+- Optional "always re-hash" mode (the same-size-same-mtime corner)
+- Record the ambient environment a build used (partial hermeticity)
+
+*Ergonomics / on-ramp:*
+- `brix init` + a standalone `brix` command
+- graph visualization (a diagram of the plan)
+- starter templates (java-service, ts-service)
+
+*Trust (also de-risks phase 3):*
+- more "never wrongly skips a rebuild" tests
+- finish the last corner of the delete-cleanup fix (per-member output manifest)
+- verify symlink handling
+
+*Extensibility:*
+- git-status change detector (fast change detection on a big repo)
+- document the public plug-in protocols (`CacheStore` / `ContentIdentity` /
+  `ChangeDetector`)
+- Go / protobuf content-identity plugins (when those languages arrive)
+
+*Bigger, still Opus (design-first — sketch before building):*
+- affected-target determination ("only build what my change touched" — a
+  reverse index; the monorepo CI win)
+
+### Fable queue (reserved for the expensive model)
+
+- **Rust port phase 3** (track 2) — scheduler + layers + context, reviewed
+  line-by-line against the do-not-reinterpret list, then the `BRIX_ENGINE` flip.
+- **JVM phase 3** (track 1) — the cross-build daemon.
+
+### Blocked / unassigned
+
+- **Replace the Java/TS build commands** — blocked on two decisions:
+  orchestrate-then-replace vs. big-bang, and where dependency resolution stops.
+- **Sandboxing / enforced hermeticity** and **remote execution** — big future
+  projects (Opus as a large effort, or Fable for review). Sandboxing is the
+  safety net that would auto-catch the Opus-queue correctness gaps above.
+- **Pending driver:** Duane will hand over a C++ project to onboard (write its
+  `brix.py`); header dependency tracking is already in place for it.
+
+*Further out (original spec, unscheduled):* distributed / lazy graph loading
+(the monorepo scaling lever — deferred until hundreds of services; see the
+long-term-goal memory), richer change detectors (filesystem watcher, remote
+metadata), in-memory and database-backed data expressions,
+`cpp.CompileApplicationAction`.
 
 ## Completed
 
