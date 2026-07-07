@@ -77,3 +77,20 @@ class JvmAbiIdentity:
 
 
 register(JvmAbiIdentity())
+
+
+class TsDtsIdentity:
+    """TypeScript declaration (`.d.ts`) hashing: a consumer recompiles on an
+    API-surface change, not on an implementation-only change or a doc-comment
+    edit. Delegates to the pure-Python normalizer in `brix.tsdts`."""
+
+    name = "ts-dts"
+    version = "1"
+
+    def digest(self, path: Path) -> str:
+        from . import tsdts
+
+        return tsdts.digest(path)
+
+
+register(TsDtsIdentity())

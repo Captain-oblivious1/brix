@@ -142,8 +142,7 @@ design decision made now is churn the port never absorbs.
 Further out (from the original spec, unscheduled): graph visualization,
 modular/distributed graph loading for large projects (the monorepo
 scaling lever — see the long-term-goal memory), affected-target CI
-determination (a reverse index), a TypeScript `.d.ts` content-identity
-plugin (ABI pruning for the JS/TS half), richer change
+determination (a reverse index), richer change
 detectors (filesystem watcher, source-control based, remote metadata),
 in-memory and database-backed data expressions,
 `cpp.CompileApplicationAction`, regex output collections (packaged Java
@@ -396,6 +395,21 @@ class tracking).
   signature. Fixtures + golden digests under `tests/fixtures/jvmabi/`
   (regenerate with its `regenerate.sh`). Phases 2–3 (workers, daemon)
   remain; `brix.java` is untouched until phase 2 wires `classpath=`.
+- **TypeScript `.d.ts` content identity** (`tsdts.py`, `identity.py`): the
+  second content-identity plugin, `ts-dts` — `data.file("api.d.ts",
+  identity="ts-dts")` makes a `.d.ts` contribute its *declaration surface* to
+  fingerprints, so a consumer recompiles on an interface change but not an
+  implementation-only change or a doc/format edit. The ABI-pruning multiplier
+  for the Java+TS monorepo half, and proof the content-identity seam is a real
+  extension point (a second plugin, no engine change). Most of the win is
+  structural — `tsc`'s declaration emit is already implementation-free, so an
+  impl-only change yields a byte-identical `.d.ts` — with `tsdts.normalize`
+  adding robustness: strip `//` and `/* */` comments and collapse formatting
+  whitespace, but preserve whitespace *inside* string/template-literal types
+  (`"a  b"` ≠ `"a b"`) and never reorder declarations, so it can only
+  over-approximate a change, never miss one. Non-text files fall back to
+  `:raw` like `jvm-abi`. Unit + engine-wiring tests in
+  `tests/test_ts_dts_identity.py`.
 - **JVM fast builds, phase 2 — persistent workers + javac worker**
   (`workers.py`, `executor.py`, `actions.py`, `planner.py`, `java.py`,
   `src/brix/_java/JavacWorker.java`): a worker is a long-lived process that
