@@ -119,7 +119,14 @@ document, not against prose.
   file of payloads with the Python-computed digests, asserted from Rust.
 - **Cache store layout**: `<fp[:2]>/<fp>/entry.json` + `files/<n>` blobs,
   temp-dir-then-rename writes. A Rust build and a Python build sharing
-  one cache directory must interoperate.
+  one cache directory must interoperate. The **remote** store
+  (`cache_http.py`, `HttpCacheStore`) mirrors this layout over HTTP GET/PUT
+  (same paths, so a local dir and a remote endpoint are the same shape), with
+  one addition the local layout doesn't need: an entry carries `file_modes`
+  (`{logical: mode}`) because bytes over HTTP lose the executable bit the local
+  blob keeps for free via `copy2` — a native remote store must record and
+  re-apply modes on restore likewise, and blobs must be written before the
+  entry so a partial upload reads back as a miss.
 
 ## Do not reinterpret (load-bearing subtleties)
 

@@ -9,6 +9,7 @@ from .actions import DeleteFilesAction, ExpandAll, Expandable, ExternalProcessAc
 from .atomic import AtomicLayer
 from .builders import AtomicBuilder, BuildResult, CacheBuilder, CleanBuilder, IncrementalBuilder
 from .cache import CacheLayer, CacheStore, CacheStoreProtocol, TwoTierCacheStore
+from .cache_http import HttpCacheStore
 from .data import DataExpr, DataFactory, DataUnion
 from .graph import Graph
 from .incremental import IncrementalLayer
@@ -40,6 +41,7 @@ __all__ = [
     "CacheLayer",
     "CacheStore",
     "CacheStoreProtocol",
+    "HttpCacheStore",
     "CleanBuilder",
     "ConsoleReporter",
     "DataExpr",

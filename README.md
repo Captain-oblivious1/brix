@@ -139,11 +139,11 @@ design decision made now is churn the port never absorbs.
    async `build()`, reporters as plain objects). Buildable by a cheaper
    model once the Rust core exists.
 
-Further out (from the original spec, unscheduled): a concrete remote cache
-backend (Nexus/HTTP GET-PUT `CacheStoreProtocol` store — the protocol and
-`TwoTierCacheStore` to front it already exist; this is the leaf backend and
-its wire decisions: auth, retries, PUT idempotency), graph visualization,
-modular/distributed graph loading for large projects, richer change
+Further out (from the original spec, unscheduled): graph visualization,
+modular/distributed graph loading for large projects (the monorepo
+scaling lever — see the long-term-goal memory), affected-target CI
+determination (a reverse index), a TypeScript `.d.ts` content-identity
+plugin (ABI pruning for the JS/TS half), richer change
 detectors (filesystem watcher, source-control based, remote metadata),
 in-memory and database-backed data expressions,
 `cpp.CompileApplicationAction`, regex output collections (packaged Java
@@ -352,12 +352,27 @@ class tracking).
   fast local store in front of a slow shared one: reads check the front
   first (a local hit costs no round-trip), a back hit is served *and
   promoted* into the front, and writes populate the front with best-effort
-  back so a down remote never blocks local caching. A concrete Nexus/HTTP
-  leaf backend is deferred (see Further out); a shared filesystem path
+  back so a down remote never blocks local caching. A shared filesystem path
   already works today via an absolute `cache_dir` or `CacheStore`. Runnable
   demo: `examples/cache_store_demo/` — simulates four builds across two
   machines (seed team cache, back-hit + promote, warm-front no round-trip,
   team cache down still succeeds).
+- **Remote HTTP cache backend** (`cache_http.py`): `HttpCacheStore(base_url,
+  auth=..., retries=, timeout=)` — a `CacheStoreProtocol` leaf store over plain
+  GET/PUT, the shared-cache win for a monorepo (CI populates it, every dev
+  restores instantly). Layout **mirrors the local `CacheStore`**
+  (`<fp[:2]>/<fp>/entry.json` + `files/<n>`), so local and remote are the same
+  content-addressed shape; content-addressed writes are idempotent, blobs go up
+  before the entry (a partial upload reads back as a miss), and reads degrade to
+  a miss on any transport error (all resilience stays in `CacheLayer`).
+  Transport is generic stdlib `urllib` (no new dependency) so any GET/PUT server
+  works — Nexus, Artifactory, an S3 gateway, a plain file server — with a
+  pluggable auth-header hook. The one field the remote carries that local
+  doesn't is `file_modes`: HTTP bytes lose the executable bit the local blob
+  keeps for free, so modes ride in the entry and are re-applied on restore.
+  Tested against a real in-process HTTP server: caching across workspaces, the
+  intended local-front/remote-back two-tier with promotion, executable-mode
+  round-trip, and unreachable-endpoint degradation.
 - **JVM fast builds, phase 1 — content-identity / ABI fingerprints**
   (`identity.py`, `jvmabi.py`, `data.py`, `incremental.py`, `metadata.py`):
   `data.file(path, identity="jvm-abi")` makes a file contribute an ABI
