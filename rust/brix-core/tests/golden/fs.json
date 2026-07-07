@@ -1,0 +1,79 @@
+{
+  "find": [
+    {
+      "template": "src/a.txt",
+      "results": [
+        [
+          "src/a.txt",
+          {}
+        ]
+      ]
+    },
+    {
+      "template": "src/missing.txt",
+      "results": []
+    },
+    {
+      "template": "src/{name}.txt",
+      "results": [
+        [
+          "src/a.txt",
+          {
+            "name": "a"
+          }
+        ],
+        [
+          "src/b.txt",
+          {
+            "name": "b"
+          }
+        ]
+      ]
+    },
+    {
+      "template": "src/{a}/{b}.txt",
+      "results": [
+        [
+          "src/nested/c.txt",
+          {
+            "a": "nested",
+            "b": "c"
+          }
+        ]
+      ]
+    },
+    {
+      "template": "src/{name}.md",
+      "results": [
+        [
+          "src/notes.md",
+          {
+            "name": "notes"
+          }
+        ]
+      ]
+    },
+    {
+      "template": "nope/{x}.txt",
+      "results": []
+    }
+  ],
+  "hash_file": [
+    {
+      "path": "src/a.txt",
+      "hash": "b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060"
+    },
+    {
+      "path": "src/nested/c.txt",
+      "hash": "ae9a6306a205417afddd14316cc1d0d5e04a98f1be10865dce643925ee070ce2"
+    },
+    {
+      "path": "src",
+      "hash": null
+    },
+    {
+      "path": "src/missing.txt",
+      "hash": null
+    }
+  ]
+}

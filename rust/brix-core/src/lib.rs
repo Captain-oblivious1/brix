@@ -11,7 +11,9 @@
 
 pub mod actions;
 pub mod data;
+pub mod detector;
 pub mod fingerprint;
+pub mod fsutil;
 pub mod keys;
 pub mod patterns;
 pub mod plan;
@@ -21,6 +23,7 @@ pub mod spec;
 pub mod targets;
 
 pub use actions::Action;
+pub use detector::TimeAndHashChangeDetector;
 pub use fingerprint::{digest, Value};
 pub use keys::{action_key, membership_key};
 pub use patterns::{overlaps, PathPattern};

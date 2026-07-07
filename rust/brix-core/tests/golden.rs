@@ -5,11 +5,19 @@
 
 use std::collections::BTreeMap;
 
+use std::path::Path;
+
 use brix_core::data::DataAtom;
 use brix_core::fingerprint::{digest, Value};
 use brix_core::patterns::{overlaps, PathPattern};
 use brix_core::shlex;
+use brix_core::TimeAndHashChangeDetector;
 use serde_json::Value as J;
+
+/// The committed fixture tree (`rust/golden/tree`), relative to this crate.
+fn tree_root() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../golden/tree")
+}
 
 fn to_value(j: &J) -> Value {
     match j {
@@ -37,6 +45,7 @@ fn load(name: &str) -> J {
         "plans" => include_str!("golden/plans.json"),
         "keys" => include_str!("golden/keys.json"),
         "regex" => include_str!("golden/regex.json"),
+        "fs" => include_str!("golden/fs.json"),
         _ => unreachable!(),
     };
     serde_json::from_str(text).expect("valid golden JSON")
@@ -204,6 +213,46 @@ fn regex_matches_python() {
                 case["bindings"]
             ),
             other => panic!("substitute changed atom kind: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn fs_matches_python() {
+    let tree = tree_root();
+    let data = load("fs");
+
+    for case in data["find"].as_array().unwrap() {
+        let template = case["template"].as_str().unwrap();
+        let got = PathPattern::new(template).unwrap().find(&tree);
+        let want = case["results"].as_array().unwrap();
+        assert_eq!(got.len(), want.len(), "find count for {template}");
+        for (g, w) in got.iter().zip(want) {
+            let w = w.as_array().unwrap();
+            assert_eq!(g.0, w[0].as_str().unwrap(), "find path for {template}");
+            let want_binds: Vec<(String, String)> = w[1]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+                .collect();
+            assert_eq!(
+                sorted_bindings(g.1.clone()),
+                sorted_bindings(want_binds),
+                "find bindings for {template} at {}",
+                g.0
+            );
+        }
+    }
+
+    let det = TimeAndHashChangeDetector::new();
+    for case in data["hash_file"].as_array().unwrap() {
+        let path = tree.join(case["path"].as_str().unwrap());
+        let got = det.hash_file(&path);
+        match &case["hash"] {
+            J::Null => assert!(got.is_none(), "expected None hash for {}", case["path"]),
+            J::String(s) => assert_eq!(got.as_deref(), Some(s.as_str()), "hash for {}", case["path"]),
+            other => panic!("bad hash fixture: {other}"),
         }
     }
 }

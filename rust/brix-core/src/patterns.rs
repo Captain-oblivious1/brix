@@ -7,6 +7,10 @@
 //! and hand-matching this small language avoids any regex-engine drift from
 //! Python's `re`. Behavior is pinned by golden fixtures.
 
+use std::path::Path;
+
+use crate::fsutil::walk_files;
+
 /// One piece of a parsed template.
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
@@ -101,6 +105,41 @@ impl PathPattern {
         } else {
             None
         }
+    }
+
+    /// Realize this pattern against the filesystem under `root`, mirroring
+    /// `PathPattern.find`. Returns sorted `(root-relative path, bindings)`
+    /// pairs. A concrete template is a single `is_file` probe; a templated one
+    /// walks its literal prefix directory and full-matches every regular file.
+    pub fn find(&self, root: &Path) -> Vec<(String, Vec<(String, String)>)> {
+        if self.is_concrete() {
+            return if root.join(&self.template).is_file() {
+                vec![(self.template.clone(), Vec::new())]
+            } else {
+                Vec::new()
+            };
+        }
+        let prefix = self.literal_prefix_dir();
+        let base = if prefix.is_empty() {
+            root.to_path_buf()
+        } else {
+            root.join(&prefix)
+        };
+        if !base.is_dir() {
+            return Vec::new();
+        }
+        // Python sorts `base.rglob("*")` (full paths) then relativizes; since
+        // all entries share the `root` prefix, sorting the relative paths gives
+        // the identical order.
+        let mut rels: Vec<String> = walk_files(&base)
+            .iter()
+            .filter_map(|p| p.strip_prefix(root).ok())
+            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+            .collect();
+        rels.sort();
+        rels.into_iter()
+            .filter_map(|rel| self.matches(&rel).map(|b| (rel, b)))
+            .collect()
     }
 
     /// Replace known bindings; unknown `{name}` placeholders are left intact.

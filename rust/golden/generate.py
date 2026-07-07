@@ -427,8 +427,70 @@ def gen_regex():
     return {"match": match_cases, "substitute": subst_cases}
 
 
+# -- content fingerprint: a committed fixture tree + filesystem realization --
+#
+# `find` and `hash_file` (and `action_fingerprint`, part 2b) read real files.
+# The tree is written here and committed, so the Rust tests read the identical
+# bytes: content hashing is sha256-of-bytes, which is mtime-independent, so a
+# git checkout (which resets mtimes) reproduces the same digests. Fixtures use
+# only file/glob/regex/value atoms — no tool (PATH/mtime), identity (plugin), or
+# worker — so every value is fully determined by the tree's bytes and layout.
+
+TREE_ROOT = ROOT / "rust" / "golden" / "tree"
+
+TREE = {
+    "src/a.txt": "alpha\n",
+    "src/b.txt": "beta\n",
+    "src/nested/c.txt": "gamma\n",
+    "src/notes.md": "notes\n",
+    "tools/upper.py": "print('x')\n",
+}
+
+
+def write_tree():
+    for rel, content in TREE.items():
+        path = TREE_ROOT / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+
+FIND_TEMPLATES = [
+    "src/a.txt",  # concrete, present
+    "src/missing.txt",  # concrete, absent
+    "src/{name}.txt",  # single-segment binding: a, b (not nested/c, not .md)
+    "src/{a}/{b}.txt",  # multi-segment: nested/c
+    "src/{name}.md",  # notes
+    "nope/{x}.txt",  # base dir absent
+]
+
+HASH_PATHS = [
+    "src/a.txt",
+    "src/nested/c.txt",
+    "src",  # a directory -> None (not a regular file)
+    "src/missing.txt",  # absent -> None
+]
+
+
+def gen_fs():
+    from brix.metadata import TimeAndHashChangeDetector
+    from brix.patterns import PathPattern
+
+    det = TimeAndHashChangeDetector(TREE_ROOT)  # metadata is never saved to disk
+    find_cases = []
+    for tmpl in FIND_TEMPLATES:
+        results = PathPattern(tmpl).find(TREE_ROOT)
+        find_cases.append(
+            {"template": tmpl, "results": [[rel, binds] for rel, binds in results]}
+        )
+    hash_cases = [
+        {"path": rel, "hash": det.hash_file(TREE_ROOT / rel)} for rel in HASH_PATHS
+    ]
+    return {"find": find_cases, "hash_file": hash_cases}
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    write_tree()
     for name, data in [
         ("digests", gen_digests()),
         ("patterns", gen_patterns()),
@@ -437,6 +499,7 @@ def main():
         ("plans", gen_plans()),
         ("keys", gen_keys()),
         ("regex", gen_regex()),
+        ("fs", gen_fs()),
     ]:
         path = OUT / f"{name}.json"
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
