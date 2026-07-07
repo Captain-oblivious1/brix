@@ -10,6 +10,8 @@
 //! No PyO3 in this crate — the Python and (future) JS/TS bindings wrap it.
 
 pub mod actions;
+pub mod content;
+pub mod context;
 pub mod data;
 pub mod detector;
 pub mod fingerprint;
@@ -23,6 +25,8 @@ pub mod spec;
 pub mod targets;
 
 pub use actions::Action;
+pub use content::action_fingerprint;
+pub use context::NodeContext;
 pub use detector::TimeAndHashChangeDetector;
 pub use fingerprint::{digest, Value};
 pub use keys::{action_key, membership_key};

@@ -46,6 +46,7 @@ fn load(name: &str) -> J {
         "keys" => include_str!("golden/keys.json"),
         "regex" => include_str!("golden/regex.json"),
         "fs" => include_str!("golden/fs.json"),
+        "fingerprints" => include_str!("golden/fingerprints.json"),
         _ => unreachable!(),
     };
     serde_json::from_str(text).expect("valid golden JSON")
@@ -254,6 +255,18 @@ fn fs_matches_python() {
             J::String(s) => assert_eq!(got.as_deref(), Some(s.as_str()), "hash for {}", case["path"]),
             other => panic!("bad hash fixture: {other}"),
         }
+    }
+}
+
+#[test]
+fn fingerprints_match_python() {
+    let ctx = brix_core::NodeContext::for_root(tree_root());
+    let det = TimeAndHashChangeDetector::new();
+    for case in load("fingerprints").as_array().unwrap() {
+        let action: brix_core::Action =
+            serde_json::from_str(case["spec"].as_str().unwrap()).expect("parse action spec");
+        let got = brix_core::action_fingerprint(&action, &ctx, &det).expect("fingerprint");
+        assert_eq!(got, case["fingerprint"].as_str().unwrap(), "fingerprint for {}", case["spec"]);
     }
 }
 

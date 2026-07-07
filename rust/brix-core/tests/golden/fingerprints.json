@@ -1,0 +1,22 @@
+[
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"cat {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/out.txt\"}]}, \"name\": \"one file\"}",
+    "fingerprint": "d2f0efb69f9741e9440fb25727745ed906e5423aa92365e7693d88d90260dde2"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"cat {srcs} {out}\", \"inputs\": {\"srcs\": [{\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"glob\"}",
+    "fingerprint": "5f23d4ead2d571e38d7e46fb6ee018e81a1c96c240f8682eb62277cf00279831"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"cat {srcs} {out}\", \"inputs\": {\"srcs\": [{\"kind\": \"regex\", \"pattern\": \"src/[^/]+\\\\.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"regex over iter_files\"}",
+    "fingerprint": "03d0a6de806ff7b767931303463436cb87a2921167e5974c51300cb44836c86a"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"cc {flag} {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}], \"flag\": [{\"kind\": \"value\", \"text\": \"-O2\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"value and env\", \"env\": {\"CC\": [{\"kind\": \"value\", \"text\": \"clang\"}]}}",
+    "fingerprint": "69d4949aa0f33087d552e7f6cc6841f1b0bd13305b25460f2f5a7d5074944830"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"pack {all} {out}\", \"inputs\": {\"all\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}, {\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/pack.txt\"}]}, \"name\": \"union input\"}",
+    "fingerprint": "1dfc16d2387767c27c6eaa3cd84141c9f418370dbed4d508a6831b223dc11273"
+  }
+]

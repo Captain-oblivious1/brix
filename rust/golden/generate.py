@@ -488,6 +488,66 @@ def gen_fs():
     return {"find": find_cases, "hash_file": hash_cases}
 
 
+# -- content fingerprint: action_fingerprint over the fixture tree -----------
+#
+# Only file/glob/regex/value/union atoms and env — no tool/identity/worker — so
+# the fingerprint is fully determined by the tree's bytes (the Rust port defers
+# those three, erroring rather than guessing). `outputs` are present on the
+# actions but never enter the fingerprint.
+
+
+def gen_fingerprints():
+    from brix import ExternalProcessAction, Graph
+    from brix.incremental import action_fingerprint
+    from brix.layers import NodeContext
+    from brix.metadata import TimeAndHashChangeDetector
+
+    d = Graph().data
+    ctx = NodeContext.for_root(TREE_ROOT)
+    det = TimeAndHashChangeDetector(TREE_ROOT)  # metadata is never saved to disk
+
+    actions = [
+        ExternalProcessAction(
+            name="one file",
+            command_line="cat {src} {out}",
+            inputs={"src": d.file("src/a.txt")},
+            outputs={"out": d.file("build/out.txt")},
+        ),
+        ExternalProcessAction(
+            name="glob",
+            command_line="cat {srcs} {out}",
+            inputs={"srcs": d.glob("src/{name}.txt")},
+            outputs={"out": d.file("build/all.txt")},
+        ),
+        ExternalProcessAction(
+            name="regex over iter_files",
+            command_line="cat {srcs} {out}",
+            inputs={"srcs": d.regex(r"src/[^/]+\.txt")},
+            outputs={"out": d.file("build/all.txt")},
+        ),
+        ExternalProcessAction(
+            name="value and env",
+            command_line="cc {flag} {src} {out}",
+            inputs={"src": d.file("src/a.txt"), "flag": d.value("-O2")},
+            outputs={"out": d.file("build/a.o")},
+            env={"CC": d.value("clang")},
+        ),
+        ExternalProcessAction(
+            name="union input",
+            command_line="pack {all} {out}",
+            inputs={"all": d.file("tools/upper.py") + d.glob("src/{name}.txt")},
+            outputs={"out": d.file("build/pack.txt")},
+        ),
+    ]
+    return [
+        {
+            "spec": json.dumps(action_to_spec(a), ensure_ascii=False),
+            "fingerprint": action_fingerprint(a, ctx, det),
+        }
+        for a in actions
+    ]
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     write_tree()
@@ -500,6 +560,7 @@ def main():
         ("keys", gen_keys()),
         ("regex", gen_regex()),
         ("fs", gen_fs()),
+        ("fingerprints", gen_fingerprints()),
     ]:
         path = OUT / f"{name}.json"
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
