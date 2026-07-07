@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use brix_core::data::DataAtom;
 use brix_core::fingerprint::{digest, Value};
 use brix_core::patterns::{overlaps, PathPattern};
 use brix_core::shlex;
@@ -34,6 +35,8 @@ fn load(name: &str) -> J {
         "overlaps" => include_str!("golden/overlaps.json"),
         "shlex" => include_str!("golden/shlex.json"),
         "plans" => include_str!("golden/plans.json"),
+        "keys" => include_str!("golden/keys.json"),
+        "regex" => include_str!("golden/regex.json"),
         _ => unreachable!(),
     };
     serde_json::from_str(text).expect("valid golden JSON")
@@ -147,6 +150,61 @@ fn plans_match_python() {
             case["name"],
             case["targets"]
         );
+    }
+}
+
+#[test]
+fn keys_match_python() {
+    for case in load("keys").as_array().unwrap() {
+        let action: brix_core::Action =
+            serde_json::from_str(case["spec"].as_str().unwrap()).expect("parse action spec");
+        let got = match case["kind"].as_str().unwrap() {
+            "action_key" => brix_core::action_key(&action),
+            "membership_key" => brix_core::membership_key(&action),
+            other => panic!("bad key kind {other}"),
+        }
+        .expect("key");
+        assert_eq!(got, case["key"].as_str().unwrap(), "{} mismatch", case["kind"]);
+    }
+}
+
+#[test]
+fn regex_matches_python() {
+    let data = load("regex");
+    for case in data["match"].as_array().unwrap() {
+        let atom = DataAtom::Regex { pattern: case["pattern"].as_str().unwrap().to_string() };
+        let got = atom.regex_match(case["path"].as_str().unwrap());
+        match &case["bindings"] {
+            J::Null => assert!(got.is_none(), "expected no match: {} vs {}", case["pattern"], case["path"]),
+            J::Object(obj) => {
+                let got = got.unwrap_or_else(|| panic!("expected match: {} vs {}", case["pattern"], case["path"]));
+                let want: Vec<(String, String)> = obj
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+                    .collect();
+                assert_eq!(sorted_bindings(got), sorted_bindings(want), "{} vs {}", case["pattern"], case["path"]);
+            }
+            other => panic!("bad regex bindings fixture: {other}"),
+        }
+    }
+    for case in data["substitute"].as_array().unwrap() {
+        let atom = DataAtom::Regex { pattern: case["pattern"].as_str().unwrap().to_string() };
+        let binds: Vec<(String, String)> = case["bindings"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+            .collect();
+        match atom.substitute(&binds) {
+            DataAtom::Regex { pattern } => assert_eq!(
+                pattern,
+                case["result"].as_str().unwrap(),
+                "substitute {} with {:?}",
+                case["pattern"],
+                case["bindings"]
+            ),
+            other => panic!("substitute changed atom kind: {other:?}"),
+        }
     }
 }
 

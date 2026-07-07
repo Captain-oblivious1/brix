@@ -310,10 +310,38 @@ def graph_stem():
     return g
 
 
+def graph_regex():
+    # A concrete producer feeds a regex collection, so dependency inference must
+    # go through the regex-vs-concrete overlap path.
+    from brix import ExpandAll, ExternalProcessAction, Graph
+
+    g = Graph()
+    d = g.data
+    g.add(
+        ExternalProcessAction(
+            name="gen",
+            command_line="gen {out}",
+            outputs={"out": d.file("videos/01.py")},
+        ),
+        ExpandAll(
+            "scene",
+            d.regex(r"videos/(?P<scene>[0-9][^/]*)\.py"),
+            ExternalProcessAction(
+                name="render {scene}",
+                command_line="mk {src} {o}",
+                inputs={"src": d.file("videos/{scene}.py")},
+                outputs={"o": d.file("build/{scene}.out")},
+            ),
+        ),
+    )
+    return g
+
+
 PLAN_CASES = [
     ("upper", graph_upper, [None, ["build/all.txt"], ["build/upper/foo.txt"]]),
     ("cpp", graph_cpp, [None, ["build/bin/app"]]),
     ("stem", graph_stem, [None, ["wealth.mpg"]]),
+    ("regex", graph_regex, [None]),
 ]
 
 
@@ -335,6 +363,70 @@ def gen_plans():
     return out
 
 
+# -- fingerprint keys (structural, content-independent) ----------------------
+
+
+def gen_keys():
+    from brix.actions import ExpandAll, ExternalProcessAction
+    from brix.incremental import action_key, membership_key
+
+    out = []
+
+    def collect(action):
+        if isinstance(action, ExternalProcessAction):
+            out.append(
+                {
+                    "kind": "action_key",
+                    "spec": json.dumps(action_to_spec(action), ensure_ascii=False),
+                    "key": action_key(action),
+                }
+            )
+        elif isinstance(action, ExpandAll):
+            out.append(
+                {
+                    "kind": "membership_key",
+                    "spec": json.dumps(action_to_spec(action), ensure_ascii=False),
+                    "key": membership_key(action),
+                }
+            )
+            collect(action.child)
+
+    for _, factory, _ in PLAN_CASES:
+        for action in factory().actions:
+            collect(action)
+    return out
+
+
+# -- RegexData match + substitute --------------------------------------------
+
+
+def gen_regex():
+    from brix.data import RegexData
+
+    match_cases = []
+    for pattern, paths in [
+        (
+            r"videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\.py",
+            ["videos/alpha/01.py", "videos/alpha/__init__.py", "videos/a/b/c.py", "videos/alpha/2x.py"],
+        ),
+        (r"(?P<name>[^/]+)\.txt", ["foo.txt", "a/b.txt", "foo.md"]),
+    ]:
+        r = RegexData(pattern)
+        for path in paths:
+            match_cases.append({"pattern": pattern, "path": path, "bindings": r.match(path)})
+
+    subst_cases = []
+    for pattern, binds in [
+        (r"videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\.py", {"video": "alpha"}),
+        (r"videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\.py", {"video": "a.b-c"}),  # re.escape
+        (r"(?P<name>[^/]+)\.txt", {}),  # unchanged
+    ]:
+        result = RegexData(pattern).substitute(binds).regex.pattern
+        subst_cases.append({"pattern": pattern, "bindings": binds, "result": result})
+
+    return {"match": match_cases, "substitute": subst_cases}
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, data in [
@@ -343,6 +435,8 @@ def main():
         ("overlaps", gen_overlaps()),
         ("shlex", gen_shlex()),
         ("plans", gen_plans()),
+        ("keys", gen_keys()),
+        ("regex", gen_regex()),
     ]:
         path = OUT / f"{name}.json"
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")

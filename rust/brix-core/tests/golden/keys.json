@@ -1,0 +1,57 @@
+[
+  {
+    "kind": "membership_key",
+    "spec": "{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{python} {tool} {source} {dest}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.txt\"}]}, \"outputs\": {\"dest\": [{\"kind\": \"file\", \"path\": \"build/upper/{name}.txt\"}]}, \"name\": \"upper {name}\"}}",
+    "key": "1ad659ebe3de68a4b8910bb17368008d6e222bc1e476c8ac4c7774ed4eeea1a2"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{python} {tool} {source} {dest}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.txt\"}]}, \"outputs\": {\"dest\": [{\"kind\": \"file\", \"path\": \"build/upper/{name}.txt\"}]}, \"name\": \"upper {name}\"}",
+    "key": "be5192f0120d97f5c0a3b2ee6473db593edf028223379005cea87aedec57864f"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{python} {tool} {parts} {combined}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/concat.py\"}], \"parts\": [{\"kind\": \"glob\", \"template\": \"build/upper/{name}.txt\"}]}, \"outputs\": {\"combined\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"combine\"}",
+    "key": "776364279069427f1177d4d77da353128a3fb6648aeaad17e2acbdc38f225dba"
+  },
+  {
+    "kind": "membership_key",
+    "spec": "{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.cpp\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{compiler} {options} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}]}, \"name\": \"compile {name}\"}}",
+    "key": "749474d082025bff9d724fafd08c6284f4698c60c175f9c6725ee324a6a0794d"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{compiler} {options} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}]}, \"name\": \"compile {name}\"}",
+    "key": "98b033cc09946e2abc6b11bc292ae9cc0c48e9e34c0b2c03fd85c856eb5b4425"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{linker} {options} {objects} -o {output}\", \"inputs\": {\"linker\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"objects\": [{\"kind\": \"glob\", \"template\": \"build/obj/{name}.o\"}]}, \"outputs\": {\"output\": [{\"kind\": \"file\", \"path\": \"build/bin/app\"}]}, \"name\": \"link build/bin/app\"}",
+    "key": "5ab7db352b46eade69f86c500f18b2e575f6a5c6143a9a167e1d655226c54c08"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"mk {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"{video}.src\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"name\": \"raw {video}\"}",
+    "key": "16a8cdf8d09e69c3961148f5eb7ff46b23c219bb5501cbcd0ca22ddde56873bb"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"mk {rawf} {out}\", \"inputs\": {\"rawf\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.mpg\"}]}, \"name\": \"final {video}\"}",
+    "key": "3c98f645432f77c72ba74f5333b96c9f10492ef09294f5a029e0969777fdced7"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"gen {out}\", \"inputs\": {}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"videos/01.py\"}]}, \"name\": \"gen\"}",
+    "key": "7fe1a6e26d4cf91a3d2e9ead800f24edd3d0b852b9b40ea13569d711c4b2c6e7"
+  },
+  {
+    "kind": "membership_key",
+    "spec": "{\"kind\": \"expand\", \"element\": \"scene\", \"collection\": [{\"kind\": \"regex\", \"pattern\": \"videos/(?P<scene>[0-9][^/]*)\\\\.py\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"mk {src} {o}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"videos/{scene}.py\"}]}, \"outputs\": {\"o\": [{\"kind\": \"file\", \"path\": \"build/{scene}.out\"}]}, \"name\": \"render {scene}\"}}",
+    "key": "931313a5d23833ab5784bc387a7226a45f437f47154733a14a833f97132ca1ee"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"mk {src} {o}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"videos/{scene}.py\"}]}, \"outputs\": {\"o\": [{\"kind\": \"file\", \"path\": \"build/{scene}.out\"}]}, \"name\": \"render {scene}\"}",
+    "key": "54942bcab18f7e7861c4fe710c76dae2f4fa64d18eb1b45f0999a70bf1c00377"
+  }
+]

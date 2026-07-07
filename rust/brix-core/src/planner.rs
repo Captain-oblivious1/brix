@@ -10,16 +10,24 @@ use crate::patterns::overlaps;
 use crate::plan::{ExecutionPlan, NodeKind};
 use crate::targets::select_actions;
 
-/// Conservatively decide whether a producer output atom and a consumer input
-/// atom can name the same path. Regex atoms need Python-`re` matching, which
-/// is a later phase; here they never overlap (fixtures avoid them).
+/// Decide whether a producer output atom and a consumer input atom can name
+/// the same path. Mirrors `_atoms_overlap`: two regex atoms never compare;
+/// a regex vs a concrete path uses full-match; otherwise pattern overlap.
 pub(crate) fn atoms_overlap(out: &DataAtom, inp: &DataAtom) -> bool {
-    if matches!(out, DataAtom::Regex { .. }) || matches!(inp, DataAtom::Regex { .. }) {
-        return false;
-    }
-    match (out.path_pattern(), inp.path_pattern()) {
-        (Some(op), Some(ip)) => overlaps(&op, &ip),
-        _ => false,
+    match (out, inp) {
+        (DataAtom::Regex { .. }, DataAtom::Regex { .. }) => false,
+        (DataAtom::Regex { .. }, _) => match inp.path_pattern() {
+            Some(ip) => ip.is_concrete() && out.regex_match(&ip.template).is_some(),
+            None => false,
+        },
+        (_, DataAtom::Regex { .. }) => match out.path_pattern() {
+            Some(op) => op.is_concrete() && inp.regex_match(&op.template).is_some(),
+            None => false,
+        },
+        _ => match (out.path_pattern(), inp.path_pattern()) {
+            (Some(op), Some(ip)) => overlaps(&op, &ip),
+            _ => false,
+        },
     }
 }
 

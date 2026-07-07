@@ -92,8 +92,9 @@ impl DataAtom {
     }
 
     /// Apply `{name}` bindings where meaningful (File/Glob path, Value text).
-    /// Tool is unchanged; Regex substitution is deferred (a later phase — the
-    /// regex engine is not ported yet).
+    /// A Regex atom narrows: each named group whose name is bound is replaced
+    /// by the escaped binding value (a narrower regex — mirrors
+    /// `RegexData.substitute`). Tool is unchanged.
     pub fn substitute(&self, bindings: &[(String, String)]) -> DataAtom {
         match self {
             DataAtom::File { path, identity } => DataAtom::File {
@@ -107,9 +108,62 @@ impl DataAtom {
             DataAtom::Value { text } if !text.is_empty() => DataAtom::Value {
                 text: subst(text, bindings),
             },
+            DataAtom::Regex { pattern } => DataAtom::Regex {
+                pattern: regex_substitute(pattern, bindings),
+            },
             other => other.clone(),
         }
     }
+
+    /// Full-match a path against a Regex atom's pattern, returning its named
+    /// captures. Mirrors `RegexData.match` (Python `re.fullmatch`). `None` for
+    /// non-Regex atoms or no match. Only participating named groups are
+    /// returned (brix's regex collections bind all groups).
+    pub fn regex_match(&self, path: &str) -> Option<Vec<(String, String)>> {
+        let DataAtom::Regex { pattern } = self else {
+            return None;
+        };
+        // \A..\z anchors both ends -> full match, matching Python re.fullmatch.
+        let re = regex::Regex::new(&format!(r"\A(?:{pattern})\z")).ok()?;
+        let caps = re.captures(path)?;
+        let mut out = Vec::new();
+        for name in re.capture_names().flatten() {
+            if let Some(m) = caps.name(name) {
+                out.push((name.to_string(), m.as_str().to_string()));
+            }
+        }
+        Some(out)
+    }
+}
+
+/// Python's `re.escape` (3.7+ semantics): backslash-escape exactly the special
+/// characters in `_special_chars_map`. Must be byte-exact because the escaped
+/// text ends up in a regex pattern that is fingerprint material.
+fn re_escape(s: &str) -> String {
+    // ()[]{}?*+-|^$\.&~# and the whitespace set \t \n \r \v \f and space.
+    const SPECIAL: &str = "()[]{}?*+-|^$\\.&~# \t\n\r\u{0b}\u{0c}";
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if SPECIAL.contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Replace each `(?P<name>...)` group whose name is bound with the escaped
+/// value — mirrors `RegexData.substitute`.
+fn regex_substitute(pattern: &str, bindings: &[(String, String)]) -> String {
+    let mut p = pattern.to_string();
+    for (name, value) in bindings {
+        let group = format!(r"\(\?P<{}>(?:[^()\\]|\\.)*\)", regex::escape(name));
+        if let Ok(re) = regex::Regex::new(&group) {
+            let replacement = re_escape(value);
+            p = re.replace_all(&p, |_: &regex::Captures| replacement.clone()).into_owned();
+        }
+    }
+    p
 }
 
 fn subst(template: &str, bindings: &[(String, String)]) -> String {

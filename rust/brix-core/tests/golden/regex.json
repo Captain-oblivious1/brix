@@ -1,0 +1,68 @@
+{
+  "match": [
+    {
+      "pattern": "videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\\.py",
+      "path": "videos/alpha/01.py",
+      "bindings": {
+        "video": "alpha",
+        "scene": "01"
+      }
+    },
+    {
+      "pattern": "videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\\.py",
+      "path": "videos/alpha/__init__.py",
+      "bindings": null
+    },
+    {
+      "pattern": "videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\\.py",
+      "path": "videos/a/b/c.py",
+      "bindings": null
+    },
+    {
+      "pattern": "videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\\.py",
+      "path": "videos/alpha/2x.py",
+      "bindings": {
+        "video": "alpha",
+        "scene": "2x"
+      }
+    },
+    {
+      "pattern": "(?P<name>[^/]+)\\.txt",
+      "path": "foo.txt",
+      "bindings": {
+        "name": "foo"
+      }
+    },
+    {
+      "pattern": "(?P<name>[^/]+)\\.txt",
+      "path": "a/b.txt",
+      "bindings": null
+    },
+    {
+      "pattern": "(?P<name>[^/]+)\\.txt",
+      "path": "foo.md",
+      "bindings": null
+    }
+  ],
+  "substitute": [
+    {
+      "pattern": "videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\\.py",
+      "bindings": {
+        "video": "alpha"
+      },
+      "result": "videos/alpha/(?P<scene>[0-9][^/]*)\\.py"
+    },
+    {
+      "pattern": "videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\\.py",
+      "bindings": {
+        "video": "a.b-c"
+      },
+      "result": "videos/a\\.b\\-c/(?P<scene>[0-9][^/]*)\\.py"
+    },
+    {
+      "pattern": "(?P<name>[^/]+)\\.txt",
+      "bindings": {},
+      "result": "(?P<name>[^/]+)\\.txt"
+    }
+  ]
+}

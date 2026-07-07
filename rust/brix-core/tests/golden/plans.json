@@ -48,5 +48,11 @@
       "wealth.mpg"
     ],
     "describe": "* [0] raw wealth\n* [1] final wealth\n    <- [0] raw wealth: data overlap: wealth.raw.mpg"
+  },
+  {
+    "name": "regex",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"process\", \"command_line\": \"gen {out}\", \"inputs\": {}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"videos/01.py\"}]}, \"name\": \"gen\"}, {\"kind\": \"expand\", \"element\": \"scene\", \"collection\": [{\"kind\": \"regex\", \"pattern\": \"videos/(?P<scene>[0-9][^/]*)\\\\.py\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"mk {src} {o}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"videos/{scene}.py\"}]}, \"outputs\": {\"o\": [{\"kind\": \"file\", \"path\": \"build/{scene}.out\"}]}, \"name\": \"render {scene}\"}}]}",
+    "targets": null,
+    "describe": "* [0] gen\n? [1] expand: render {scene}\n    <- [0] gen: data overlap: videos/01.py ~ videos/(?P<scene>[0-9][^/]*)\\.py"
   }
 ]
