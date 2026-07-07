@@ -1,0 +1,11 @@
+[package]
+name = "brix-core"
+version = "0.1.0"
+edition = "2021"
+description = "The brix build engine core (pure Rust; no PyO3). Phase 1: patterns, data atoms, fingerprint digest, shlex."
+
+[dependencies]
+sha2 = "0.10"
+
+[dev-dependencies]
+serde_json = "1"

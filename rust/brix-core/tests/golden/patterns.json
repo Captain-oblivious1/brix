@@ -1,0 +1,705 @@
+[
+  {
+    "template": "src/{name}.txt",
+    "is_concrete": false,
+    "literal_prefix_dir": "src",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": {
+          "name": "foo"
+        }
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "src/foo.txt"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "src/{name}.txt"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "src/{name}.txt"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "src/{name}.txt"
+      },
+      {
+        "bindings": {},
+        "result": "src/{name}.txt"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "src/{name}.txt"
+      }
+    ]
+  },
+  {
+    "template": "build/upper/{name}.txt",
+    "is_concrete": false,
+    "literal_prefix_dir": "build/upper",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "build/upper/foo.txt"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "build/upper/{name}.txt"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "build/upper/{name}.txt"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "build/upper/{name}.txt"
+      },
+      {
+        "bindings": {},
+        "result": "build/upper/{name}.txt"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "build/upper/{name}.txt"
+      }
+    ]
+  },
+  {
+    "template": "a/b.txt",
+    "is_concrete": true,
+    "literal_prefix_dir": "a",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": {}
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "a/b.txt"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "a/b.txt"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "a/b.txt"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "a/b.txt"
+      },
+      {
+        "bindings": {},
+        "result": "a/b.txt"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "a/b.txt"
+      }
+    ]
+  },
+  {
+    "template": "{a}/{a}.txt",
+    "is_concrete": false,
+    "literal_prefix_dir": "",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": {
+          "a": "x"
+        }
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "{a}/{a}.txt"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "X/X.txt"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "{a}/{a}.txt"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "{a}/{a}.txt"
+      },
+      {
+        "bindings": {},
+        "result": "{a}/{a}.txt"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "only-a/only-a.txt"
+      }
+    ]
+  },
+  {
+    "template": "{a}-{b}.txt",
+    "is_concrete": false,
+    "literal_prefix_dir": "",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": {
+          "a": "one",
+          "b": "two"
+        }
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "{a}-{b}.txt"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "X-Y.txt"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "{a}-{b}.txt"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "{a}-{b}.txt"
+      },
+      {
+        "bindings": {},
+        "result": "{a}-{b}.txt"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "only-a-{b}.txt"
+      }
+    ]
+  },
+  {
+    "template": "a/{x}/b/{y}.txt",
+    "is_concrete": false,
+    "literal_prefix_dir": "a",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": {
+          "x": "mid",
+          "y": "end"
+        }
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "a/{x}/b/{y}.txt"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "a/{x}/b/{y}.txt"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "a/1/b/2.txt"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "a/{x}/b/{y}.txt"
+      },
+      {
+        "bindings": {},
+        "result": "a/{x}/b/{y}.txt"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "a/{x}/b/{y}.txt"
+      }
+    ]
+  },
+  {
+    "template": "{video}/{scene}.png",
+    "is_concrete": false,
+    "literal_prefix_dir": "",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": {
+          "video": "intro",
+          "scene": "scene1"
+        }
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "{video}/{scene}.png"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "{video}/{scene}.png"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "{video}/{scene}.png"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "intro/s1.png"
+      },
+      {
+        "bindings": {},
+        "result": "{video}/{scene}.png"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "{video}/{scene}.png"
+      }
+    ]
+  },
+  {
+    "template": "prefix{n}suffix",
+    "is_concrete": false,
+    "literal_prefix_dir": "",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": {
+          "n": "MID"
+        }
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "prefix{n}suffix"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "prefix{n}suffix"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "prefix{n}suffix"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "prefix{n}suffix"
+      },
+      {
+        "bindings": {},
+        "result": "prefix{n}suffix"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "prefix{n}suffix"
+      }
+    ]
+  }
+]

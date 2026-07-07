@@ -114,16 +114,16 @@ design decision made now is churn the port never absorbs.
    workers warm *between* builds, which flips the last benchmark scenario
    and is the "faster than Gradle" claim), which deserves full-strength
    review.
-2. **Rust engine port** — design docs written: **`docs/rust-port.md`**
-   (crate layout, coarse data-shaped PyO3 boundary, byte-compatibility
-   requirements for fingerprints/metadata/cache, the do-not-reinterpret
-   list of load-bearing subtleties, threading model, 4-phase plan with
-   golden tests; former open questions are now settled decisions) and
-   **`docs/boundary-schema.md`** (the exact wire schema — graph spec,
-   config, event stream, extension traits — that phase 2 builds
-   against). A cheaper model executes against those docs plus the test
-   suite; phases 1–2 are safe solo, phase 3 needs line-by-line review
-   against the subtleties list.
+2. **Rust engine port** — design docs: **`docs/rust-port.md`** +
+   **`docs/boundary-schema.md`**. **Phase 1 (the bottom layer) is done** —
+   see the Completed log: `rust/brix-core` with the fingerprint digest
+   (byte-compatible with Python), `PathPattern`, data-atom structural
+   identity, and shlex splitting, all pinned by cross-language golden
+   fixtures. Remaining: **phase 2** (planner + targets, graph-spec
+   deserialization, `plan.describe()` parity — safe solo against the
+   golden tests) and **phase 3** (scheduler + layers + context, then flip
+   the default), where the do-not-reinterpret list matters most and which
+   needs line-by-line review at full strength.
 3. **JS/TS API** — mirror API on the same core, specced in the second
    half of `docs/boundary-schema.md`: the Python API transliterated,
    with exactly three sanctioned deviations (mechanical camelCase,
@@ -380,6 +380,24 @@ class tracking).
   loses only the multi-module API-change recompile to Gradle's warm daemon —
   the case phase 3's cross-build daemon is meant to flip. Remaining: phase 3
   (cross-build daemon), reserved for full-strength review.
+- **Rust port, phase 1 — `brix-core` bottom layer + golden tests**
+  (`rust/brix-core/`, `rust/golden/generate.py`): the leaf pieces with no
+  scheduler, ported to pure Rust (no PyO3 yet). `fingerprint` reproduces
+  Python's `_digest` **byte-for-byte** — a hand-rolled canonical JSON
+  serializer matching `json.dumps(sort_keys=True, separators=(",",":"))`
+  with `ensure_ascii=True` (non-ASCII `\uXXXX`, astral surrogate pairs,
+  and the `0x7f` escape boundary that Python's `[^\ -~]` rule imposes) plus
+  sha256; `patterns::PathPattern` hand-matches the `{name}` glob language
+  (backtracking `[^/]+`, repeated-binding consistency — no regex crate,
+  which lacks backreferences) with `substitute`/`overlaps`/
+  `literal_prefix_dir`; `data` carries the atom kinds and their structural
+  identity; `shlex` splits POSIX-style like Python's `shlex.split`. The
+  contract is **cross-language golden fixtures**: `rust/golden/generate.py`
+  runs the *real* Python functions and emits JSON that `cargo test` asserts
+  against (9 unit + 4 golden), so "matches Python" is verified, not
+  claimed. `RegexData`'s Python-`re` matching and `action_fingerprint`'s
+  file I/O are later phases. Remaining: phase 2 (planner/targets) and
+  phase 3 (scheduler/layers), the latter for full-strength review.
 
 ## Design rules
 

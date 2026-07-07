@@ -1,0 +1,47 @@
+[
+  {
+    "a": "a/b.txt",
+    "b": "a/b.txt",
+    "overlaps": true
+  },
+  {
+    "a": "a/b.txt",
+    "b": "a/c.txt",
+    "overlaps": false
+  },
+  {
+    "a": "src/{name}.txt",
+    "b": "src/foo.txt",
+    "overlaps": true
+  },
+  {
+    "a": "src/{name}.txt",
+    "b": "other/foo.txt",
+    "overlaps": false
+  },
+  {
+    "a": "src/{name}.txt",
+    "b": "src/{other}.txt",
+    "overlaps": true
+  },
+  {
+    "a": "build/{n}.o",
+    "b": "build/{m}.c",
+    "overlaps": false
+  },
+  {
+    "a": "{video}.mpg",
+    "b": "wealth.raw.mpg",
+    "overlaps": true
+  },
+  {
+    "a": "a/{x}/b.txt",
+    "b": "a/{y}/c.txt",
+    "overlaps": false
+  },
+  {
+    "a": "a/{x}/b.txt",
+    "b": "a/{y}/b.txt",
+    "overlaps": true
+  }
+]

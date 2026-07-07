@@ -1,0 +1,131 @@
+[
+  {
+    "payload": "hello",
+    "digest": "5aa762ae383fbb727af3c7a36d4940a5b8c40a989452d2304fc958ff3f354e7a"
+  },
+  {
+    "payload": "",
+    "digest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+  },
+  {
+    "payload": 123,
+    "digest": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3"
+  },
+  {
+    "payload": true,
+    "digest": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+  },
+  {
+    "payload": false,
+    "digest": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+  },
+  {
+    "payload": null,
+    "digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "payload": [
+      "file",
+      "src/a.txt"
+    ],
+    "digest": "3e10c46b7383230dd4e5fea8ce41bf030e66dafe2a4d0a35eeb151154bdf415f"
+  },
+  {
+    "payload": {
+      "b": 2,
+      "a": 1,
+      "c": [
+        1,
+        2,
+        3
+      ]
+    },
+    "digest": "84f4af92bec11c6859051af709e559ebaf58dba8fda10d9cc11090d044be3c25"
+  },
+  {
+    "payload": {
+      "command": "{cc} -c {src} -o {obj}",
+      "inputs": {
+        "src": [
+          [
+            "file",
+            "a.c"
+          ]
+        ]
+      }
+    },
+    "digest": "b5388b51e067e35d8de32c4bae6ed19ef009bd07434264083fcc09ffcd070e22"
+  },
+  {
+    "payload": "café",
+    "digest": "ee08d8beb64c89c25fe7f583c6b522f7f380aab939035ec58d3fcdba24c881e1"
+  },
+  {
+    "payload": "中文",
+    "digest": "bd1c3f2541766530995ff0087f285a5f7cc3e8997716c394f23fe08a4fd54f41"
+  },
+  {
+    "payload": "emoji 😀 tail",
+    "digest": "c7e9ee2da631d5bd02cfd0e6feb3fb592f00f849250b4728d320608d693a954d"
+  },
+  {
+    "payload": {
+      "π": "value",
+      "a": "é"
+    },
+    "digest": "5beaf92f03d98a174369f711adc7b34613325e51f77736c34c285a657a866f5b"
+  },
+  {
+    "payload": "line1\nline2\ttab",
+    "digest": "a3d260b7df4ab27fb58ac3cf2e0f55ca6ea5a4184e261ea71689be14f367ad21"
+  },
+  {
+    "payload": "null\u0000byte",
+    "digest": "68a72795fa2ed46f8bbb55819811d5e48770395d8f04c90e0b78d6896c682698"
+  },
+  {
+    "payload": "ctrl\u001fend",
+    "digest": "d4640cd97e62119d26d665e7c672230439eabb96be7d611fc093d825a1742031"
+  },
+  {
+    "payload": "delchar",
+    "digest": "860cb583bc82868c6988724a1024de3141159e41afc4f071eb9f243d5e6c0582"
+  },
+  {
+    "payload": "quote \" and backslash \\ slash /",
+    "digest": "0eff2e63423d0b7533327498da99500af3ca669ebc7b11e97c505a36d493be29"
+  },
+  {
+    "payload": {
+      "command": "{python} {tool} {source} {dest}",
+      "inputs": {
+        "python": [
+          [
+            "tool",
+            "/usr/bin/python3",
+            [
+              "mtime",
+              123
+            ]
+          ]
+        ],
+        "source": [
+          [
+            "file",
+            "src/a.txt",
+            "deadbeef"
+          ]
+        ]
+      },
+      "env": {
+        "FLAG": [
+          [
+            "value",
+            "on"
+          ]
+        ]
+      }
+    },
+    "digest": "be9f42cd6e54e1faf1102f14a4f7a08bb130faccf2ac401d8b3280749e9b0027"
+  }
+]

@@ -1,0 +1,77 @@
+[
+  {
+    "input": "a b c",
+    "argv": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "input": "  spaced   out ",
+    "argv": [
+      "spaced",
+      "out"
+    ]
+  },
+  {
+    "input": "",
+    "argv": []
+  },
+  {
+    "input": "   ",
+    "argv": []
+  },
+  {
+    "input": "'single quoted with spaces' next",
+    "argv": [
+      "single quoted with spaces",
+      "next"
+    ]
+  },
+  {
+    "input": "a'b'c",
+    "argv": [
+      "abc"
+    ]
+  },
+  {
+    "input": "double \"quoted value\" end",
+    "argv": [
+      "double",
+      "quoted value",
+      "end"
+    ]
+  },
+  {
+    "input": "esc \"a\\\"b\\\\c\" end",
+    "argv": [
+      "esc",
+      "a\"b\\c",
+      "end"
+    ]
+  },
+  {
+    "input": "back\\ slash\\ escaped",
+    "argv": [
+      "back slash escaped"
+    ]
+  },
+  {
+    "input": "{python} tools/upper.py 'src/a b.txt' build/out.txt",
+    "argv": [
+      "{python}",
+      "tools/upper.py",
+      "src/a b.txt",
+      "build/out.txt"
+    ]
+  },
+  {
+    "input": "'unterminated",
+    "error": true
+  },
+  {
+    "input": "\"unterminated",
+    "error": true
+  }
+]
