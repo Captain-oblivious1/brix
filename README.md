@@ -120,11 +120,15 @@ design decision made now is churn the port never absorbs.
    digest, `PathPattern`, shlex, plus graph-spec deserialization,
    dependency inference, target selection (shortest-stem), and
    `plan.describe()` parity — all pinned by cross-language golden fixtures.
-   Remaining: **phase 3** (scheduler + layers + context, then flip the
-   default via `BRIX_ENGINE`), where the do-not-reinterpret list matters
-   most and which needs line-by-line review at full strength. Also still
-   open from the design: `RegexData`'s Python-`re` matching and
-   `action_fingerprint`'s file I/O (both lean on the detector/scheduler).
+   **Phase 2 part 1** also landed the structural fingerprint keys
+   (`action_key`/`membership_key`) and `RegexData`'s Python-`re` matching
+   + substitution, making `atoms_overlap` faithful to Python's regex rules
+   (all golden-pinned). Remaining: **phase 3** (scheduler + layers +
+   context, then flip the default via `BRIX_ENGINE`), where the
+   do-not-reinterpret list matters most and which needs line-by-line
+   review at full strength. Also still open from the design:
+   `action_fingerprint`'s content hashing + the change detector +
+   `PathPattern.find` (all need the filesystem apparatus — the next chunk).
 3. **JS/TS API** — mirror API on the same core, specced in the second
    half of `docs/boundary-schema.md`: the Python API transliterated,
    with exactly three sanctioned deviations (mechanical camelCase,
@@ -433,6 +437,22 @@ class tracking).
   insertion-channel ordering (a proposed cleanup runs before the
   expansion's consumer). Purpose: lower the risk of Rust phase 3 by making
   its acceptance criteria concrete rather than review-dependent.
+- **Rust port, phase 2 part 1 — fingerprint keys + regex overlap**
+  (`rust/brix-core/`: `keys.rs`, `data.rs`, `planner.rs`): the structural,
+  content-independent identity keys — `action_key` (command + input/output/
+  env shapes via `_expr_identity`) and `membership_key` (expansion element +
+  collection shape) — plus `RegexData`'s Python-`re` matching and
+  substitution (`\A(?:…)\z` full-match, participating named captures,
+  `re_escape` on substituted values). With regex matching in hand,
+  `atoms_overlap` is now faithful to Python: regex-vs-regex never overlaps,
+  regex-vs-concrete uses full-match (the deferral from phase 2 is gone). New
+  golden fixtures from **real** Python: `keys.json` (11), `regex.json` (2),
+  and a regex-overlap plan case (a concrete producer `videos/01.py` feeding a
+  regex collection, so the edge reason is exercised end-to-end). `cargo test`
+  is 9 unit + 7 golden. Remaining Rust before phase 3: the content
+  fingerprint (`action_fingerprint` + change detector + `NodeContext` file
+  I/O + `PathPattern.find`), which needs a filesystem apparatus and is its
+  own chunk.
 
 ## Design rules
 
