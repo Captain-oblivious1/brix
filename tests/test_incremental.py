@@ -267,3 +267,97 @@ def test_metadata_file_is_written(tmp_path):
     assert metadata_path.exists()
     stored = json.loads(metadata_path.read_text())
     assert stored["actions"], "action records should be persisted"
+
+
+# -- "never make a stale hit" invariants -------------------------------------
+#
+# These pin the completeness of fingerprint invalidation: any change that could
+# affect an output must re-stale its action (and only content, not timestamps,
+# decides downstream freshness). They are the production-safety property for a
+# monorepo — a missed invalidation ships stale artifacts — and the behaviours a
+# future Rust port must reproduce exactly.
+
+
+def test_added_source_propagates_to_glob_consumer(tmp_path):
+    """Growing a glob input's membership must re-stale its consumer even though
+    no existing file changed — the counterpart to deleted-member cleanup. A
+    Rust port that keyed the glob fingerprint only on existing members' hashes
+    (not the member set) would leave `combine` stale-fresh; this catches it."""
+    write_workspace(tmp_path, {"a": "aa", "b": "bb"})
+    builder = IncrementalBuilder(make_graph, root=tmp_path)
+    builder.build()
+    assert (tmp_path / "build/all.txt").read_text() == "AABB"
+
+    write_workspace(tmp_path, {"a": "aa", "b": "bb", "c": "cc"})  # add member c
+    result = builder.build()
+    assert result.success
+    assert (tmp_path / "build/all.txt").read_text() == "AABBCC"
+    counts = runs(tmp_path)
+    assert counts["upper:src/c.txt"] == 1  # new member compiled
+    assert counts["upper:src/a.txt"] == 1  # rewritten same-content -> stayed fresh
+    assert counts["upper:src/b.txt"] == 1
+    assert counts["combine"] == 2  # glob consumer re-staled by the new member
+
+    third = builder.build()  # settled: nothing left to do
+    assert third.success
+    assert runs(tmp_path) == counts
+
+
+def test_tool_change_invalidates_everything_it_built(tmp_path):
+    """Changing a shared file input (here the upper.py script every `upper`
+    action depends on) re-stales every action that used it — the 'compiler
+    upgrade invalidates everything it built' property. Yet because the rebuilt
+    outputs are byte-identical, the downstream consumer stays fresh: freshness
+    is content-based, not timestamp-based. A port that dropped this shared
+    input from the fingerprint would leave the uppers stale-fresh (counts
+    1, 1); one that used mtimes downstream would spuriously rerun combine."""
+    write_workspace(tmp_path, {"a": "aa", "b": "bb"})
+    builder = IncrementalBuilder(make_graph, root=tmp_path)
+    builder.build()
+
+    (tmp_path / "tools/upper.py").write_text(UPPER_TOOL + "# retuned\n")  # same outputs
+    result = builder.build()
+    assert result.success
+    counts = runs(tmp_path)
+    assert counts["upper:src/a.txt"] == 2  # both re-staled by the tool change
+    assert counts["upper:src/b.txt"] == 2
+    assert counts["combine"] == 1  # outputs unchanged -> downstream stayed fresh
+
+
+def test_command_line_change_refingerprints(tmp_path):
+    """The command template is fingerprint material: changing it re-stales the
+    action even when every declared input is byte-identical."""
+    from brix import ExternalProcessAction, Graph
+
+    (tmp_path / "tools").mkdir(exist_ok=True)
+    (tmp_path / "tools/echo.py").write_text(
+        "import sys, pathlib\n"
+        "pathlib.Path('runs.log').open('a').write('run\\n')\n"
+        "pathlib.Path(sys.argv[-1]).write_text(sys.argv[1])\n"
+    )
+
+    def graph_with_label(label):
+        def supplier():
+            graph = Graph()
+            data = graph.data
+            graph.add(
+                ExternalProcessAction(
+                    name="gen",
+                    command_line="{python} {tool} " + label + " {out}",
+                    inputs={
+                        "python": data.tool(sys.executable),
+                        "tool": data.file("tools/echo.py"),
+                    },
+                    outputs={"out": data.file("out.txt")},
+                )
+            )
+            return graph
+
+        return supplier
+
+    IncrementalBuilder(graph_with_label("first"), root=tmp_path).build()
+    assert (tmp_path / "out.txt").read_text() == "first"
+    IncrementalBuilder(graph_with_label("second"), root=tmp_path).build()
+    assert (tmp_path / "out.txt").read_text() == "second"  # command change reran it
+    IncrementalBuilder(graph_with_label("second"), root=tmp_path).build()
+    assert runs(tmp_path)["run"] == 2  # third build was fresh

@@ -205,6 +205,15 @@ class tracking).
   still re-detects via the (deferred) outer membership. Closes the
   "vanished nested expansions are skipped" gap the rust-port doc flagged;
   regression test `test_deleted_video_removes_nested_stale_outputs`.
+- **"Never make a stale hit" invalidation-completeness tests**
+  (`tests/test_incremental.py`): executable spec for the fingerprint
+  invalidations a monorepo depends on and a Rust port must reproduce —
+  glob-membership *growth* re-stales the consumer (mutation-verified: dropping
+  member tracking makes it fail), a shared file input (build script/tool)
+  change invalidates every action that used it *while* byte-identical outputs
+  keep the downstream fresh (content-based, not mtime), and the command
+  template is fingerprint material. Pins the production-safety property (a
+  missed invalidation ships stale artifacts) ahead of phase 3.
 - **Reporter seam + result provenance** (`src/brix/report.py`): the
   scheduler emits events (`build_begin`, `node_started`, `node_completed`,
   `node_skipped`, `collection_realized`, `node_inserted`, `build_end`) to a
