@@ -120,15 +120,19 @@ design decision made now is churn the port never absorbs.
    digest, `PathPattern`, shlex, plus graph-spec deserialization,
    dependency inference, target selection (shortest-stem), and
    `plan.describe()` parity — all pinned by cross-language golden fixtures.
-   **Phase 2 part 1** also landed the structural fingerprint keys
-   (`action_key`/`membership_key`) and `RegexData`'s Python-`re` matching
-   + substitution, making `atoms_overlap` faithful to Python's regex rules
-   (all golden-pinned). Remaining: **phase 3** (scheduler + layers +
-   context, then flip the default via `BRIX_ENGINE`), where the
-   do-not-reinterpret list matters most and which needs line-by-line
-   review at full strength. Also still open from the design:
-   `action_fingerprint`'s content hashing + the change detector +
-   `PathPattern.find` (all need the filesystem apparatus — the next chunk).
+   **Phase 2's deferred pieces are also done** (parts 1, 2a, 2b in the
+   Completed log): the structural fingerprint keys, `RegexData` matching +
+   substitution (so `atoms_overlap` is faithful), and the full **content
+   fingerprint** — `PathPattern::find`, the change detector, `NodeContext`
+   overlay reads, and `action_fingerprint` over file/glob/regex/value atoms,
+   pinned to real Python against a committed fixture tree. Remaining:
+   **phase 3** (scheduler + layers + context, then flip the default via
+   `BRIX_ENGINE`), where the do-not-reinterpret list matters most and which
+   needs line-by-line review at full strength. Also a small fingerprint
+   *tail* the port intentionally errors on rather than guessing: `tool`
+   atoms (PATH + stat signature), `identity=` content-identity plugins
+   (`jvm-abi`), and the `worker` toolchain leg — each pulled in by phase 3
+   or the identity-plugin port.
 3. **JS/TS API** — mirror API on the same core, specced in the second
    half of `docs/boundary-schema.md`: the Python API transliterated,
    with exactly three sanctioned deviations (mechanical camelCase,
@@ -449,10 +453,29 @@ class tracking).
   golden fixtures from **real** Python: `keys.json` (11), `regex.json` (2),
   and a regex-overlap plan case (a concrete producer `videos/01.py` feeding a
   regex collection, so the edge reason is exercised end-to-end). `cargo test`
-  is 9 unit + 7 golden. Remaining Rust before phase 3: the content
-  fingerprint (`action_fingerprint` + change detector + `NodeContext` file
-  I/O + `PathPattern.find`), which needs a filesystem apparatus and is its
-  own chunk.
+  is 9 unit + 7 golden.
+- **Rust port, phase 2 part 2a — filesystem primitives** (`rust/brix-core/`:
+  `fsutil.rs`, `detector.rs`, `patterns.rs`): the content fingerprint's
+  filesystem groundwork. `walk_files` (the file half of `rglob("*")`),
+  `TimeAndHashChangeDetector.hash_file` (sha256 of bytes, `None` for missing/
+  non-regular files) + `stat_signature`, and `PathPattern::find` (concrete =
+  `is_file` probe; templated = walk the literal prefix dir and full-match,
+  sorted). The Python `(mtime,size)→hash` memo is a perf cache that never
+  changes the value, so the port hashes directly. Pinned by a **committed
+  fixture tree** (`rust/golden/tree/`) + `fs.json`: `find` covers single- vs
+  multi-segment bindings and extension filtering; `hash_file` covers a file, a
+  directory (`None`) and a missing path (`None`). Content hashing is
+  mtime-independent, so a git checkout reproduces the digests.
+- **Rust port, phase 2 part 2b — content fingerprint** (`rust/brix-core/`:
+  `context.rs`, `content.rs`): `NodeContext` (`read_path`/`find`/`iter_files`)
+  with the staging+deletions overlay (staged outputs shadow the workspace,
+  markers hide files; sorted results), and `action_fingerprint` — the cache
+  layer's key — over file/glob/regex/value atoms: `command` + `inputs` (+ `env`
+  when non-empty), `outputs` excluded, keys digested sorted. `tool` / `identity=`
+  / `worker` are the deferred tail and **error** rather than guess, so a caller
+  can never get a silently-wrong key. Golden `fingerprints.json` (5) from real
+  Python over the fixture tree: single file, glob, regex-over-`iter_files`,
+  value+env, and a union input. `cargo test` is 9 unit + 9 golden.
 
 ## Design rules
 
