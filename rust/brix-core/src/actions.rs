@@ -1,0 +1,162 @@
+//! Logical actions — the nodes of the graph spec. Mirrors
+//! `src/brix/actions.py` and the wire `Action` shape in
+//! `docs/boundary-schema.md` (Process | Expand | Delete).
+//!
+//! `inputs`/`outputs`/`env` keep **insertion order** (a `Vec` of pairs, not a
+//! sorted map): dependency inference reports the *first* overlapping atom's
+//! text as the edge reason, so iteration order is observable in
+//! `plan.describe()` and must match Python's ordered dicts.
+
+use std::fmt;
+
+use serde::de::{MapAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+
+use crate::data::{DataAtom, DataExpr};
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Action {
+    Process {
+        #[serde(default)]
+        name: Option<String>,
+        command_line: String,
+        #[serde(default, deserialize_with = "ordered_map")]
+        inputs: Vec<(String, DataExpr)>,
+        #[serde(default, deserialize_with = "ordered_map")]
+        outputs: Vec<(String, DataExpr)>,
+        #[serde(default, deserialize_with = "ordered_map")]
+        env: Vec<(String, DataExpr)>,
+    },
+    Expand {
+        element: String,
+        collection: DataExpr,
+        child: Box<Action>,
+    },
+    Delete {
+        paths: Vec<String>,
+    },
+}
+
+/// Deserialize a JSON object into `Vec<(String, DataExpr)>` preserving the
+/// document's key order (serde's `Vec` alone would demand a JSON array).
+fn ordered_map<'de, D>(d: D) -> Result<Vec<(String, DataExpr)>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OrderedVisitor;
+    impl<'de> Visitor<'de> for OrderedVisitor {
+        type Value = Vec<(String, DataExpr)>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a JSON object of name -> data expression")
+        }
+        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            let mut out = Vec::new();
+            while let Some((k, v)) = map.next_entry::<String, DataExpr>()? {
+                out.push((k, v));
+            }
+            Ok(out)
+        }
+    }
+    d.deserialize_map(OrderedVisitor)
+}
+
+impl Action {
+    pub fn label(&self) -> String {
+        match self {
+            Action::Process { name, command_line, .. } => {
+                name.clone().unwrap_or_else(|| command_line.clone())
+            }
+            Action::Expand { child, .. } => format!("expand: {}", child.label()),
+            Action::Delete { paths } => format!("rm {}", paths.join(" ")),
+        }
+    }
+
+    /// Anything an `Expand` can instantiate per member: Process or Expand,
+    /// never Delete.
+    pub fn is_expandable(&self) -> bool {
+        !matches!(self, Action::Delete { .. })
+    }
+
+    /// Path atoms among the action's inputs (drives dependency inference and
+    /// target-selection needs). Worker inputs are a later phase.
+    pub fn input_atoms(&self) -> Vec<DataAtom> {
+        match self {
+            Action::Process { inputs, .. } => path_atoms(inputs),
+            Action::Expand { collection, child, .. } => {
+                let mut atoms: Vec<DataAtom> =
+                    collection.iter().filter(|a| a.is_path_atom()).cloned().collect();
+                atoms.extend(child.input_atoms());
+                atoms
+            }
+            Action::Delete { .. } => Vec::new(),
+        }
+    }
+
+    pub fn output_atoms(&self) -> Vec<DataAtom> {
+        match self {
+            Action::Process { outputs, .. } => path_atoms(outputs),
+            Action::Expand { child, .. } => child.output_atoms(),
+            Action::Delete { .. } => Vec::new(),
+        }
+    }
+
+    /// Apply `{name}` bindings. An `Expand` whose own `element` is bound
+    /// collapses to its substituted child (there is nothing left to expand
+    /// over); otherwise it substitutes its collection and child and keeps the
+    /// Expand shape. Mirrors `ExpandAll.substitute`.
+    pub fn substitute(&self, bindings: &[(String, String)]) -> Action {
+        match self {
+            Action::Process { name, command_line, inputs, outputs, env } => {
+                let new_name = name.as_ref().map(|n| {
+                    let mut s = n.clone();
+                    for (k, v) in bindings {
+                        s = s.replace(&format!("{{{k}}}"), v);
+                    }
+                    s
+                });
+                Action::Process {
+                    name: new_name,
+                    command_line: command_line.clone(),
+                    inputs: subst_pairs(inputs, bindings),
+                    outputs: subst_pairs(outputs, bindings),
+                    env: subst_pairs(env, bindings),
+                }
+            }
+            Action::Expand { element, collection, child } => {
+                if bindings.iter().any(|(k, _)| k == element) {
+                    child.substitute(bindings)
+                } else {
+                    Action::Expand {
+                        element: element.clone(),
+                        collection: collection.iter().map(|a| a.substitute(bindings)).collect(),
+                        child: Box::new(child.substitute(bindings)),
+                    }
+                }
+            }
+            Action::Delete { .. } => self.clone(),
+        }
+    }
+}
+
+fn path_atoms(pairs: &[(String, DataExpr)]) -> Vec<DataAtom> {
+    pairs
+        .iter()
+        .flat_map(|(_, expr)| expr.iter())
+        .filter(|a| a.is_path_atom())
+        .cloned()
+        .collect()
+}
+
+fn subst_pairs(
+    pairs: &[(String, DataExpr)],
+    bindings: &[(String, String)],
+) -> Vec<(String, DataExpr)> {
+    pairs
+        .iter()
+        .map(|(k, expr)| (k.clone(), expr.iter().map(|a| a.substitute(bindings)).collect()))
+        .collect()
+}

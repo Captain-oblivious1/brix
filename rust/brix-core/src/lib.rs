@@ -9,10 +9,19 @@
 //!
 //! No PyO3 in this crate — the Python and (future) JS/TS bindings wrap it.
 
+pub mod actions;
 pub mod data;
 pub mod fingerprint;
 pub mod patterns;
+pub mod plan;
+pub mod planner;
 pub mod shlex;
+pub mod spec;
+pub mod targets;
 
+pub use actions::Action;
 pub use fingerprint::{digest, Value};
 pub use patterns::{overlaps, PathPattern};
+pub use plan::ExecutionPlan;
+pub use planner::plan_graph;
+pub use spec::{parse, GraphSpec};

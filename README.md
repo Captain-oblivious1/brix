@@ -115,15 +115,16 @@ design decision made now is churn the port never absorbs.
    and is the "faster than Gradle" claim), which deserves full-strength
    review.
 2. **Rust engine port** — design docs: **`docs/rust-port.md`** +
-   **`docs/boundary-schema.md`**. **Phase 1 (the bottom layer) is done** —
-   see the Completed log: `rust/brix-core` with the fingerprint digest
-   (byte-compatible with Python), `PathPattern`, data-atom structural
-   identity, and shlex splitting, all pinned by cross-language golden
-   fixtures. Remaining: **phase 2** (planner + targets, graph-spec
-   deserialization, `plan.describe()` parity — safe solo against the
-   golden tests) and **phase 3** (scheduler + layers + context, then flip
-   the default), where the do-not-reinterpret list matters most and which
-   needs line-by-line review at full strength.
+   **`docs/boundary-schema.md`**. **Phases 1 and 2 are done** — see the
+   Completed log: `rust/brix-core` with the byte-compatible fingerprint
+   digest, `PathPattern`, shlex, plus graph-spec deserialization,
+   dependency inference, target selection (shortest-stem), and
+   `plan.describe()` parity — all pinned by cross-language golden fixtures.
+   Remaining: **phase 3** (scheduler + layers + context, then flip the
+   default via `BRIX_ENGINE`), where the do-not-reinterpret list matters
+   most and which needs line-by-line review at full strength. Also still
+   open from the design: `RegexData`'s Python-`re` matching and
+   `action_fingerprint`'s file I/O (both lean on the detector/scheduler).
 3. **JS/TS API** — mirror API on the same core, specced in the second
    half of `docs/boundary-schema.md`: the Python API transliterated,
    with exactly three sanctioned deviations (mechanical camelCase,
@@ -398,6 +399,24 @@ class tracking).
   claimed. `RegexData`'s Python-`re` matching and `action_fingerprint`'s
   file I/O are later phases. Remaining: phase 2 (planner/targets) and
   phase 3 (scheduler/layers), the latter for full-strength review.
+- **Rust port, phase 2 — planner + targets** (`rust/brix-core/`:
+  `spec.rs`, `actions.rs`, `plan.rs`, `planner.rs`, `targets.rs`): the
+  graph spec deserializes from the `docs/boundary-schema.md` JSON (serde),
+  `plan_graph` infers dependency edges from output/input atom overlap, and
+  `select_actions` does demand-driven target selection with binding
+  extraction and the shortest-stem rule. `ExecutionPlan.describe()` is
+  byte-identical to Python's. A parity subtlety made load-bearing:
+  `inputs`/`outputs` keep **insertion order** (a `Vec` of pairs, and an
+  order-preserving serde deserializer), because an edge reason reports the
+  *first* overlapping atom — a sorted map would change the reported reason.
+  Golden fixtures extend `rust/golden/generate.py`: it serializes **real**
+  Python graphs (expansion, typed C++ lowering, the shortest-stem pipeline)
+  to specs and captures `plan.describe()` for several target sets; the spec
+  is stored as a raw JSON string so key order survives into the Rust
+  deserializer. `cargo test` is 9 unit + 5 golden. Regex-atom overlap and
+  worker inputs are deferred (later phase). Remaining: phase 3
+  (scheduler/layers/context, then the `BRIX_ENGINE` default flip), for
+  full-strength review.
 
 ## Design rules
 

@@ -174,6 +174,167 @@ def gen_shlex():
     return out
 
 
+# -- planner + targets: spec -> plan.describe() ------------------------------
+
+
+def atom_to_spec(atom):
+    from brix.data import FileData, GlobData, RegexData, ToolData, ValueData
+
+    if isinstance(atom, FileData):
+        d = {"kind": "file", "path": atom.path}
+        if atom.identity is not None:
+            d["identity"] = atom.identity
+        return d
+    if isinstance(atom, GlobData):
+        d = {"kind": "glob", "template": atom.pattern.template}
+        if atom.identity is not None:
+            d["identity"] = atom.identity
+        return d
+    if isinstance(atom, RegexData):
+        return {"kind": "regex", "pattern": atom.regex.pattern}
+    if isinstance(atom, ToolData):
+        return {"kind": "tool", "name": atom.name}
+    if isinstance(atom, ValueData):
+        return {"kind": "value", "text": atom.text}
+    raise TypeError(atom)
+
+
+def expr_to_spec(expr):
+    return [atom_to_spec(a) for a in expr.atoms()]
+
+
+def action_to_spec(action):
+    from brix.actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
+
+    if isinstance(action, ExternalProcessAction):
+        d = {
+            "kind": "process",
+            "command_line": action.command_line,
+            "inputs": {k: expr_to_spec(v) for k, v in action.inputs.items()},
+            "outputs": {k: expr_to_spec(v) for k, v in action.outputs.items()},
+        }
+        if action.name is not None:
+            d["name"] = action.name
+        if action.env:
+            d["env"] = {k: expr_to_spec(v) for k, v in action.env.items()}
+        return d
+    if isinstance(action, ExpandAll):
+        return {
+            "kind": "expand",
+            "element": action.element_name,
+            "collection": expr_to_spec(action.collection),
+            "child": action_to_spec(action.child),
+        }
+    if isinstance(action, DeleteFilesAction):
+        return {"kind": "delete", "paths": list(action.paths)}
+    raise TypeError(action)
+
+
+def graph_to_spec(graph):
+    return {"version": 1, "actions": [action_to_spec(a) for a in graph.actions]}
+
+
+def graph_upper():
+    from brix import ExpandAll, ExternalProcessAction, Graph
+
+    g = Graph()
+    d = g.data
+    g.add(
+        ExpandAll(
+            "name",
+            d.glob("src/{name}.txt"),
+            ExternalProcessAction(
+                name="upper {name}",
+                command_line="{python} {tool} {source} {dest}",
+                inputs={
+                    "python": d.tool("python3"),
+                    "tool": d.file("tools/upper.py"),
+                    "source": d.file("src/{name}.txt"),
+                },
+                outputs={"dest": d.file("build/upper/{name}.txt")},
+            ),
+        ),
+        ExternalProcessAction(
+            name="combine",
+            command_line="{python} {tool} {parts} {combined}",
+            inputs={
+                "python": d.tool("python3"),
+                "tool": d.file("tools/concat.py"),
+                "parts": d.glob("build/upper/{name}.txt"),
+            },
+            outputs={"combined": d.file("build/all.txt")},
+        ),
+    )
+    return g
+
+
+def graph_cpp():
+    from brix import Graph, cpp
+
+    g = Graph()
+    d = g.data
+    g.add(
+        cpp.CompileSourceAction(
+            source_files=d.glob("src/{name}.cpp"),
+            object_files=d.glob("build/obj/{name}.o"),
+        ),
+        cpp.LinkApplicationAction(
+            object_files=d.glob("build/obj/{name}.o"),
+            output_file=d.file("build/bin/app"),
+        ),
+    )
+    return g
+
+
+def graph_stem():
+    # The make shortest-stem case: {video}.mpg also matches wealth.raw.mpg as
+    # video=wealth.raw, so the {video}.raw.mpg producer (stem wealth) must win.
+    from brix import ExternalProcessAction, Graph
+
+    g = Graph()
+    d = g.data
+    g.add(
+        ExternalProcessAction(
+            name="raw {video}",
+            command_line="mk {src} {out}",
+            inputs={"src": d.file("{video}.src")},
+            outputs={"out": d.file("{video}.raw.mpg")},
+        ),
+        ExternalProcessAction(
+            name="final {video}",
+            command_line="mk {rawf} {out}",
+            inputs={"rawf": d.file("{video}.raw.mpg")},
+            outputs={"out": d.file("{video}.mpg")},
+        ),
+    )
+    return g
+
+
+PLAN_CASES = [
+    ("upper", graph_upper, [None, ["build/all.txt"], ["build/upper/foo.txt"]]),
+    ("cpp", graph_cpp, [None, ["build/bin/app"]]),
+    ("stem", graph_stem, [None, ["wealth.mpg"]]),
+]
+
+
+def gen_plans():
+    from brix.planner import plan_graph
+
+    out = []
+    for name, factory, target_sets in PLAN_CASES:
+        graph = factory()
+        # Store the spec as a raw JSON *string* (key order preserved) so the
+        # Rust side deserializes it directly; round-tripping through a generic
+        # JSON value would sort object keys and break edge-reason ordering.
+        spec_json = json.dumps(graph_to_spec(graph), ensure_ascii=False)
+        for targets in target_sets:
+            plan = plan_graph(graph, Path("/root"), targets)
+            out.append(
+                {"name": name, "spec": spec_json, "targets": targets, "describe": plan.describe()}
+            )
+    return out
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, data in [
@@ -181,6 +342,7 @@ def main():
         ("patterns", gen_patterns()),
         ("overlaps", gen_overlaps()),
         ("shlex", gen_shlex()),
+        ("plans", gen_plans()),
     ]:
         path = OUT / f"{name}.json"
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")

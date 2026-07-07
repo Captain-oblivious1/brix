@@ -33,6 +33,7 @@ fn load(name: &str) -> J {
         "patterns" => include_str!("golden/patterns.json"),
         "overlaps" => include_str!("golden/overlaps.json"),
         "shlex" => include_str!("golden/shlex.json"),
+        "plans" => include_str!("golden/plans.json"),
         _ => unreachable!(),
     };
     serde_json::from_str(text).expect("valid golden JSON")
@@ -122,6 +123,29 @@ fn overlaps_match_python() {
             "overlaps {} ~ {}",
             case["a"],
             case["b"]
+        );
+    }
+}
+
+#[test]
+fn plans_match_python() {
+    let cases = load("plans");
+    for case in cases.as_array().unwrap() {
+        // The spec is a raw JSON string so key order survives (see generate.py).
+        let spec = brix_core::spec::parse(case["spec"].as_str().unwrap()).expect("parse spec");
+        let targets: Option<Vec<String>> = match &case["targets"] {
+            J::Null => None,
+            J::Array(a) => Some(a.iter().map(|v| v.as_str().unwrap().to_string()).collect()),
+            other => panic!("bad targets fixture: {other}"),
+        };
+        let plan = brix_core::plan_graph(spec.actions, "/root", targets.as_deref())
+            .expect("plan_graph");
+        assert_eq!(
+            plan.describe(),
+            case["describe"].as_str().unwrap(),
+            "describe mismatch: graph {} targets {}",
+            case["name"],
+            case["targets"]
         );
     }
 }

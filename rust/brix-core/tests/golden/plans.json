@@ -1,0 +1,52 @@
+[
+  {
+    "name": "upper",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{python} {tool} {source} {dest}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.txt\"}]}, \"outputs\": {\"dest\": [{\"kind\": \"file\", \"path\": \"build/upper/{name}.txt\"}]}, \"name\": \"upper {name}\"}}, {\"kind\": \"process\", \"command_line\": \"{python} {tool} {parts} {combined}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/concat.py\"}], \"parts\": [{\"kind\": \"glob\", \"template\": \"build/upper/{name}.txt\"}]}, \"outputs\": {\"combined\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"combine\"}]}",
+    "targets": null,
+    "describe": "? [0] expand: upper {name}\n* [1] combine\n    <- [0] expand: upper {name}: data overlap: build/upper/{name}.txt"
+  },
+  {
+    "name": "upper",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{python} {tool} {source} {dest}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.txt\"}]}, \"outputs\": {\"dest\": [{\"kind\": \"file\", \"path\": \"build/upper/{name}.txt\"}]}, \"name\": \"upper {name}\"}}, {\"kind\": \"process\", \"command_line\": \"{python} {tool} {parts} {combined}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/concat.py\"}], \"parts\": [{\"kind\": \"glob\", \"template\": \"build/upper/{name}.txt\"}]}, \"outputs\": {\"combined\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"combine\"}]}",
+    "targets": [
+      "build/all.txt"
+    ],
+    "describe": "? [0] expand: upper {name}\n* [1] combine\n    <- [0] expand: upper {name}: data overlap: build/upper/{name}.txt"
+  },
+  {
+    "name": "upper",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{python} {tool} {source} {dest}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.txt\"}]}, \"outputs\": {\"dest\": [{\"kind\": \"file\", \"path\": \"build/upper/{name}.txt\"}]}, \"name\": \"upper {name}\"}}, {\"kind\": \"process\", \"command_line\": \"{python} {tool} {parts} {combined}\", \"inputs\": {\"python\": [{\"kind\": \"tool\", \"name\": \"python3\"}], \"tool\": [{\"kind\": \"file\", \"path\": \"tools/concat.py\"}], \"parts\": [{\"kind\": \"glob\", \"template\": \"build/upper/{name}.txt\"}]}, \"outputs\": {\"combined\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"combine\"}]}",
+    "targets": [
+      "build/upper/foo.txt"
+    ],
+    "describe": "* [0] upper foo"
+  },
+  {
+    "name": "cpp",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.cpp\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{compiler} {options} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}]}, \"name\": \"compile {name}\"}}, {\"kind\": \"process\", \"command_line\": \"{linker} {options} {objects} -o {output}\", \"inputs\": {\"linker\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"objects\": [{\"kind\": \"glob\", \"template\": \"build/obj/{name}.o\"}]}, \"outputs\": {\"output\": [{\"kind\": \"file\", \"path\": \"build/bin/app\"}]}, \"name\": \"link build/bin/app\"}]}",
+    "targets": null,
+    "describe": "? [0] expand: compile {name}\n* [1] link build/bin/app\n    <- [0] expand: compile {name}: data overlap: build/obj/{name}.o"
+  },
+  {
+    "name": "cpp",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.cpp\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{compiler} {options} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}]}, \"name\": \"compile {name}\"}}, {\"kind\": \"process\", \"command_line\": \"{linker} {options} {objects} -o {output}\", \"inputs\": {\"linker\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"objects\": [{\"kind\": \"glob\", \"template\": \"build/obj/{name}.o\"}]}, \"outputs\": {\"output\": [{\"kind\": \"file\", \"path\": \"build/bin/app\"}]}, \"name\": \"link build/bin/app\"}]}",
+    "targets": [
+      "build/bin/app"
+    ],
+    "describe": "? [0] expand: compile {name}\n* [1] link build/bin/app\n    <- [0] expand: compile {name}: data overlap: build/obj/{name}.o"
+  },
+  {
+    "name": "stem",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"process\", \"command_line\": \"mk {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"{video}.src\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"name\": \"raw {video}\"}, {\"kind\": \"process\", \"command_line\": \"mk {rawf} {out}\", \"inputs\": {\"rawf\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.mpg\"}]}, \"name\": \"final {video}\"}]}",
+    "targets": null,
+    "describe": "* [0] raw {video}\n* [1] final {video}\n    <- [0] raw {video}: data overlap: {video}.raw.mpg"
+  },
+  {
+    "name": "stem",
+    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"process\", \"command_line\": \"mk {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"{video}.src\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"name\": \"raw {video}\"}, {\"kind\": \"process\", \"command_line\": \"mk {rawf} {out}\", \"inputs\": {\"rawf\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.mpg\"}]}, \"name\": \"final {video}\"}]}",
+    "targets": [
+      "wealth.mpg"
+    ],
+    "describe": "* [0] raw wealth\n* [1] final wealth\n    <- [0] raw wealth: data overlap: wealth.raw.mpg"
+  }
+]
