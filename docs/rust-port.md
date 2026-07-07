@@ -198,8 +198,16 @@ Fingerprints and incremental:
 - Collection membership is recorded per `membership_key` but applied to
   metadata **only if the whole build succeeds**; a failed build must
   re-detect deletions next time. Vanished members propose
-  `DeleteFilesAction` cleanup and forget the vanished action's record;
-  vanished *nested expansions* are skipped (documented gap).
+  `DeleteFilesAction` cleanup and forget the vanished action's record. A
+  vanished *nested* expansion recurses: its inner collection never realizes
+  (the subtree is pruned), so cleanup reads the vanished member's recorded
+  inner membership back from metadata — the inner `membership_key` is
+  deterministic from the substituted collection, so it matches what the
+  previous build recorded. This read must **not** mutate membership records
+  (a failed build re-detects via the still-committed outer membership and
+  walks back in); the one unrecoverable case — an inner membership never
+  recorded (prior failure, or nesting added since) — is left for a future
+  build rather than guessed.
 - Metadata saves at build end (success or failure), atomic
   write-tmp-then-rename.
 

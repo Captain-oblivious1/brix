@@ -271,22 +271,45 @@ class IncrementalLayer(BuildLayer):
         proposals: list[NodeProposal] = []
         for member in removed:
             vanished = action.child.substitute({action.element_name: member})
-            if not isinstance(vanished, ExternalProcessAction):
-                # A vanished *nested expansion* (e.g. a whole removed video):
-                # its inner membership was keyed by the substituted collection,
-                # so recovering its outputs needs metadata archaeology we don't
-                # do yet. Known gap; the consumer still refingerprints.
-                continue
-            self.metadata.forget_action(action_key(vanished))
-            stale_outputs = [
-                atom.path
-                for expr in vanished.outputs.values()
-                for atom in expr.atoms()
-                if isinstance(atom, FileData) and atom.pattern.is_concrete
-            ]
+            stale_outputs = self._reap_vanished(vanished)
             if stale_outputs:
                 proposals.append(NodeProposal(DeleteFilesAction(stale_outputs)))
         return proposals or None
+
+    def _reap_vanished(self, action) -> list[str]:
+        """Concrete stale outputs under a vanished expansion member, forgetting
+        its fingerprint records along the way.
+
+        Recurses through *nested* expansions. Their inner collections never
+        realize this build — the whole subtree is pruned when the outer member
+        disappears — so their membership is read back from metadata instead: the
+        inner ``membership_key`` is deterministic from the substituted
+        collection, so it matches exactly what the previous build recorded for
+        this member (e.g. a deleted video's scene list).
+
+        Reads, but never *mutates*, membership records. A failed build must
+        re-detect this deletion next time via the outer membership (which is
+        only committed on success), and that re-detection walks back in here and
+        needs the inner lists intact. ``forget_action`` is idempotent, so
+        re-forgetting on a later retry is harmless. If an inner membership was
+        never recorded (a prior failure, or nesting added since), that subtree
+        can't be enumerated and is left for a future build — the one
+        unrecoverable case, degrading to the old skip rather than guessing."""
+        if isinstance(action, ExternalProcessAction):
+            self.metadata.forget_action(action_key(action))
+            return [
+                atom.path
+                for expr in action.outputs.values()
+                for atom in expr.atoms()
+                if isinstance(atom, FileData) and atom.pattern.is_concrete
+            ]
+        if isinstance(action, ExpandAll):
+            stale: list[str] = []
+            for member in self.metadata.membership(membership_key(action)) or []:
+                child = action.child.substitute({action.element_name: member})
+                stale += self._reap_vanished(child)
+            return stale
+        return []  # DeleteFilesAction or other: nothing to reap
 
     def on_build_end(self, result, ctx):
         if result.success:

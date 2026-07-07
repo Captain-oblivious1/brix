@@ -78,6 +78,42 @@ def test_nested_expansion_is_incremental_per_scene(tmp_path):
     assert ran == ["render alpha/02"]
 
 
+def test_deleted_video_removes_nested_stale_outputs(tmp_path):
+    """Deleting a whole outer member (a video) must clean the outputs of its
+    *nested* expansion (every scene), not just a top-level output — matching a
+    clean build. The inner expansion never realizes this build (its subtree is
+    pruned), so cleanup is driven from the outer collection by reading the
+    vanished video's recorded scene membership."""
+    import shutil
+
+    write_workspace(tmp_path)
+    builder = IncrementalBuilder(nested_graph, root=tmp_path)
+    builder.build()
+    assert (tmp_path / "build/alpha/01.out").exists()
+    assert (tmp_path / "build/alpha/02.out").exists()
+    assert (tmp_path / "build/beta/01.out").exists()
+
+    # Remove the entire 'alpha' video: its outer collection entry and its scenes.
+    (tmp_path / "videos/alpha.py").unlink()
+    shutil.rmtree(tmp_path / "videos/alpha")
+
+    result = builder.build()
+    assert result.success
+    # Every stale output under the vanished video is gone; the survivor stays.
+    assert not (tmp_path / "build/alpha/01.out").exists()
+    assert not (tmp_path / "build/alpha/02.out").exists()
+    assert (tmp_path / "build/beta/01.out").exists()
+    # The deletions were real, visible nodes in the plan.
+    rm_labels = [n.label for n in result.plan.nodes if n.label.startswith("rm ")]
+    assert any("build/alpha/01.out" in label for label in rm_labels)
+    assert any("build/alpha/02.out" in label for label in rm_labels)
+
+    # Settled: the next build has nothing left to delete.
+    third = builder.build()
+    assert third.success
+    assert not any(n.label.startswith("rm ") for n in third.plan.nodes)
+
+
 def test_nested_regex_collection_excludes_non_scenes(tmp_path):
     """Regex collections substitute outer bindings and filter membership —
     e.g. numbered scene files only, no __init__.py."""

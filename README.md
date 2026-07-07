@@ -194,6 +194,17 @@ class tracking).
   cleanup). Deletions run through the layer stack like any node.
   Runnable demo: `examples/incremental_demo/` — four builds printing how
   many processes actually spawned (4 / 0 / 2 / 1).
+- **Deleted-member cleanup now recurses through nested expansions**
+  (`incremental.py` `_reap_vanished`): deleting a whole outer member (e.g. an
+  entire video) cleans every output of its *nested* expansion (each scene),
+  not just a top-level output — matching a clean build. The inner collection
+  never realizes (its subtree is pruned), so cleanup reads the vanished
+  member's recorded inner membership back from metadata; the reconstructed
+  inner `membership_key` is deterministic, so it matches what the previous
+  build stored. The read never mutates membership records, so a failed build
+  still re-detects via the (deferred) outer membership. Closes the
+  "vanished nested expansions are skipped" gap the rust-port doc flagged;
+  regression test `test_deleted_video_removes_nested_stale_outputs`.
 - **Reporter seam + result provenance** (`src/brix/report.py`): the
   scheduler emits events (`build_begin`, `node_started`, `node_completed`,
   `node_skipped`, `collection_realized`, `node_inserted`, `build_end`) to a
