@@ -417,6 +417,22 @@ class tracking).
   worker inputs are deferred (later phase). Remaining: phase 3
   (scheduler/layers/context, then the `BRIX_ENGINE` default flip), for
   full-strength review.
+- **Scheduler-contract tests** (`tests/test_scheduler_contract.py`): the
+  subtleties `docs/rust-port.md` flags as "only partially pinned by tests"
+  (and reserves phase 3 for reviewing) made into an explicit executable
+  spec — a net for the eventual Rust scheduler port that *either* engine
+  must pass. Pins: the event-ordering contract (`build_begin` first /
+  `build_end` last; per node `node_started` < `process_started` <
+  `node_completed`; `collection_realized` before its children); the
+  stuck-node **snapshot** rule (a 2-node cycle reports *both* nodes as
+  unreachable, not one — verified by mutating the executor to the naive
+  advance-then-rejudge form and watching this test catch it — and the
+  all-terminal-predecessor quiet-skip); the on-success-only failure cascade
+  (transitive skip along on-success edges without spurious "unreachable"
+  errors, and on-completion reactivating a branch past a failure); and the
+  insertion-channel ordering (a proposed cleanup runs before the
+  expansion's consumer). Purpose: lower the risk of Rust phase 3 by making
+  its acceptance criteria concrete rather than review-dependent.
 
 ## Design rules
 
