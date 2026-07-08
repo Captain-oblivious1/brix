@@ -334,8 +334,17 @@ CLI/status stay in Python but depend on core answers:
    build), pinned by `rust/brix-core/tests/cache.rs` — the mirror of
    `tests/test_cache.py` + `tests/test_cache_store.py` — including
    read/write interop pins on the entry layout.
-   Remaining slices: the atomic layer, persistent workers, then the
-   PyO3 boundary.
+   *Slice 5 — the atomic layer — is DONE*: `atomic.rs` (staging
+   redirection at build begin, staged deletion markers, the journaled
+   COMMIT protocol with idempotent crash recovery, stale-staging
+   discard, and held staging: HELD marker, build-on-top composition,
+   `commit_staging`/`discard_staging` with their refusal rules), pinned
+   by `rust/brix-core/tests/atomic.rs` — the mirror of
+   `tests/test_atomic.py` + `tests/test_held_staging.py` (minus the
+   status/CLI cases, which stay Python until the boundary) — plus the
+   full three-layer stack proof (cache hits restored via staging, then
+   committed). Remaining slices: persistent workers, then the PyO3
+   boundary.
 4. **Flip the default**, keep `BRIX_ENGINE=py` working one release,
    verify the animation project (full dryRun cycle, targeted builds,
    clean-then-cache-restore, `view`), then delete the Python engine
@@ -384,9 +393,8 @@ leg (the Rust `Action` carries no worker yet). `tool` atoms and the
 `metadata.json` hash-cache landed with phase-3 slice 3; the cache-store
 layout with slice 4.
 
-**Remaining for phase 3:** the atomic layer, the event stream across the
-boundary, and the deferred tail above — then the `BRIX_ENGINE` default
-flip.
+**Remaining for phase 3:** the event stream across the boundary and the
+deferred tail above — then the `BRIX_ENGINE` default flip.
 
 ## Decisions (were open questions; settled — do not reopen during the port)
 

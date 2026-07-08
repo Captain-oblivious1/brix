@@ -12,6 +12,7 @@
 //! No PyO3 in this crate — the Python and (future) JS/TS bindings wrap it.
 
 pub mod actions;
+pub mod atomic;
 pub mod cache;
 pub mod content;
 pub mod context;
@@ -35,6 +36,7 @@ pub mod spec;
 pub mod targets;
 
 pub use actions::Action;
+pub use atomic::{commit_staging, discard_staging, AtomicLayer};
 pub use cache::{CacheLayer, CacheStore, CacheStoreProtocol, TwoTierCacheStore};
 pub use content::action_fingerprint;
 pub use context::NodeContext;

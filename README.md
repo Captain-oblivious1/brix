@@ -131,11 +131,13 @@ below is tagged with the model that should do it.
    scheduler core (runs steps in parallel in the right order — clean builds
    work end-to-end in pure Rust), incremental rebuilds (a Rust build skips
    everything that hasn't changed, sharing the same metadata file Python
-   writes), and now the shared result cache (a fresh checkout builds
-   instantly from results any earlier build stored — Rust and Python can
-   even share one cache directory). **What's left: the staging layer**,
-   persistent workers, the Python↔Rust boundary, and then switching brix to
-   run on the Rust engine by default.
+   writes), the shared result cache (a fresh checkout builds instantly from
+   results any earlier build stored — Rust and Python can even share one
+   cache directory), and now atomic builds (all-or-nothing commits through
+   a staging area, including the held-for-review flow). All three build
+   layers now run in pure Rust. **What's left: persistent workers, the
+   Python↔Rust boundary**, and then switching brix to run on the Rust
+   engine by default.
    **[Fable]** — the trickiest part of the whole project; one subtle ordering
    bug here breaks builds, so it needs the most careful model reviewing it
    line by line.
@@ -741,6 +743,28 @@ build inputs that come from memory or a database instead of files, and a C++
   broken/write-failing stores, two-tier promotion). `cargo test` is 18
   unit + 9 golden + 43 behavioral; clippy clean; Python suite 190. The
   atomic layer, workers, and the PyO3 boundary are the remaining slices.
+- **Rust port, phase 3 slice 5 — the atomic layer** (`rust/brix-core/src/atomic.rs`):
+  either the whole build lands, or nothing on disk changes. Ported
+  behavior-for-behavior from `atomic.py`: `on_build_begin` recovers an
+  interrupted commit (COMMIT marker → idempotent re-apply), discards
+  failed-build debris, keeps held staging to build on top of (consuming
+  the HELD marker so only the new build's outcome decides what staging
+  becomes), then redirects `output_root`/`deletions_root` into
+  `build/staging/add` + `del`; Delete actions become staged markers
+  applied at commit; `on_build_end` journals COMMIT first, then copies
+  `add/`, applies `del/`, and removes staging — or writes HELD instead
+  under `hold`. `commit_staging` refuses failed-build debris (only a
+  successful build's staging may reach the workspace) and
+  `discard_staging` refuses an interrupted commit (it already committed
+  and must finish). With this, **all three build layers run in pure
+  Rust**: the full `[cache, incremental, atomic]` stack is exercised
+  end-to-end, including cache hits restored via staging and committed
+  with the build. Pinned by `rust/brix-core/tests/atomic.rs` — the
+  mirror of `tests/test_atomic.py` + `tests/test_held_staging.py` (15
+  tests; the status/CLI cases stay Python until the boundary slice).
+  `cargo test` is 18 unit + 9 golden + 58 behavioral; clippy clean;
+  Python suite 190. Persistent workers and the PyO3 boundary are the
+  remaining slices.
 
 ## Design rules
 
