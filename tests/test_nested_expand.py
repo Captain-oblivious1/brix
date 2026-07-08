@@ -19,10 +19,10 @@ def nested_graph():
     graph.add(
         ExpandAll(
             element_name="video",
-            collection=data.glob("videos/{video}.py"),
+            collection=data.glob("videos/{video:*}.py"),
             child=ExpandAll(
                 element_name="scene",
-                collection=data.glob("videos/{video}/{scene}.py"),
+                collection=data.glob("videos/{video:*}/{scene:*}.py"),
                 child=ExternalProcessAction(
                     name="render {video}/{scene}",
                     command_line="{python} {tool} {source} {out}",
@@ -122,7 +122,7 @@ def test_nested_regex_collection_excludes_non_scenes(tmp_path):
     graph.add(
         ExpandAll(
             element_name="video",
-            collection=data.glob("videos/{video}.py"),
+            collection=data.glob("videos/{video:*}.py"),
             child=ExpandAll(
                 element_name="scene",
                 collection=data.regex(r"videos/(?P<video>[^/]+)/(?P<scene>[0-9][^/]*)\.py"),

@@ -28,8 +28,8 @@ def test_jar_lowers_to_javac_then_jar():
     assert compile_java.inputs["javac"].name == "javac"
     # The classes dir is an output declaration: it stages under atomic.
     assert compile_java.outputs["classes_dir"].path == "build/classes"
-    # Recursive glob so packaged classes (com/foo/Bar.class) are tracked too.
-    assert compile_java.outputs["classes"].pattern.template == "build/classes/{**name}.class"
+    # Bare {name} is recursive, so packaged classes (com/foo/Bar.class) are tracked too.
+    assert compile_java.outputs["classes"].pattern.template == "build/classes/{name}.class"
 
     assert package.name == "jar build/libs/app.jar"
     assert "cf {output}" in package.command_line

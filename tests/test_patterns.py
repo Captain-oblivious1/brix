@@ -12,8 +12,16 @@ def test_binding_extraction():
     p = PathPattern("src/{name}.cpp")
     assert p.binding_names == ("name",)
     assert p.match("src/foo.cpp") == {"name": "foo"}
-    assert p.match("src/nested/foo.cpp") is None  # bindings match one segment
+    # Bare {name} is recursive by default (like make's %): matches across /.
+    assert p.match("src/nested/foo.cpp") == {"name": "nested/foo"}
     assert p.match("src/foo.h") is None
+
+
+def test_single_segment_constraint():
+    p = PathPattern("src/{name:*}.cpp")
+    assert p.binding_names == ("name",)
+    assert p.match("src/foo.cpp") == {"name": "foo"}
+    assert p.match("src/nested/foo.cpp") is None  # {name:*} is one segment
 
 
 def test_multiple_bindings():
@@ -58,17 +66,19 @@ def test_find_concrete(tmp_path):
 
 
 def test_recursive_binding_matches_across_segments():
-    p = PathPattern("build/classes/{**rel}.class")
-    assert p.binding_names == ("rel",)
-    assert not p.is_concrete
-    assert p.literal_prefix_dir == "build/classes"
-    assert p.match("build/classes/App.class") == {"rel": "App"}
-    assert p.match("build/classes/com/foo/Bar.class") == {"rel": "com/foo/Bar"}
-    assert p.match("build/classes/x.txt") is None  # wrong extension
-    assert p.match("other/App.class") is None  # wrong prefix
-    assert p.substitute({"rel": "com/foo/Bar"}) == "build/classes/com/foo/Bar.class"
-    # A plain {name} still matches only one segment.
-    assert PathPattern("src/{name}.java").match("src/a/b.java") is None
+    # Bare {rel} is recursive by default; {rel:**} is the explicit form.
+    for template in ("build/classes/{rel}.class", "build/classes/{rel:**}.class"):
+        p = PathPattern(template)
+        assert p.binding_names == ("rel",)
+        assert not p.is_concrete
+        assert p.literal_prefix_dir == "build/classes"
+        assert p.match("build/classes/App.class") == {"rel": "App"}
+        assert p.match("build/classes/com/foo/Bar.class") == {"rel": "com/foo/Bar"}
+        assert p.match("build/classes/x.txt") is None  # wrong extension
+        assert p.match("other/App.class") is None  # wrong prefix
+        assert p.substitute({"rel": "com/foo/Bar"}) == "build/classes/com/foo/Bar.class"
+    # {name:*} restricts to a single segment.
+    assert PathPattern("src/{name:*}.java").match("src/a/b.java") is None
 
 
 def test_recursive_find_walks_nested(tmp_path):
@@ -76,7 +86,7 @@ def test_recursive_find_walks_nested(tmp_path):
     (tmp_path / "build/classes/App.class").write_text("a")
     (tmp_path / "build/classes/com/foo/Bar.class").write_text("b")
     (tmp_path / "build/classes/com/foo/notes.txt").write_text("n")  # excluded
-    found = PathPattern("build/classes/{**rel}.class").find(tmp_path)
+    found = PathPattern("build/classes/{rel}.class").find(tmp_path)
     assert found == [
         ("build/classes/App.class", {"rel": "App"}),
         ("build/classes/com/foo/Bar.class", {"rel": "com/foo/Bar"}),

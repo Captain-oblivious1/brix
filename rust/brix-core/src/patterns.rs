@@ -1,11 +1,16 @@
-//! `PathPattern`: a workspace-relative path template whose `{name}`
-//! placeholders each match one path segment (`[^/]+`, no `/`).
+//! `PathPattern`: a workspace-relative path template with `{name}`
+//! placeholders. A bare `{name}` is **recursive** — it matches across `/`
+//! (like make's `%`, so `build/{rel}.class` matches `build/com/foo/Bar.class`
+//! with `rel=com/foo/Bar`). `{name:*}` restricts a placeholder to one path
+//! segment (`[^/]+`); `{name:**}` is the explicit form of the recursive
+//! default (`.+`).
 //!
 //! Mirrors `src/brix/patterns.py`. Python compiles the template to a regex
-//! (`{name}` -> `(?P<name>[^/]+)`, a repeated name -> a backreference); this
-//! port matches by hand instead — the `regex` crate has no backreferences,
-//! and hand-matching this small language avoids any regex-engine drift from
-//! Python's `re`. Behavior is pinned by golden fixtures.
+//! (`{name}`/`{name:**}` -> `(?P<name>.+)`, `{name:*}` -> `(?P<name>[^/]+)`, a
+//! repeated name -> a backreference); this port matches by hand instead — the
+//! `regex` crate has no backreferences, and hand-matching this small language
+//! avoids any regex-engine drift from Python's `re`. Behavior is pinned by
+//! golden fixtures.
 
 use std::path::Path;
 
@@ -15,8 +20,8 @@ use crate::fsutil::walk_files;
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     Literal(String),
-    /// `{name}` matches one path segment; `{**name}` (`recursive`) matches
-    /// across `/`.
+    /// `{name:*}` matches one path segment; a bare `{name}` or `{name:**}`
+    /// (`recursive`) matches across `/`.
     Binding { name: String, recursive: bool },
 }
 
@@ -29,10 +34,42 @@ pub struct PathPattern {
     pub binding_names: Vec<String>,
 }
 
-/// A `{name}` binding where `name` is `\w+` (ASCII letters, digits, `_`),
-/// matching Python's `_BINDING_RE = re.compile(r"\{(\w+)\}")`.
+/// A binding name is `\w+` (ASCII letters, digits, `_`), matching Python's
+/// `_BINDING_RE = re.compile(r"\{(\w+)(?::(\*\*|\*))?\}")`.
 fn is_word(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Try to parse a `{name}` / `{name:*}` / `{name:**}` binding starting at
+/// `chars[i] == '{'`. Returns `(name, recursive, index just past the '}')`,
+/// or `None` if the braces don't form a well-formed binding (then the `{` is
+/// treated as a literal, matching Python's regex not firing). A bare `{name}`
+/// and `{name:**}` are recursive; `{name:*}` is a single segment.
+fn parse_binding(chars: &[char], i: usize) -> Option<(String, bool, usize)> {
+    let mut j = i + 1;
+    let name_start = j;
+    while j < chars.len() && is_word(chars[j]) {
+        j += 1;
+    }
+    if j == name_start {
+        return None; // no name
+    }
+    let name: String = chars[name_start..j].iter().collect();
+    if j < chars.len() && chars[j] == '}' {
+        return Some((name, true, j + 1)); // bare {name} => recursive default
+    }
+    if j < chars.len() && chars[j] == ':' {
+        let star_start = j + 1;
+        let mut k = star_start;
+        while k < chars.len() && chars[k] == '*' {
+            k += 1;
+        }
+        let stars = k - star_start;
+        if (stars == 1 || stars == 2) && k < chars.len() && chars[k] == '}' {
+            return Some((name, stars == 2, k + 1)); // `*` single, `**` recursive
+        }
+    }
+    None
 }
 
 fn parse(template: &str) -> (Vec<Token>, Vec<String>) {
@@ -43,24 +80,13 @@ fn parse(template: &str) -> (Vec<Token>, Vec<String>) {
     let mut i = 0;
     while i < chars.len() {
         if chars[i] == '{' {
-            // Try to read {word} or {**word}.
-            let mut j = i + 1;
-            let recursive = j + 1 < chars.len() && chars[j] == '*' && chars[j + 1] == '*';
-            if recursive {
-                j += 2;
-            }
-            let name_start = j;
-            while j < chars.len() && is_word(chars[j]) {
-                j += 1;
-            }
-            if j > name_start && j < chars.len() && chars[j] == '}' {
-                let name: String = chars[name_start..j].iter().collect();
+            if let Some((name, recursive, next)) = parse_binding(&chars, i) {
                 if !literal.is_empty() {
                     tokens.push(Token::Literal(std::mem::take(&mut literal)));
                 }
                 names.push(name.clone());
                 tokens.push(Token::Binding { name, recursive });
-                i = j + 1;
+                i = next;
                 continue;
             }
         }
@@ -157,28 +183,14 @@ impl PathPattern {
         let mut i = 0;
         while i < chars.len() {
             if chars[i] == '{' {
-                let mut j = i + 1;
-                let recursive = j + 1 < chars.len() && chars[j] == '*' && chars[j + 1] == '*';
-                if recursive {
-                    j += 2;
-                }
-                let name_start = j;
-                while j < chars.len() && is_word(chars[j]) {
-                    j += 1;
-                }
-                if j > name_start && j < chars.len() && chars[j] == '}' {
-                    let name: String = chars[name_start..j].iter().collect();
-                    if let Some(value) = lookup(&name) {
-                        out.push_str(&value);
-                    } else {
-                        out.push('{');
-                        if recursive {
-                            out.push_str("**");
-                        }
-                        out.push_str(&name);
-                        out.push('}');
+                if let Some((name, _recursive, next)) = parse_binding(&chars, i) {
+                    match lookup(&name) {
+                        Some(value) => out.push_str(&value),
+                        // Unknown placeholder: leave its original text intact
+                        // (Python's repl returns `m.group(0)`).
+                        None => out.extend(chars[i..next].iter()),
                     }
-                    i = j + 1;
+                    i = next;
                     continue;
                 }
             }
@@ -229,9 +241,10 @@ fn match_tokens(
                 }
                 return match_tokens(tokens, ti + 1, path, pi + bound_chars.len(), bindings);
             }
-            // `{name}` is `[^/]+` (stop at the next slash); `{**name}` is `.+`
-            // (run to the end, crossing slashes). Greedy: take the longest run,
-            // then shrink and backtrack — matching Python's greedy `.+`/`[^/]+`.
+            // `{name:*}` is `[^/]+` (stop at the next slash); a recursive
+            // binding is `.+` (run to the end, crossing slashes). Greedy: take
+            // the longest run, then shrink and backtrack — matching Python's
+            // greedy `.+`/`[^/]+`.
             let mut max = pi;
             if *recursive {
                 max = path.len();
@@ -293,10 +306,15 @@ mod tests {
     #[test]
     fn basic_binding() {
         assert_eq!(
-            m("src/{name}.txt", "src/foo.txt"),
+            m("src/{name:*}.txt", "src/foo.txt"),
             Some(vec![("name".to_string(), "foo".to_string())])
         );
-        assert_eq!(m("src/{name}.txt", "src/a/b.txt"), None); // {name} is one segment
+        assert_eq!(m("src/{name:*}.txt", "src/a/b.txt"), None); // {name:*} is one segment
+        // A bare {name} is recursive by default (matches across /).
+        assert_eq!(
+            m("src/{name}.txt", "src/a/b.txt"),
+            Some(vec![("name".to_string(), "a/b".to_string())])
+        );
     }
 
     #[test]

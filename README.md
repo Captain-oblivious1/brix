@@ -522,21 +522,26 @@ build inputs that come from memory or a database instead of files, and a C++
   first build uses a header-blind key until it has built once — inherent to
   depfile-based tracking under a content-addressed cache (Bazel avoids it only
   by requiring declared headers).
-- **Recursive-glob patterns (`{**name}`) + packaged-Java stale-jar fix**
-  (`patterns.py`, `rust/brix-core/src/patterns.rs`, `java.py`): a `{**name}`
-  placeholder matches *across* `/` (`.+`), where `{name}` matches one segment
-  (`[^/]+`) — so `build/classes/{**rel}.class` matches `App.class` *and*
-  `com/foo/Bar.class`. Fixes a **confirmed correctness bug**: `JarAction`
-  tracked classes with a top-level-only `{name}.class` glob, so a changed
-  *packaged* class re-ran `javac` but not the jar step, leaving a stale jar
-  (`test_packaged_class_change_updates_jar`, real JDK, was `xfail`, now passes).
-  Realized through the overlay-aware `find()` (which walks recursively), so it
-  sees classes staged under an atomic build — unlike `RegexData`/`iter_files`,
-  which doesn't surface staged outputs. Implemented in *both* engines and
-  cross-checked: `PathPattern` compiles `{**name}` to `.+`, the Rust matcher
-  scans to end-of-path with the same greedy backtracking; new golden pattern
-  cases pin match/substitute parity (`cargo test` 9 unit + 9 golden). Also
-  unblocks nested source globbing generally (e.g. `src/{**pkg}/{cls}.java`).
+- **Recursive-by-default glob syntax (`{name}` / `{name:*}` / `{name:**}`) +
+  packaged-Java stale-jar fix** (`patterns.py`, `rust/brix-core/src/patterns.rs`,
+  `java.py`): a bare `{name}` matches *across* `/` (`.+`, like make's `%`),
+  `{name:*}` pins one segment (`[^/]+`), and `{name:**}` is the explicit
+  recursive form — so `build/classes/{rel}.class` matches `App.class` *and*
+  `com/foo/Bar.class`. (This supersedes the earlier `{**name}`-prefix syntax:
+  recursion is the sensible default for build outputs, and the simple case now
+  writes nothing extra while single-segment is the opt-in constraint.) Fixes a
+  **confirmed correctness bug**: `JarAction` tracked classes with a
+  top-level-only glob, so a changed *packaged* class re-ran `javac` but not the
+  jar step, leaving a stale jar (`test_packaged_class_change_updates_jar`, real
+  JDK, was `xfail`, now passes). Realized through the overlay-aware `find()`
+  (which walks recursively), so it sees classes staged under an atomic build —
+  unlike `RegexData`/`iter_files`, which doesn't surface staged outputs.
+  Implemented in *both* engines and cross-checked: `PathPattern` compiles a
+  recursive binding to `.+`, the Rust matcher scans to end-of-path with the same
+  greedy backtracking; new golden pattern cases pin match/substitute parity
+  (`cargo test` 9 unit + 9 golden). Also fixes latent nested-source globbing
+  (Java sources live in package dirs like `com/foo/Bar.java`, which the old
+  single-segment default silently missed).
   (`workers.py`, `executor.py`, `actions.py`, `planner.py`, `java.py`,
   `src/brix/_java/JavacWorker.java`): a worker is a long-lived process that
   executes many actions over a JSON-lines protocol, amortizing startup
@@ -794,8 +799,11 @@ data.tool("c++")                 # tool identity (later: path, version, …)
 data.value("-O2 -std=c++20")     # literal data that affects outputs
 ```
 
-- `glob` bindings match one path segment; `src/{name}.cpp` over
-  `src/foo.cpp`, `src/bar.cpp` realizes to `name=foo`, `name=bar`.
+- `glob` bindings are **recursive by default** — a bare `{name}` matches
+  across `/` (like make's `%`), so `build/{rel}.class` matches both
+  `build/App.class` and `build/com/foo/Bar.class`. Write `{name:*}` to pin a
+  binding to a single path segment; `{name:**}` is the explicit recursive form.
+  For anything richer than that, drop to `data.regex` and write a full regex.
 - `value` exists so options/flags/env are hashable inputs without users
   creating JSON option files.
 - Unions compose sets:

@@ -5,7 +5,7 @@
   },
   {
     "spec": "{\"kind\": \"process\", \"command_line\": \"cat {srcs} {out}\", \"inputs\": {\"srcs\": [{\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"glob\"}",
-    "fingerprint": "5f23d4ead2d571e38d7e46fb6ee018e81a1c96c240f8682eb62277cf00279831"
+    "fingerprint": "02cd2a7884a581786716fbea35d38ff7209f3037ec1113059519279e58ee0df9"
   },
   {
     "spec": "{\"kind\": \"process\", \"command_line\": \"cat {srcs} {out}\", \"inputs\": {\"srcs\": [{\"kind\": \"regex\", \"pattern\": \"src/[^/]+\\\\.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/all.txt\"}]}, \"name\": \"regex over iter_files\"}",
@@ -17,6 +17,6 @@
   },
   {
     "spec": "{\"kind\": \"process\", \"command_line\": \"pack {all} {out}\", \"inputs\": {\"all\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}, {\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/pack.txt\"}]}, \"name\": \"union input\"}",
-    "fingerprint": "1dfc16d2387767c27c6eaa3cd84141c9f418370dbed4d508a6831b223dc11273"
+    "fingerprint": "6553c3f27caab81318a16df36a475f51aef87bcfd8e6458235b14e9cdf665fae"
   }
 ]

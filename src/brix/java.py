@@ -22,9 +22,10 @@ Directory convention: the classes directory is declared as a
 ``data.file`` *output* of the javac step (so it renders through
 ``output_root`` and stages under atomic builds) and as a ``data.file``
 *input* of the jar step (so it resolves through the overlay). Class-file
-tracking uses a ``{name}.class`` glob, which covers default-package
-classes; packaged (nested-directory) class tracking needs regex output
-collections — future work.
+tracking uses a bare ``{name}.class`` glob, which is recursive by default
+(matches across ``/``) and so covers packaged classes
+(``com/foo/Bar.class``), not just default-package ones — a changed
+packaged class thus re-runs the jar step, avoiding a stale jar.
 """
 
 from __future__ import annotations
@@ -158,12 +159,12 @@ class JarAction(Action):
             )
 
     def lower(self) -> list[Action]:
-        # Recursive `{**name}` so class tracking reaches packaged classes
+        # Bare `{name}` is recursive, so class tracking reaches packaged classes
         # (`com/foo/Bar.class`), not just default-package ones — otherwise a
         # changed packaged class re-runs javac but not the jar step, leaving a
         # stale jar. Realizes through the overlay-aware `find()`, so it also sees
         # freshly compiled classes staged under an atomic build.
-        classes = GlobData(f"{self.classes_dir}/{{**name}}.class")
+        classes = GlobData(f"{self.classes_dir}/{{name}}.class")
         if self.javac_worker is not None:
             inputs: dict[str, DataExpr] = {
                 "options": _options_expr(self.options),

@@ -68,7 +68,8 @@ def gen_digests():
 # -- patterns: match / substitute / literal_prefix_dir / is_concrete ---------
 
 PATTERN_TEMPLATES = [
-    "src/{name}.txt",
+    "src/{name}.txt",  # bare binding: recursive by default (matches across /)
+    "src/{name:*}.txt",  # single-segment constraint
     "build/upper/{name}.txt",
     "a/b.txt",  # concrete
     "{a}/{a}.txt",  # repeated binding
@@ -76,8 +77,9 @@ PATTERN_TEMPLATES = [
     "a/{x}/b/{y}.txt",  # multiple segments
     "{video}/{scene}.png",
     "prefix{n}suffix",
-    "build/classes/{**rel}.class",  # recursive binding: matches across /
-    "src/{**pkg}/{cls}.java",  # recursive then single segment
+    "build/classes/{rel}.class",  # bare recursive: matches across /
+    "build/classes/{rel:**}.class",  # explicit recursive (same as bare)
+    "src/{pkg:**}/{cls:*}.java",  # recursive then single segment
 ]
 
 MATCH_PATHS = [
@@ -464,7 +466,8 @@ def write_tree():
 FIND_TEMPLATES = [
     "src/a.txt",  # concrete, present
     "src/missing.txt",  # concrete, absent
-    "src/{name}.txt",  # single-segment binding: a, b (not nested/c, not .md)
+    "src/{name:*}.txt",  # single-segment: a, b (not nested/c, not .md)
+    "src/{name}.txt",  # bare = recursive: a, b, AND nested/c
     "src/{a}/{b}.txt",  # multi-segment: nested/c
     "src/{name}.md",  # notes
     "nope/{x}.txt",  # base dir absent

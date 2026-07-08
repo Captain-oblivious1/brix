@@ -12,7 +12,9 @@
       },
       {
         "path": "src/a/b.txt",
-        "bindings": null
+        "bindings": {
+          "name": "a/b"
+        }
       },
       {
         "path": "a/b.txt",
@@ -109,6 +111,119 @@
           "cls": "Bar"
         },
         "result": "src/{name}.txt"
+      }
+    ]
+  },
+  {
+    "template": "src/{name:*}.txt",
+    "is_concrete": false,
+    "literal_prefix_dir": "src",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": {
+          "name": "foo"
+        }
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      },
+      {
+        "path": "build/classes/App.class",
+        "bindings": null
+      },
+      {
+        "path": "build/classes/com/foo/Bar.class",
+        "bindings": null
+      },
+      {
+        "path": "src/com/foo/Bar.java",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "src/foo.txt"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "src/{name:*}.txt"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "src/{name:*}.txt"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "src/{name:*}.txt"
+      },
+      {
+        "bindings": {},
+        "result": "src/{name:*}.txt"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "src/{name:*}.txt"
+      },
+      {
+        "bindings": {
+          "rel": "com/foo/Bar"
+        },
+        "result": "src/{name:*}.txt"
+      },
+      {
+        "bindings": {
+          "pkg": "com/foo",
+          "cls": "Bar"
+        },
+        "result": "src/{name:*}.txt"
       }
     ]
   },
@@ -903,7 +1018,7 @@
     ]
   },
   {
-    "template": "build/classes/{**rel}.class",
+    "template": "build/classes/{rel}.class",
     "is_concrete": false,
     "literal_prefix_dir": "build/classes",
     "matches": [
@@ -969,38 +1084,38 @@
         "bindings": {
           "name": "foo"
         },
-        "result": "build/classes/{**rel}.class"
+        "result": "build/classes/{rel}.class"
       },
       {
         "bindings": {
           "a": "X",
           "b": "Y"
         },
-        "result": "build/classes/{**rel}.class"
+        "result": "build/classes/{rel}.class"
       },
       {
         "bindings": {
           "x": "1",
           "y": "2"
         },
-        "result": "build/classes/{**rel}.class"
+        "result": "build/classes/{rel}.class"
       },
       {
         "bindings": {
           "video": "intro",
           "scene": "s1"
         },
-        "result": "build/classes/{**rel}.class"
+        "result": "build/classes/{rel}.class"
       },
       {
         "bindings": {},
-        "result": "build/classes/{**rel}.class"
+        "result": "build/classes/{rel}.class"
       },
       {
         "bindings": {
           "a": "only-a"
         },
-        "result": "build/classes/{**rel}.class"
+        "result": "build/classes/{rel}.class"
       },
       {
         "bindings": {
@@ -1013,12 +1128,127 @@
           "pkg": "com/foo",
           "cls": "Bar"
         },
-        "result": "build/classes/{**rel}.class"
+        "result": "build/classes/{rel}.class"
       }
     ]
   },
   {
-    "template": "src/{**pkg}/{cls}.java",
+    "template": "build/classes/{rel:**}.class",
+    "is_concrete": false,
+    "literal_prefix_dir": "build/classes",
+    "matches": [
+      {
+        "path": "src/foo.txt",
+        "bindings": null
+      },
+      {
+        "path": "src/a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/b.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/x.txt",
+        "bindings": null
+      },
+      {
+        "path": "x/y.txt",
+        "bindings": null
+      },
+      {
+        "path": "one-two.txt",
+        "bindings": null
+      },
+      {
+        "path": "a/mid/b/end.txt",
+        "bindings": null
+      },
+      {
+        "path": "intro/scene1.png",
+        "bindings": null
+      },
+      {
+        "path": "prefixMIDsuffix",
+        "bindings": null
+      },
+      {
+        "path": "nomatch",
+        "bindings": null
+      },
+      {
+        "path": "build/classes/App.class",
+        "bindings": {
+          "rel": "App"
+        }
+      },
+      {
+        "path": "build/classes/com/foo/Bar.class",
+        "bindings": {
+          "rel": "com/foo/Bar"
+        }
+      },
+      {
+        "path": "src/com/foo/Bar.java",
+        "bindings": null
+      }
+    ],
+    "substitutions": [
+      {
+        "bindings": {
+          "name": "foo"
+        },
+        "result": "build/classes/{rel:**}.class"
+      },
+      {
+        "bindings": {
+          "a": "X",
+          "b": "Y"
+        },
+        "result": "build/classes/{rel:**}.class"
+      },
+      {
+        "bindings": {
+          "x": "1",
+          "y": "2"
+        },
+        "result": "build/classes/{rel:**}.class"
+      },
+      {
+        "bindings": {
+          "video": "intro",
+          "scene": "s1"
+        },
+        "result": "build/classes/{rel:**}.class"
+      },
+      {
+        "bindings": {},
+        "result": "build/classes/{rel:**}.class"
+      },
+      {
+        "bindings": {
+          "a": "only-a"
+        },
+        "result": "build/classes/{rel:**}.class"
+      },
+      {
+        "bindings": {
+          "rel": "com/foo/Bar"
+        },
+        "result": "build/classes/com/foo/Bar.class"
+      },
+      {
+        "bindings": {
+          "pkg": "com/foo",
+          "cls": "Bar"
+        },
+        "result": "build/classes/{rel:**}.class"
+      }
+    ]
+  },
+  {
+    "template": "src/{pkg:**}/{cls:*}.java",
     "is_concrete": false,
     "literal_prefix_dir": "src",
     "matches": [
@@ -1083,44 +1313,44 @@
         "bindings": {
           "name": "foo"
         },
-        "result": "src/{**pkg}/{cls}.java"
+        "result": "src/{pkg:**}/{cls:*}.java"
       },
       {
         "bindings": {
           "a": "X",
           "b": "Y"
         },
-        "result": "src/{**pkg}/{cls}.java"
+        "result": "src/{pkg:**}/{cls:*}.java"
       },
       {
         "bindings": {
           "x": "1",
           "y": "2"
         },
-        "result": "src/{**pkg}/{cls}.java"
+        "result": "src/{pkg:**}/{cls:*}.java"
       },
       {
         "bindings": {
           "video": "intro",
           "scene": "s1"
         },
-        "result": "src/{**pkg}/{cls}.java"
+        "result": "src/{pkg:**}/{cls:*}.java"
       },
       {
         "bindings": {},
-        "result": "src/{**pkg}/{cls}.java"
+        "result": "src/{pkg:**}/{cls:*}.java"
       },
       {
         "bindings": {
           "a": "only-a"
         },
-        "result": "src/{**pkg}/{cls}.java"
+        "result": "src/{pkg:**}/{cls:*}.java"
       },
       {
         "bindings": {
           "rel": "com/foo/Bar"
         },
-        "result": "src/{**pkg}/{cls}.java"
+        "result": "src/{pkg:**}/{cls:*}.java"
       },
       {
         "bindings": {

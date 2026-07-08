@@ -14,6 +14,23 @@
       "results": []
     },
     {
+      "template": "src/{name:*}.txt",
+      "results": [
+        [
+          "src/a.txt",
+          {
+            "name": "a"
+          }
+        ],
+        [
+          "src/b.txt",
+          {
+            "name": "b"
+          }
+        ]
+      ]
+    },
+    {
       "template": "src/{name}.txt",
       "results": [
         [
@@ -26,6 +43,12 @@
           "src/b.txt",
           {
             "name": "b"
+          }
+        ],
+        [
+          "src/nested/c.txt",
+          {
+            "name": "nested/c"
           }
         ]
       ]
