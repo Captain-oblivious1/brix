@@ -129,9 +129,11 @@ below is tagged with the model that should do it.
    the Python behavior exactly (via tests that cross-check the two): the
    change-detection math, the planning, the dependency inference, the
    scheduler core (runs steps in parallel in the right order — clean builds
-   work end-to-end in pure Rust), and now incremental rebuilds (a Rust build
-   skips everything that hasn't changed, sharing the same metadata file
-   Python writes). **What's left: the caching and staging layers**,
+   work end-to-end in pure Rust), incremental rebuilds (a Rust build skips
+   everything that hasn't changed, sharing the same metadata file Python
+   writes), and now the shared result cache (a fresh checkout builds
+   instantly from results any earlier build stored — Rust and Python can
+   even share one cache directory). **What's left: the staging layer**,
    persistent workers, the Python↔Rust boundary, and then switching brix to
    run on the Rust engine by default.
    **[Fable]** — the trickiest part of the whole project; one subtle ordering
@@ -714,6 +716,31 @@ build inputs that come from memory or a database instead of files, and a C++
   fingerprint error (unported identity plugin) fails the node instead of
   crashing the build. The cache and atomic layers, workers, and the PyO3
   boundary are the remaining slices.
+- **Rust port, phase 3 slice 4 — the cache layer** (`rust/brix-core/src/cache.rs`):
+  reuse results across workspaces, keyed by the same `action_fingerprint`
+  the incremental layer records. The store is pluggable
+  (`CacheStoreProtocol` trait — load / restore / store); the built-in
+  `CacheStore` shares Python's on-disk layout byte-for-byte
+  (`<fp[:2]>/<fp>/entry.json` + `files/<n>` blobs, tmp-then-rename with a
+  lost race discarded), **so the two engines can share one cache
+  directory** — pinned in both directions: Rust restores from a
+  hand-written Python-format entry, and a Rust-written entry carries the
+  exact key shape Python's `ProcessResult(**d)` needs. `TwoTierCacheStore`
+  is ported too (front-first reads, back hits promoted into the front, a
+  down back never blocks local caching). Resilience lives in the *layer*,
+  as in Python: any store error — unreachable remote, corrupt entry,
+  disk-full populate — degrades to a cache miss or a skipped write, never
+  a failed build. Real failures with an exit code are cached and replayed
+  (`source="cache"`, exit code and stderr intact); signal-killed or
+  never-started runs are not. Restored outputs write through
+  `ctx.output_root`, so an output-redirecting outer layer (the future
+  atomic port) routes them via staging — covered by a redirect test.
+  Pinned by `rust/brix-core/tests/cache.rs`, the mirror of
+  `tests/test_cache.py` + `tests/test_cache_store.py` (fresh-checkout and
+  rm-rf-rebuild payoffs, freshness-beats-cache, miss-then-repopulate,
+  broken/write-failing stores, two-tier promotion). `cargo test` is 18
+  unit + 9 golden + 43 behavioral; clippy clean; Python suite 190. The
+  atomic layer, workers, and the PyO3 boundary are the remaining slices.
 
 ## Design rules
 

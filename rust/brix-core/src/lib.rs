@@ -12,6 +12,7 @@
 //! No PyO3 in this crate — the Python and (future) JS/TS bindings wrap it.
 
 pub mod actions;
+pub mod cache;
 pub mod content;
 pub mod context;
 pub mod data;
@@ -34,6 +35,7 @@ pub mod spec;
 pub mod targets;
 
 pub use actions::Action;
+pub use cache::{CacheLayer, CacheStore, CacheStoreProtocol, TwoTierCacheStore};
 pub use content::action_fingerprint;
 pub use context::NodeContext;
 pub use detector::TimeAndHashChangeDetector;
