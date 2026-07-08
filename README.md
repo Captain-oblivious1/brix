@@ -102,91 +102,145 @@ end-to-end test that skips when no JDK is on PATH).
 
 ## TODO
 
-Duane's priority: settle Python semantics before the Rust port — every
-design decision made now is churn the port never absorbs.
+**Priority:** lock down how brix behaves (in Python) before rewriting the engine
+in Rust. Every behavior settled now is rework the rewrite won't have to redo.
 
-**Ownership.** *Opus* = the everyday model, for self-contained, test-guarded,
-Fable-independent work. *Fable* = the expensive model, reserved for
-full-strength, line-by-line review of the load-bearing scheduler/daemon
-subtleties (the "do-not-reinterpret" list). Items are tagged below.
+**Who does what.** Two AI models share the work. **Opus** is the everyday model:
+it handles self-contained jobs that come with tests and don't need deep judgment.
+**Fable** is the expensive, most-careful model, saved for the few pieces where a
+subtle mistake would break builds in ways ordinary tests might miss — mainly the
+scheduler (the part that decides what runs when) and the build server. Each item
+below is tagged with the model that should do it.
 
-### Three strategic tracks
+### The three big tracks
 
-1. **Fast JVM builds** — `docs/java-fast-builds.md`. Phases 1–2 done (Completed
-   log: ABI fingerprints, persistent workers, javac worker, the Gradle
-   benchmark). **Remaining: phase 3 — the cross-build daemon** (keep workers
-   warm *between* builds; the "faster than Gradle" claim). **[Fable]**
-2. **Rust engine port** — `docs/rust-port.md` + `docs/boundary-schema.md`.
-   Phases 1–2 **and** all deferred fingerprint pieces done (Completed log:
-   digest/patterns/shlex, planner/targets/`describe()`, fingerprint keys,
-   `RegexData`, the full content fingerprint incl. `deps`). **Remaining: phase 3
-   — scheduler + layers + context, then flip the default via `BRIX_ENGINE`**
-   (plus the small fingerprint tail the port errors on today: `tool` atoms,
-   `identity=` plugins, the `worker` leg). **[Fable]** — do-not-reinterpret list
-   matters most here.
-3. **JS/TS API** — the Python API transliterated on the same core
-   (`docs/boundary-schema.md`: camelCase, async `build()`, plain-object
-   reporters). **[Blocked]** — waits on the Rust core (track 2).
+1. **Make Java builds fast** — design notes in `docs/java-fast-builds.md`. Mostly
+   done: brix already skips recompiling a Java library's users when only its
+   internals changed (not its public interface), and it keeps compiler processes
+   alive so they don't pay startup cost on every file. **What's left: an
+   always-warm build server** — keep those compiler processes alive *between*
+   separate builds, not just within one build. This is the piece that would let
+   brix beat Gradle on the last benchmark. **[Fable]** — fiddly, easy to get
+   subtly wrong.
+2. **Rewrite the engine in Rust** — design notes in `docs/rust-port.md` and
+   `docs/boundary-schema.md`. The goal: one shared engine that can power *both* a
+   Python and a JavaScript/TypeScript way of writing build files, so nobody has
+   to learn a new language. Most of the groundwork is done and proven to match
+   the Python behavior exactly (via tests that cross-check the two): the
+   change-detection math, the planning, the dependency inference. **What's left:
+   the scheduler** (runs steps in parallel in the right order), the build
+   "layers" (caching, incremental, staging), and then switching brix to run on
+   the Rust engine by default. **[Fable]** — the trickiest part of the whole
+   project; one subtle ordering bug here breaks builds, so it needs the most
+   careful model reviewing it line by line.
+3. **A JavaScript/TypeScript way to write build files** — same features as the
+   Python one, just in their language (`docs/boundary-schema.md`). **[Blocked]**
+   — can't start until the Rust engine (track 2) exists, since both languages are
+   meant to share it.
 
-### Opus queue (ready now — Fable-independent, test-guarded)
+### Opus queue — ready to do now
 
-*Correctness fixes (from the "gaps" analysis):*
-- Java packaged-class output tracking (nested package dirs, not just default)
-- "Run B after A" ordering edges (dependencies with no shared file)
-- Warn/error when two actions declare the same output
-- Optional "always re-hash" mode (the same-size-same-mtime corner)
-- Record the ambient environment a build used (partial hermeticity)
+These are self-contained and come with tests. No Fable needed.
 
-*Ergonomics / on-ramp:*
-- `brix init` + a standalone `brix` command
-- graph visualization (a diagram of the plan)
-- starter templates (java-service, ts-service)
+**Correctness fixes** (holes found in the "what might we be missing?" review):
 
-*Trust (also de-risks phase 3):*
-- more "never wrongly skips a rebuild" tests
-- finish the last corner of the delete-cleanup fix (per-member output manifest)
-- verify symlink handling
+- **Track Java classes in real packages.** brix only tracks Java class files at
+  the top level right now, not ones in package folders like `com/foo/Bar.class`.
+  So cleaning up a leftover class after you delete its source doesn't fully work
+  for real (packaged) Java code.
+- **Let you say "run B after A" without a shared file.** Today brix works out
+  ordering only from files — A makes a file, B reads it. Some steps need to be
+  ordered without sharing a file, like "start the service, then run tests against
+  it." There's no way to express that yet.
+- **Warn when two steps write the same file.** Right now brix silently lets the
+  second one win, which can make a build come out differently depending on timing.
+  It should catch the collision instead.
+- **An optional "always re-check file contents" mode.** To go fast, brix assumes a
+  file is unchanged when its size and timestamp both match. In rare cases a file's
+  contents can change while those stay the same; this mode would catch it, at the
+  cost of some speed.
+- **Record the environment a build used.** An environment variable or machine
+  setting that a tool reads, but that the build file didn't declare, can change a
+  build's result without brix noticing — the classic "works on my machine, fails
+  on the server." Recording what was actually used is the first step to catching
+  it.
 
-*Extensibility:*
-- git-status change detector (fast change detection on a big repo)
-- document the public plug-in protocols (`CacheStore` / `ContentIdentity` /
-  `ChangeDetector`)
-- Go / protobuf content-identity plugins (when those languages arrive)
-- **TS/JS build support** — a `ts.py` like `cpp.py`/`java.py` (today you'd run
-  `tsc`/a bundler as a raw `ExternalProcessAction`; there is *no* TS/JS build
-  sugar yet). As part of it, transitive-import dependency tracking — the
-  header-tracking analog — reusing the general depfile mechanism
-  (`ExternalProcessAction.depfile` + fingerprint fold) with a **TS-format
-  scanner** (`tsc --listFiles` / bundler metafile), not the Makefile
-  `scan_depfile`. Note: the `ts-dts` *content-identity* plugin already exists;
-  this is the missing *build layer*, distinct from the [Blocked] JS/TS
-  **authoring** binding in track 3.
+**Making it easy to start:**
 
-*Bigger, still Opus (design-first — sketch before building):*
-- affected-target determination ("only build what my change touched" — a
-  reverse index; the monorepo CI win)
+- **A `brix` command, like `git`.** `brix init` sets up a new project with a
+  starter build file; `brix build` runs it. Today there's no `brix` command — you
+  run your build file directly with Python.
+- **Draw a picture of the build.** Boxes for steps, arrows for what depends on
+  what, instead of a text list.
+- **Ready-made starter templates** for a Java service and a TypeScript service, so
+  people begin from something that already works.
 
-### Fable queue (reserved for the expensive model)
+**Building trust** (also makes the Rust rewrite safer to check):
 
-- **Rust port phase 3** (track 2) — scheduler + layers + context, reviewed
-  line-by-line against the do-not-reinterpret list, then the `BRIX_ENGINE` flip.
-- **JVM phase 3** (track 1) — the cross-build daemon.
+- **More tests that try to trick brix into skipping a rebuild it shouldn't** — and
+  prove it doesn't.
+- **Close the last corner of the delete-cleanup fix.** When you delete files, brix
+  cleans up their leftover build outputs; it handles the normal case, but one rare
+  situation (a build that crashed at just the wrong moment) it can't fully clean.
+  Fixing it needs a small change to how brix remembers past builds — cheaper to do
+  before the Rust rewrite locks things down.
+- **Double-check symbolic links** — that a symlinked source file, or one whose
+  target changes, is noticed.
 
-### Blocked / unassigned
+**Extending brix:**
 
-- **Replace the Java/TS build commands** — blocked on two decisions:
-  orchestrate-then-replace vs. big-bang, and where dependency resolution stops.
-- **Sandboxing / enforced hermeticity** and **remote execution** — big future
-  projects (Opus as a large effort, or Fable for review). Sandboxing is the
-  safety net that would auto-catch the Opus-queue correctness gaps above.
-- **Pending driver:** Duane will hand over a C++ project to onboard (write its
-  `brix.py`); header dependency tracking is already in place for it.
+- **Use git to spot changes instantly.** Today brix checks files directly to see
+  what changed; on a big repo, asking git "what changed since last time?" is much
+  faster.
+- **Write down the official ways to plug in.** There are three: where cached
+  results are stored, how brix judges whether a change actually "matters," and how
+  it detects file changes. Document them so other people can build on brix.
+- **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
+  does this for Java and TypeScript (skip rebuilding users when only internals
+  changed). Add it for Go and Protobuf when those languages show up in a project.
+- **Support for building TypeScript/JavaScript** — a helper like the ones for C++
+  and Java. Today you *can* build TS by running the compiler as a plain command,
+  but there's no convenient helper. As part of this, track import dependencies:
+  the TS version of the C/C++ header problem — a bundle depends on everything it
+  imports, so editing a deeply-imported file should rebuild it. The machinery for
+  this already exists (built for C/C++); TS just needs a different reader for its
+  dependency format. Note: this is about *building* TS code — separate from the
+  [Blocked] track-3 item of *writing build files* in TS. The interface-change
+  detector for TS already exists.
 
-*Further out (original spec, unscheduled):* distributed / lazy graph loading
-(the monorepo scaling lever — deferred until hundreds of services; see the
-long-term-goal memory), richer change detectors (filesystem watcher, remote
-metadata), in-memory and database-backed data expressions,
-`cpp.CompileApplicationAction`.
+**Bigger, but still Opus** (sketch the design first):
+
+- **"Only build what my change touched."** Given a set of edits, work out which
+  parts of a big project could be affected and build/test only those — not all 50
+  services every time. The biggest time-saver for a company monorepo.
+
+### Fable queue — for the careful model only
+
+- **The scheduler + build layers of the Rust rewrite** (track 2), reviewed
+  carefully, then switching brix to run on Rust by default. The single trickiest
+  part of the project.
+- **The always-warm Java build server** (track 1).
+
+### Blocked or not yet decided
+
+- **Fully replacing your Java/TS build tools with brix.** Blocked on two decisions
+  from Duane: (a) wrap the existing builds first and replace piece by piece, or
+  replace everything at once; and (b) whether brix also handles *downloading*
+  third-party dependencies, or leaves that to an existing tool.
+- **Two big future projects.** *Sandboxing*: run each build step so it can only
+  see the files it declared — turning "you forgot to list a dependency" into an
+  immediate error instead of a silent wrong build. This is the safety net that
+  would automatically catch several of the correctness gaps above. *Spreading
+  compilation across many machines* (remote execution). Both are large — either
+  Opus as a big effort or Fable to review.
+- **Pending:** Duane will hand over a real C++ project to set up a build file for.
+  Header dependency tracking is already built and ready for it.
+
+**Lower-priority ideas** (from the original spec): loading only part of a huge
+project's build at a time (only needed at hundreds of services), fancier change
+detection (a file-system watcher, or pulling change info from a remote server),
+build inputs that come from memory or a database instead of files, and a C++
+"compile-and-link in one step" helper.
 
 ## Completed
 
