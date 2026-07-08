@@ -17,22 +17,26 @@ use crate::data::DataAtom;
 /// did-not-run `ProcessResult` (mirrors Python's `RenderError`).
 pub type RenderResult<T> = Result<T, String>;
 
+/// `shutil.which` for a bare name: search PATH, first regular executable
+/// file wins. `None` when not found.
+pub fn which(name: &str) -> Option<String> {
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        let candidate = dir.join(name);
+        if is_executable_file(&candidate) {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
 /// Resolve a tool name to an invocable path (mirrors `resolve_tool`):
-/// a name containing `/` is used as-is; otherwise PATH is searched
-/// (`shutil.which` semantics: first regular, executable file wins).
+/// a name containing `/` is used as-is; otherwise PATH is searched.
 pub fn resolve_tool(name: &str) -> RenderResult<String> {
     if name.contains('/') {
         return Ok(name.to_string());
     }
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            let candidate = dir.join(name);
-            if is_executable_file(&candidate) {
-                return Ok(candidate.to_string_lossy().into_owned());
-            }
-        }
-    }
-    Err(format!("tool not found: {name}"))
+    which(name).ok_or_else(|| format!("tool not found: {name}"))
 }
 
 #[cfg(unix)]

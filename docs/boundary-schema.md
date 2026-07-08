@@ -23,7 +23,8 @@ filesystem edge inside the core.
 Action        = Process | Expand | Delete
 Process       = { "kind": "process", "name": str, "command_line": str,
                   "inputs": { key: DataExpr }, "outputs": { key: DataExpr },
-                  "env": { key: DataExpr } }          // env may be {}
+                  "env": { key: DataExpr },           // env may be {}
+                  "depfile": str? }                   // absent = no depfile
 Expand        = { "kind": "expand", "element": str,
                   "collection": DataExpr, "child": Action }   // child may be Expand
 Delete        = { "kind": "delete", "paths": [str] }
@@ -40,10 +41,16 @@ uses Python-compatible named groups (the core must match Python's `re`
 semantics for the subset used: named groups, character classes,
 quantifiers — no lookbehind is promised). `identity` names a registered
 content-identity plugin (`docs/java-fast-builds.md`); absent means byte
-hashing. The typed helpers (`cpp`, `java`) lower **before** this
-boundary and never appear in it. WorkerSpec (same doc) adds
-`"worker": { "name": str, "command_line": str, "inputs": {...} }` to
-Process when it lands — reserve the key.
+hashing. `depfile` is the logical path of a Makefile-format dependency
+file the tool writes (`cc -MMD -MF`), scanned by the incremental layer
+after a successful run; it is not identity (never part of `action_key`).
+It was always part of the Python `ExternalProcessAction` but was missing
+from this shape when it was first pinned — added (still version 1: it is
+optional and additive, both engines default it to absent) when the Rust
+incremental layer ported it. The typed helpers (`cpp`, `java`) lower
+**before** this boundary and never appear in it. WorkerSpec (same doc)
+adds `"worker": { "name": str, "command_line": str, "inputs": {...} }`
+to Process when it lands — reserve the key.
 
 ## Build config (skin → core)
 

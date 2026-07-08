@@ -11,7 +11,10 @@ use std::path::Path;
 use std::process::Command;
 
 /// The captured result of one process invocation (or a failure to invoke).
-#[derive(Debug, Clone, Default)]
+/// Serde field names match Python's `asdict(ProcessResult)` exactly — this
+/// shape is stored in `metadata.json` action records and replayed across
+/// engines, so it is wire format, not just an in-memory struct.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ProcessResult {
     pub action_name: String,
     pub command: String,

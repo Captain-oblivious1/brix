@@ -8,7 +8,7 @@
 //! Commands use `true`/`false`/`sh -c` rather than a Python interpreter so
 //! the suite is self-contained on any POSIX dev machine.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -17,7 +17,7 @@ use brix_core::executor::{execute, BuildResult};
 use brix_core::layers::{BuildLayer, NodeProposal};
 use brix_core::plan::{EdgeTrigger, ExecutionPlan, Node, NodeKind, NodeState};
 use brix_core::process::ProcessResult;
-use brix_core::report::Reporter;
+use brix_core::report::{NullReporter, Reporter};
 
 // -- helpers ------------------------------------------------------------------
 
@@ -28,6 +28,7 @@ fn ok_action(name: &str) -> Action {
         inputs: vec![],
         outputs: vec![],
         env: vec![],
+        depfile: None,
     }
 }
 
@@ -38,6 +39,7 @@ fn fail_action() -> Action {
         inputs: vec![],
         outputs: vec![],
         env: vec![],
+        depfile: None,
     }
 }
 
@@ -54,7 +56,7 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-fn write(root: &PathBuf, rel: &str, content: &str) {
+fn write(root: &Path, rel: &str, content: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
@@ -80,7 +82,7 @@ impl Recorder {
         let events = self.events();
         events
             .iter()
-            .position(|(k, l)| k == kind && label.map_or(true, |want| l == want))
+            .position(|(k, l)| k == kind && label.is_none_or(|want| l == want))
             .unwrap_or_else(|| panic!("no {kind} {label:?} in {events:?}"))
     }
 }
@@ -148,7 +150,7 @@ fn expand_then_combine_spec() -> String {
     .to_string()
 }
 
-fn plan_from_spec(spec_json: &str, root: &PathBuf) -> ExecutionPlan {
+fn plan_from_spec(spec_json: &str, root: &Path) -> ExecutionPlan {
     let spec = brix_core::spec::parse(spec_json).unwrap();
     brix_core::planner::plan_graph(spec.actions, root.to_str().unwrap(), None).unwrap()
 }
@@ -389,6 +391,90 @@ fn nested_expansion_builds_per_video_per_scene() {
     assert!(plan.nodes.iter().any(|n| n.label == "render alpha/01"));
 }
 
+// -- overlay: execution under a redirected output root --------------------------
+
+/// Points the context at an atomic-shaped staging tree (`build/staging/add`
+/// for outputs, `build/staging/del` for deletion markers) — the same
+/// redirection the atomic layer performs in `on_build_begin`.
+struct RedirectToStaging;
+
+impl BuildLayer for RedirectToStaging {
+    fn on_build_begin(
+        &self,
+        _plan: &ExecutionPlan,
+        ctx: &mut brix_core::context::NodeContext,
+    ) {
+        ctx.output_root = ctx.workspace_root.join("build/staging/add");
+        ctx.deletions_root = Some(ctx.workspace_root.join("build/staging/del"));
+    }
+}
+
+#[test]
+fn staged_outputs_shadow_and_pipeline_reads_through_overlay() {
+    // With output_root redirected: writes land in staging (never the
+    // workspace), and the downstream glob merges staged outputs with
+    // workspace files — staged copies shadowing.
+    let root = scratch("overlay");
+    write(&root, "src/a.txt", "a");
+    write(&root, "build/upper/z.txt", "Z"); // pre-existing workspace member
+    let mut plan = plan_from_spec(&expand_then_combine_spec(), &root);
+    let result = execute(&mut plan, Some(1), &[&RedirectToStaging], &NullReporter);
+    assert!(result.success, "errors: {:?}", result.errors);
+
+    // upper's output went to staging, not the workspace.
+    assert!(!root.join("build/upper/a.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("build/staging/add/build/upper/a.txt")).unwrap(),
+        "A"
+    );
+    // combine saw both roots: staged a.txt + workspace z.txt, logical order.
+    assert!(!root.join("build/all.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("build/staging/add/build/all.txt")).unwrap(),
+        "AZ"
+    );
+}
+
+#[test]
+fn deletion_markers_hide_workspace_files_from_reads() {
+    // A deletion marker (not re-created in staging) hides the workspace copy
+    // from collection reads: combine must not see z.txt.
+    let root = scratch("overlay-del");
+    write(&root, "src/a.txt", "a");
+    write(&root, "build/upper/z.txt", "Z");
+    write(&root, "build/staging/del/build/upper/z.txt", ""); // marker
+    let mut plan = plan_from_spec(&expand_then_combine_spec(), &root);
+    let result = execute(&mut plan, Some(1), &[&RedirectToStaging], &NullReporter);
+    assert!(result.success, "errors: {:?}", result.errors);
+    assert_eq!(
+        std::fs::read_to_string(root.join("build/staging/add/build/all.txt")).unwrap(),
+        "A"
+    );
+    assert!(root.join("build/upper/z.txt").exists()); // workspace untouched
+}
+
+#[test]
+fn delete_action_routes_through_output_root() {
+    // A Delete node unlinks under output_root: with staging redirected, the
+    // staged copy goes and the workspace copy stays (the atomic layer turns
+    // these into markers separately — this pins the executor's target root).
+    let root = scratch("overlay-rm");
+    write(&root, "build/x.txt", "workspace");
+    write(&root, "build/staging/add/build/x.txt", "staged");
+    let mut plan = ExecutionPlan::new(root.to_str().unwrap());
+    let rm = plan.add_node(
+        NodeKind::Process,
+        "rm build/x.txt".into(),
+        Action::Delete { paths: vec!["build/x.txt".into()] },
+    );
+    let result = execute(&mut plan, Some(1), &[&RedirectToStaging], &NullReporter);
+    assert!(result.success, "errors: {:?}", result.errors);
+    assert_eq!(result.states.status(rm), NodeState::Done);
+    assert!(!root.join("build/staging/add/build/x.txt").exists());
+    assert_eq!(std::fs::read_to_string(root.join("build/x.txt")).unwrap(), "workspace");
+    assert_eq!(result.process_results[0].stdout, "deleted build/x.txt\n");
+}
+
 // -- failure results and did-not-run diagnostics --------------------------------
 
 #[test]
@@ -406,6 +492,7 @@ fn render_error_is_a_failed_node_not_a_crash() {
             inputs: vec![],
             outputs: vec![],
             env: vec![],
+            depfile: None,
         },
     );
     let result = execute(&mut plan, Some(1), &[], &brix_core::report::NullReporter);

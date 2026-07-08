@@ -127,11 +127,13 @@ below is tagged with the model that should do it.
    Python and a JavaScript/TypeScript way of writing build files, so nobody has
    to learn a new language. Most of the groundwork is done and proven to match
    the Python behavior exactly (via tests that cross-check the two): the
-   change-detection math, the planning, the dependency inference, and now the
+   change-detection math, the planning, the dependency inference, the
    scheduler core (runs steps in parallel in the right order — clean builds
-   work end-to-end in pure Rust). **What's left: the build "layers"**
-   (caching, incremental, staging), persistent workers, the Python↔Rust
-   boundary, and then switching brix to run on the Rust engine by default.
+   work end-to-end in pure Rust), and now incremental rebuilds (a Rust build
+   skips everything that hasn't changed, sharing the same metadata file
+   Python writes). **What's left: the caching and staging layers**,
+   persistent workers, the Python↔Rust boundary, and then switching brix to
+   run on the Rust engine by default.
    **[Fable]** — the trickiest part of the whole project; one subtle ordering
    bug here breaks builds, so it needs the most careful model reviewing it
    line by line.
@@ -678,6 +680,39 @@ build inputs that come from memory or a database instead of files, and a C++
   plus a nested-expansion and an insertion-ordering case (11 tests; a worker
   panic becomes a failed node rather than a hang, the one deliberate
   divergence). Layers (incremental/cache/atomic), workers, and the PyO3
+  boundary are the remaining slices.
+- **Rust port, phase 3 slices 2+3 — overlay execution + the incremental
+  layer** (`rust/brix-core/`: `metadata.rs`, `incremental.rs` new;
+  `detector.rs`, `content.rs`, `actions.rs`, `process.rs` extended). Slice 2
+  proved the phase-2b overlay under real execution: staged writes, merged
+  reads, deletion markers, and redirected deletes, via a layer pointing
+  `output_root` at a staging tree (3 tests in `tests/executor.rs`). Slice 3
+  is the full incremental layer: `BuildMetadata` reads/writes **the same
+  `metadata.json` Python writes** (version 1, sorted keys, tmp+rename;
+  lenient loads where a malformed record degrades to a rerun, never a crash;
+  Python-written `jvm-abi@1` identity digests survive a Rust load/save
+  round trip untouched — interop pinned by a hand-written Python-format
+  fixture). The change detector gained the persistent `(mtime_ns, size) →
+  sha256` memo; `action_fingerprint` gained tool atoms (PATH resolution +
+  stat signature) and the discovered-deps fold. `IncrementalLayer` mirrors
+  Python behavior-for-behavior: fresh nodes replay their recorded
+  stdout/stderr (`source="replayed"`), a failed action is never fresh and
+  its declared outputs are removed, vanished expansion members become
+  Delete proposals through nested membership reaping (memberships committed
+  only on build success), and depfile scanning folds a tool's reported
+  headers into the fingerprint *in the same build* (no spurious second
+  rebuild). The `depfile` field was added to the wire Process shape in
+  `docs/boundary-schema.md` (still version 1 — optional and additive; it
+  was always in the Python action but missing from the pinned shape).
+  Pinned by `tests/incremental.rs` — the Rust mirror of
+  `tests/test_incremental.py`, same cases, same names, sh scripts standing
+  in for the Python tool scripts — including the "never make a stale hit"
+  invariants (added glob member re-stales its consumer; a tool change
+  invalidates everything it built while byte-identical outputs keep
+  downstream fresh). `cargo test` is 18 unit + 9 golden + 28 behavioral;
+  clippy clean. Deliberate divergence (documented in the code): a
+  fingerprint error (unported identity plugin) fails the node instead of
+  crashing the build. The cache and atomic layers, workers, and the PyO3
   boundary are the remaining slices.
 
 ## Design rules

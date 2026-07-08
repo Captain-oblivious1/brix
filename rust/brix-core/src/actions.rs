@@ -27,6 +27,12 @@ pub enum Action {
         outputs: Vec<(String, DataExpr)>,
         #[serde(default, deserialize_with = "ordered_map")]
         env: Vec<(String, DataExpr)>,
+        /// Workspace-relative path of a Makefile-format dependency file the
+        /// tool writes (`cc -MMD -MF`); the incremental layer scans it after a
+        /// successful run to learn undeclared inputs (C/C++ headers). Not
+        /// identity: never part of `action_key`.
+        #[serde(default)]
+        depfile: Option<String>,
     },
     Expand {
         element: String,
@@ -110,20 +116,23 @@ impl Action {
     /// Expand shape. Mirrors `ExpandAll.substitute`.
     pub fn substitute(&self, bindings: &[(String, String)]) -> Action {
         match self {
-            Action::Process { name, command_line, inputs, outputs, env } => {
-                let new_name = name.as_ref().map(|n| {
-                    let mut s = n.clone();
+            Action::Process { name, command_line, inputs, outputs, env, depfile } => {
+                // `name` and `depfile` substitute by plain `{key}` -> value
+                // string replacement (mirrors `ExternalProcessAction.substitute`).
+                let replace_keys = |s: &str| {
+                    let mut s = s.to_string();
                     for (k, v) in bindings {
                         s = s.replace(&format!("{{{k}}}"), v);
                     }
                     s
-                });
+                };
                 Action::Process {
-                    name: new_name,
+                    name: name.as_deref().map(replace_keys),
                     command_line: command_line.clone(),
                     inputs: subst_pairs(inputs, bindings),
                     outputs: subst_pairs(outputs, bindings),
                     env: subst_pairs(env, bindings),
+                    depfile: depfile.as_deref().map(replace_keys),
                 }
             }
             Action::Expand { element, collection, child } => {

@@ -4,13 +4,19 @@
 //! as its key, so it must match Python byte-for-byte.
 //!
 //! Ported here: the content-hashing core over `file` / `glob` / `regex` /
-//! `value` atoms. Deliberately *not* ported (each returns an error so a caller
-//! can never get a silently-wrong key):
-//!   - `tool` atoms — need PATH resolution + a stat signature (machine-specific
-//!     mtime), so they can't be golden-pinned;
+//! `value` / `tool` atoms, plus the discovered-deps fold (extra inputs a tool
+//! reported reading — C/C++ headers from a depfile — content-hashed like any
+//! input; absent when nothing was scanned, so it never perturbs an existing
+//! fingerprint). Tool atoms carry `[name, resolved, stat_signature]` — a
+//! machine-specific mtime, so they are exercised by behavioral tests, never
+//! golden-pinned.
+//!
+//! Deliberately *not* ported (each returns an error so a caller can never get
+//! a silently-wrong key):
 //!   - `identity=` (content-identity plugins like `jvm-abi`) — need the plugin
-//!     registry, which lives in Python;
+//!     registry, which lives in Python until the boundary slice;
 //!   - the `worker` toolchain leg — the Rust `Action` carries no worker yet.
+//!
 //! These are the fingerprint's remaining tail, tracked in the README.
 
 use std::collections::BTreeMap;
@@ -81,7 +87,35 @@ fn atom_fp(
         }
         DataAtom::Value { text } => Ok(Value::List(vec![Value::str("value"), Value::str(text)])),
         DataAtom::Tool { name } => {
-            Err(format!("tool atoms are not ported (PATH + stat signature): {name}"))
+            // Python: `atom.name if "/" in atom.name else shutil.which(...)`;
+            // missing -> ["tool", name, None, None]. Workspace-relative paths
+            // resolve against the workspace; absolute ones pass through the
+            // join unchanged (PathBuf::join, like pathlib, replaces on abs).
+            let resolved = if name.contains('/') {
+                Some(name.clone())
+            } else {
+                crate::render::which(name)
+            };
+            Ok(match resolved {
+                None => Value::List(vec![
+                    Value::str("tool"),
+                    Value::str(name),
+                    Value::Null,
+                    Value::Null,
+                ]),
+                Some(resolved) => {
+                    let sig = det.stat_signature(&ctx.workspace_root.join(&resolved));
+                    Value::List(vec![
+                        Value::str("tool"),
+                        Value::str(name),
+                        Value::str(&resolved),
+                        match sig {
+                            Some(sig) => Value::List(sig.into_iter().map(Value::Int).collect()),
+                            None => Value::Null,
+                        },
+                    ])
+                }
+            })
         }
     }
 }
@@ -120,6 +154,25 @@ pub fn action_fingerprint(
     payload.insert("inputs".to_string(), exprs_fp(inputs, ctx, det)?);
     if !env.is_empty() {
         payload.insert("env".to_string(), exprs_fp(env, ctx, det)?);
+    }
+    // Discovered (scanned) dependencies — inputs the tool reported reading
+    // last build that the graph didn't declare (C/C++ headers from a
+    // depfile). Content-hashed like any input, so editing one re-stales the
+    // action. Absent on the first build and for actions with no depfile, so
+    // it never perturbs an existing fingerprint. Empty lists are falsy in
+    // Python (`if deps:`), so an empty scan adds no key either.
+    if let Some(meta) = &det.metadata {
+        let deps = crate::keys::action_key(action)
+            .and_then(|key| meta.discovered_deps(&key))
+            .unwrap_or_default();
+        if !deps.is_empty() {
+            let mut map = BTreeMap::new();
+            for path in deps {
+                let hashed = det.hash_file(&ctx.read_path(&path));
+                map.insert(path, hash_value(hashed));
+            }
+            payload.insert("deps".to_string(), Value::Map(map));
+        }
     }
     Ok(digest(&Value::Map(payload)))
 }

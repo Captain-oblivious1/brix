@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use crate::fsutil::walk_files;
 use crate::patterns::PathPattern;
 
+/// One realized pattern match: `(logical, physical, bindings)`.
+pub type FoundFile = (String, PathBuf, Vec<(String, String)>);
+
 #[derive(Debug, Clone)]
 pub struct NodeContext {
     pub workspace_root: PathBuf,
@@ -64,7 +67,7 @@ impl NodeContext {
     /// Realize a `PathPattern` across the overlay: `(logical, physical,
     /// bindings)` sorted by logical, staged copies shadowing workspace copies,
     /// marked deletions excluded.
-    pub fn find(&self, pattern: &PathPattern) -> Vec<(String, PathBuf, Vec<(String, String)>)> {
+    pub fn find(&self, pattern: &PathPattern) -> Vec<FoundFile> {
         let mut merged: BTreeMap<String, (PathBuf, Vec<(String, String)>)> = BTreeMap::new();
         for root in self.read_roots() {
             for (logical, bindings) in pattern.find(root) {

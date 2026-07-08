@@ -314,8 +314,20 @@ CLI/status stay in Python but depend on core answers:
    builds run end-to-end in pure Rust, pinned by
    `rust/brix-core/tests/executor.rs` — the Rust mirror of
    `tests/test_scheduler_contract.py` (same cases, same names).
-   Remaining slices: the three layers (incremental, cache, atomic),
-   persistent workers, then the PyO3 boundary.
+   *Slice 2 — overlay parity under execution — is DONE* (staged writes,
+   merged reads, deletion markers, redirected deletes; pinned in the same
+   test file). *Slice 3 — the incremental layer — is DONE*: `metadata.rs`
+   (the metadata.json store: lenient loads, sorted tmp+rename saves,
+   sig-validated hash cache preserving Python-written identity digests),
+   the detector's persistent hash memo, tool atoms and the
+   discovered-deps fold in `content.rs`, and `incremental.rs`
+   (fresh-replay with stored stdout/stderr, failure-is-never-fresh with
+   output removal, vanished-member Delete proposals with nested reaping,
+   depfile scanning with same-build refingerprint), pinned by
+   `rust/brix-core/tests/incremental.rs` — the mirror of
+   `tests/test_incremental.py` (same cases, same names).
+   Remaining slices: the cache and atomic layers, persistent workers,
+   then the PyO3 boundary.
 4. **Flip the default**, keep `BRIX_ENGINE=py` working one release,
    verify the animation project (full dryRun cycle, targeted builds,
    clean-then-cache-restore, `view`), then delete the Python engine
@@ -358,17 +370,15 @@ evolved into `keys.rs` / `content.rs` / `detector.rs` rather than one
 `fingerprint.rs` + `metadata.rs`.
 
 **Deferred tail** (the port *errors* on these rather than emit a possibly
-wrong key — they are pulled in by phase 3 or the identity-plugin port, not
-this layer): `tool` atoms (PATH resolution + a machine-specific stat
-signature), `identity=` content-identity plugins (`jvm-abi`, which need the
-Python plugin registry), and the `worker` toolchain leg (the Rust `Action`
-carries no worker yet). The `metadata.json` hash-cache and the cache-store
-layout are likewise engine-phase work.
+wrong key): `identity=` content-identity plugins (`jvm-abi`, which need the
+Python plugin registry until the boundary slice) and the `worker` toolchain
+leg (the Rust `Action` carries no worker yet). `tool` atoms and the
+`metadata.json` hash-cache landed with phase-3 slice 3; the cache-store
+layout is slice 4.
 
-**Remaining for phase 3:** the scheduler, the layer stack
-(incremental / cache / atomic), the context wiring into a running build,
-the event stream across the boundary, and the deferred tail above — then
-the `BRIX_ENGINE` default flip.
+**Remaining for phase 3:** the cache and atomic layers, the event stream
+across the boundary, and the deferred tail above — then the
+`BRIX_ENGINE` default flip.
 
 ## Decisions (were open questions; settled — do not reopen during the port)
 

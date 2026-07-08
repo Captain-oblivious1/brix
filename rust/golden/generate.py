@@ -226,6 +226,8 @@ def action_to_spec(action):
             d["name"] = action.name
         if action.env:
             d["env"] = {k: expr_to_spec(v) for k, v in action.env.items()}
+        if action.depfile is not None:
+            d["depfile"] = action.depfile
         return d
     if isinstance(action, ExpandAll):
         return {
