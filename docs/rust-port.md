@@ -307,6 +307,15 @@ CLI/status stay in Python but depend on core answers:
 3. **Scheduler + layers + context**: the big one. Python builders
    delegate `build()` end-to-end; reporters and results cross the
    boundary. All tests pass with `BRIX_ENGINE=rust`.
+   *Slice 1 — the scheduler core — is DONE*: `executor.rs` (readiness,
+   on-success-only cascade, stuck-node snapshot rule, runtime expansion,
+   insertion channel), `process.rs`, `render.rs`, and the
+   `BuildLayer`/`Reporter` trait seams, on plain scoped threads. Clean
+   builds run end-to-end in pure Rust, pinned by
+   `rust/brix-core/tests/executor.rs` — the Rust mirror of
+   `tests/test_scheduler_contract.py` (same cases, same names).
+   Remaining slices: the three layers (incremental, cache, atomic),
+   persistent workers, then the PyO3 boundary.
 4. **Flip the default**, keep `BRIX_ENGINE=py` working one release,
    verify the animation project (full dryRun cycle, targeted builds,
    clean-then-cache-restore, `view`), then delete the Python engine

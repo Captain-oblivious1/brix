@@ -127,12 +127,14 @@ below is tagged with the model that should do it.
    Python and a JavaScript/TypeScript way of writing build files, so nobody has
    to learn a new language. Most of the groundwork is done and proven to match
    the Python behavior exactly (via tests that cross-check the two): the
-   change-detection math, the planning, the dependency inference. **What's left:
-   the scheduler** (runs steps in parallel in the right order), the build
-   "layers" (caching, incremental, staging), and then switching brix to run on
-   the Rust engine by default. **[Fable]** — the trickiest part of the whole
-   project; one subtle ordering bug here breaks builds, so it needs the most
-   careful model reviewing it line by line.
+   change-detection math, the planning, the dependency inference, and now the
+   scheduler core (runs steps in parallel in the right order — clean builds
+   work end-to-end in pure Rust). **What's left: the build "layers"**
+   (caching, incremental, staging), persistent workers, the Python↔Rust
+   boundary, and then switching brix to run on the Rust engine by default.
+   **[Fable]** — the trickiest part of the whole project; one subtle ordering
+   bug here breaks builds, so it needs the most careful model reviewing it
+   line by line.
 3. **A JavaScript/TypeScript way to write build files** — same features as the
    Python one, just in their language (`docs/boundary-schema.md`). **[Blocked]**
    — can't start until the Rust engine (track 2) exists, since both languages are
@@ -522,26 +524,7 @@ build inputs that come from memory or a database instead of files, and a C++
   first build uses a header-blind key until it has built once — inherent to
   depfile-based tracking under a content-addressed cache (Bazel avoids it only
   by requiring declared headers).
-- **Recursive-by-default glob syntax (`{name}` / `{name:*}` / `{name:**}`) +
-  packaged-Java stale-jar fix** (`patterns.py`, `rust/brix-core/src/patterns.rs`,
-  `java.py`): a bare `{name}` matches *across* `/` (`.+`, like make's `%`),
-  `{name:*}` pins one segment (`[^/]+`), and `{name:**}` is the explicit
-  recursive form — so `build/classes/{rel}.class` matches `App.class` *and*
-  `com/foo/Bar.class`. (This supersedes the earlier `{**name}`-prefix syntax:
-  recursion is the sensible default for build outputs, and the simple case now
-  writes nothing extra while single-segment is the opt-in constraint.) Fixes a
-  **confirmed correctness bug**: `JarAction` tracked classes with a
-  top-level-only glob, so a changed *packaged* class re-ran `javac` but not the
-  jar step, leaving a stale jar (`test_packaged_class_change_updates_jar`, real
-  JDK, was `xfail`, now passes). Realized through the overlay-aware `find()`
-  (which walks recursively), so it sees classes staged under an atomic build —
-  unlike `RegexData`/`iter_files`, which doesn't surface staged outputs.
-  Implemented in *both* engines and cross-checked: `PathPattern` compiles a
-  recursive binding to `.+`, the Rust matcher scans to end-of-path with the same
-  greedy backtracking; new golden pattern cases pin match/substitute parity
-  (`cargo test` 9 unit + 9 golden). Also fixes latent nested-source globbing
-  (Java sources live in package dirs like `com/foo/Bar.java`, which the old
-  single-segment default silently missed).
+- **JVM fast builds, phase 2 — persistent workers + javac worker**
   (`workers.py`, `executor.py`, `actions.py`, `planner.py`, `java.py`,
   `src/brix/_java/JavacWorker.java`): a worker is a long-lived process that
   executes many actions over a JSON-lines protocol, amortizing startup
@@ -656,6 +639,46 @@ build inputs that come from memory or a database instead of files, and a C++
   can never get a silently-wrong key. Golden `fingerprints.json` (5) from real
   Python over the fixture tree: single file, glob, regex-over-`iter_files`,
   value+env, and a union input. `cargo test` is 9 unit + 9 golden.
+- **Recursive-by-default glob syntax (`{name}` / `{name:*}` / `{name:**}`) +
+  packaged-Java stale-jar fix** (`patterns.py`, `rust/brix-core/src/patterns.rs`,
+  `java.py`): a bare `{name}` matches *across* `/` (`.+`, like make's `%`),
+  `{name:*}` pins one segment (`[^/]+`), and `{name:**}` is the explicit
+  recursive form — so `build/classes/{rel}.class` matches `App.class` *and*
+  `com/foo/Bar.class`. (This supersedes the earlier `{**name}`-prefix syntax:
+  recursion is the sensible default for build outputs, and the simple case now
+  writes nothing extra while single-segment is the opt-in constraint.) Fixes a
+  **confirmed correctness bug**: `JarAction` tracked classes with a
+  top-level-only glob, so a changed *packaged* class re-ran `javac` but not the
+  jar step, leaving a stale jar (`test_packaged_class_change_updates_jar`, real
+  JDK, was `xfail`, now passes). Realized through the overlay-aware `find()`
+  (which walks recursively), so it sees classes staged under an atomic build —
+  unlike `RegexData`/`iter_files`, which doesn't surface staged outputs.
+  Implemented in *both* engines and cross-checked: `PathPattern` compiles a
+  recursive binding to `.+`, the Rust matcher scans to end-of-path with the same
+  greedy backtracking; new golden pattern cases pin match/substitute parity
+  (`cargo test` 9 unit + 9 golden). Also fixes latent nested-source globbing
+  (Java sources live in package dirs like `com/foo/Bar.java`, which the old
+  single-segment default silently missed).
+- **Rust port, phase 3 slice 1 — the scheduler core** (`rust/brix-core/`:
+  `executor.rs`, `process.rs`, `render.rs`, `report.rs`, `layers.rs`, plus
+  `NodeState`/`EdgeTrigger`/`NodeStateTable` in `plan.rs`): `execute()` ported
+  structure-for-structure from `executor.py` — readiness (on-success needs
+  DONE; on-completion needs DONE *or* FAILED, so a skipped predecessor
+  satisfies neither), the on-success-only failure cascade, the stuck-node
+  **snapshot** rule (all-terminal predecessors → quiet skip, otherwise
+  "unreachable"), runtime expansion (nested `ExpandAll` included), and the
+  insertion channel with layer proposals ordered before the expansion's
+  consumers. Process spawning on plain scoped threads (no async runtime);
+  command/env rendering and output-dir preparation mirror `render.py`; the
+  `BuildLayer`/`Reporter` seams are traits with the exact Python hook set, and
+  `process_started` fires only when a real spawn is imminent, from the worker
+  thread. Clean builds run end-to-end in pure Rust (spec JSON → planner →
+  scheduler → processes). Pinned by `rust/brix-core/tests/executor.rs` — the
+  Rust mirror of `tests/test_scheduler_contract.py`, same cases, same names —
+  plus a nested-expansion and an insertion-ordering case (11 tests; a worker
+  panic becomes a failed node rather than a hang, the one deliberate
+  divergence). Layers (incremental/cache/atomic), workers, and the PyO3
+  boundary are the remaining slices.
 
 ## Design rules
 
