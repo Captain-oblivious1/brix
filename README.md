@@ -144,19 +144,6 @@ These are self-contained and come with tests. No Fable needed.
 
 **Correctness fixes** (holes found in the "what might we be missing?" review):
 
-- **Stale jar when a packaged Java class changes — a confirmed correctness bug.**
-  `JarAction` tracks class files with a top-level-only `{name}.class` glob (a
-  glob's `{name}` is one path segment). So editing a class in a package folder
-  (`com/foo/Bar`) re-runs `javac` but **not** the jar step — the rebuilt jar
-  keeps the old class. Demonstrated by `test_packaged_class_change_updates_jar`
-  (currently `xfail`). This is a wrong incremental build, not just a cleanup gap,
-  and it hits any real (packaged) Java project. The fix needs an *overlay-aware*
-  match over nested paths — `iter_files`-based `RegexData` doesn't see staged
-  outputs under an atomic build, so the real fix is **recursive-glob (`**`)
-  support in `PathPattern`** (used via the overlay-aware `find()`), which also
-  ripples into the Rust port's pattern matcher and golden fixtures — so it's a
-  bigger job than a one-line correctness fix. Related: cleaning up an orphaned
-  packaged `.class` after its source is deleted needs the same nested matching.
 - **Let you say "run B after A" without a shared file.** Today brix works out
   ordering only from files — A makes a file, B reads it. Some steps need to be
   ordered without sharing a file, like "start the service, then run tests against
@@ -535,7 +522,21 @@ build inputs that come from memory or a database instead of files, and a C++
   first build uses a header-blind key until it has built once — inherent to
   depfile-based tracking under a content-addressed cache (Bazel avoids it only
   by requiring declared headers).
-- **JVM fast builds, phase 2 — persistent workers + javac worker**
+- **Recursive-glob patterns (`{**name}`) + packaged-Java stale-jar fix**
+  (`patterns.py`, `rust/brix-core/src/patterns.rs`, `java.py`): a `{**name}`
+  placeholder matches *across* `/` (`.+`), where `{name}` matches one segment
+  (`[^/]+`) — so `build/classes/{**rel}.class` matches `App.class` *and*
+  `com/foo/Bar.class`. Fixes a **confirmed correctness bug**: `JarAction`
+  tracked classes with a top-level-only `{name}.class` glob, so a changed
+  *packaged* class re-ran `javac` but not the jar step, leaving a stale jar
+  (`test_packaged_class_change_updates_jar`, real JDK, was `xfail`, now passes).
+  Realized through the overlay-aware `find()` (which walks recursively), so it
+  sees classes staged under an atomic build — unlike `RegexData`/`iter_files`,
+  which doesn't surface staged outputs. Implemented in *both* engines and
+  cross-checked: `PathPattern` compiles `{**name}` to `.+`, the Rust matcher
+  scans to end-of-path with the same greedy backtracking; new golden pattern
+  cases pin match/substitute parity (`cargo test` 9 unit + 9 golden). Also
+  unblocks nested source globbing generally (e.g. `src/{**pkg}/{cls}.java`).
   (`workers.py`, `executor.py`, `actions.py`, `planner.py`, `java.py`,
   `src/brix/_java/JavacWorker.java`): a worker is a long-lived process that
   executes many actions over a JSON-lines protocol, amortizing startup

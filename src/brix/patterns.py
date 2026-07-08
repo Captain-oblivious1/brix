@@ -2,7 +2,10 @@
 
 User-facing ``file``/``glob`` declarations lower into :class:`PathPattern`.
 A pattern is a workspace-relative path template whose ``{name}`` placeholders
-each match one path segment (no ``/``).
+each match one path segment (no ``/``). A ``{**name}`` placeholder is
+*recursive*: it matches across ``/``, so ``build/{**rel}.class`` matches both
+``build/App.class`` (``rel=App``) and ``build/com/foo/Bar.class``
+(``rel=com/foo/Bar``) — the recursive-glob form for nested trees.
 
 This is the simple prototype implementation: correctness and clear semantics
 over speed. The indexing structures described in the design doc (prefix tries,
@@ -14,7 +17,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_BINDING_RE = re.compile(r"\{(\w+)\}")
+# Group 1 is the optional ``**`` (recursive) marker; group 2 is the name.
+_BINDING_RE = re.compile(r"\{(\*\*)?(\w+)\}")
 
 # Probe token used for conservative pattern-vs-pattern overlap checks.
 # Contains no "/" so it matches a single-segment binding.
@@ -32,7 +36,9 @@ class PathPattern:
         if not template:
             raise PatternError("empty path pattern")
         self.template = template
-        self.binding_names: tuple[str, ...] = tuple(_BINDING_RE.findall(template))
+        self.binding_names: tuple[str, ...] = tuple(
+            m.group(2) for m in _BINDING_RE.finditer(template)
+        )
         self._regex = self._compile(template)
 
     @property
@@ -46,13 +52,15 @@ class PathPattern:
         seen: set[str] = set()
         for m in _BINDING_RE.finditer(template):
             parts.append(re.escape(template[pos : m.start()]))
-            name = m.group(1)
+            recursive = m.group(1) is not None
+            name = m.group(2)
             if name in seen:
                 # Repeated binding must match the same text.
                 parts.append(f"(?P={name})")
             else:
                 seen.add(name)
-                parts.append(f"(?P<{name}>[^/]+)")
+                # `{name}` is one segment ([^/]+); `{**name}` crosses / (.+).
+                parts.append(f"(?P<{name}>{'.+' if recursive else '[^/]+'})")
             pos = m.end()
         parts.append(re.escape(template[pos:]))
         parts.append("$")
@@ -69,7 +77,7 @@ class PathPattern:
         """Replace known bindings; unknown placeholders are left intact."""
 
         def repl(m: re.Match[str]) -> str:
-            return bindings.get(m.group(1), m.group(0))
+            return bindings.get(m.group(2), m.group(0))
 
         return _BINDING_RE.sub(repl, self.template)
 

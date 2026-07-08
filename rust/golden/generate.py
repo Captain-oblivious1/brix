@@ -76,6 +76,8 @@ PATTERN_TEMPLATES = [
     "a/{x}/b/{y}.txt",  # multiple segments
     "{video}/{scene}.png",
     "prefix{n}suffix",
+    "build/classes/{**rel}.class",  # recursive binding: matches across /
+    "src/{**pkg}/{cls}.java",  # recursive then single segment
 ]
 
 MATCH_PATHS = [
@@ -89,6 +91,9 @@ MATCH_PATHS = [
     "intro/scene1.png",
     "prefixMIDsuffix",
     "nomatch",
+    "build/classes/App.class",  # recursive, zero extra segments
+    "build/classes/com/foo/Bar.class",  # recursive, nested
+    "src/com/foo/Bar.java",  # recursive {**pkg} + single {cls}
 ]
 
 SUBSTITUTIONS = [
@@ -98,6 +103,8 @@ SUBSTITUTIONS = [
     {"video": "intro", "scene": "s1"},
     {},  # unknown placeholders left intact
     {"a": "only-a"},  # partial
+    {"rel": "com/foo/Bar"},  # recursive binding value spans /
+    {"pkg": "com/foo", "cls": "Bar"},
 ]
 
 

@@ -28,7 +28,8 @@ def test_jar_lowers_to_javac_then_jar():
     assert compile_java.inputs["javac"].name == "javac"
     # The classes dir is an output declaration: it stages under atomic.
     assert compile_java.outputs["classes_dir"].path == "build/classes"
-    assert compile_java.outputs["classes"].pattern.template == "build/classes/{name}.class"
+    # Recursive glob so packaged classes (com/foo/Bar.class) are tracked too.
+    assert compile_java.outputs["classes"].pattern.template == "build/classes/{**name}.class"
 
     assert package.name == "jar build/libs/app.jar"
     assert "cf {output}" in package.command_line
@@ -104,13 +105,6 @@ def test_jar_builds_and_runs(tmp_path):
 
 
 @needs_jdk
-@pytest.mark.xfail(
-    reason="Known bug: JarAction tracks classes with a top-level-only {name}.class "
-    "glob, so changing a packaged class (com/foo/Bar) re-runs javac but not the "
-    "jar step -> stale jar. Fix needs an overlay-aware nested-path match "
-    "(recursive-glob support in PathPattern); see the TODO.",
-    strict=True,
-)
 def test_packaged_class_change_updates_jar(tmp_path):
     """Changing a class in a *package* folder (com/foo/Bar) must re-run the jar
     step, not just javac — otherwise the jar keeps the stale class (a wrong

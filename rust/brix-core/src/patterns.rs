@@ -15,7 +15,9 @@ use crate::fsutil::walk_files;
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     Literal(String),
-    Binding(String),
+    /// `{name}` matches one path segment; `{**name}` (`recursive`) matches
+    /// across `/`.
+    Binding { name: String, recursive: bool },
 }
 
 #[derive(Debug, Clone)]
@@ -41,18 +43,23 @@ fn parse(template: &str) -> (Vec<Token>, Vec<String>) {
     let mut i = 0;
     while i < chars.len() {
         if chars[i] == '{' {
-            // Try to read {word}.
+            // Try to read {word} or {**word}.
             let mut j = i + 1;
+            let recursive = j + 1 < chars.len() && chars[j] == '*' && chars[j + 1] == '*';
+            if recursive {
+                j += 2;
+            }
+            let name_start = j;
             while j < chars.len() && is_word(chars[j]) {
                 j += 1;
             }
-            if j > i + 1 && j < chars.len() && chars[j] == '}' {
-                let name: String = chars[i + 1..j].iter().collect();
+            if j > name_start && j < chars.len() && chars[j] == '}' {
+                let name: String = chars[name_start..j].iter().collect();
                 if !literal.is_empty() {
                     tokens.push(Token::Literal(std::mem::take(&mut literal)));
                 }
                 names.push(name.clone());
-                tokens.push(Token::Binding(name));
+                tokens.push(Token::Binding { name, recursive });
                 i = j + 1;
                 continue;
             }
@@ -151,15 +158,23 @@ impl PathPattern {
         while i < chars.len() {
             if chars[i] == '{' {
                 let mut j = i + 1;
+                let recursive = j + 1 < chars.len() && chars[j] == '*' && chars[j + 1] == '*';
+                if recursive {
+                    j += 2;
+                }
+                let name_start = j;
                 while j < chars.len() && is_word(chars[j]) {
                     j += 1;
                 }
-                if j > i + 1 && j < chars.len() && chars[j] == '}' {
-                    let name: String = chars[i + 1..j].iter().collect();
+                if j > name_start && j < chars.len() && chars[j] == '}' {
+                    let name: String = chars[name_start..j].iter().collect();
                     if let Some(value) = lookup(&name) {
                         out.push_str(&value);
                     } else {
                         out.push('{');
+                        if recursive {
+                            out.push_str("**");
+                        }
                         out.push_str(&name);
                         out.push('}');
                     }
@@ -200,7 +215,7 @@ fn match_tokens(
             }
             match_tokens(tokens, ti + 1, path, pi + lit_chars.len(), bindings)
         }
-        Token::Binding(name) => {
+        Token::Binding { name, recursive } => {
             if let Some((_, bound)) = bindings.iter().find(|(k, _)| k == name) {
                 // Repeated binding: the same text must appear here.
                 let bound_chars: Vec<char> = bound.chars().collect();
@@ -214,10 +229,16 @@ fn match_tokens(
                 }
                 return match_tokens(tokens, ti + 1, path, pi + bound_chars.len(), bindings);
             }
-            // [^/]+ : the maximal run of non-slash chars from pi, then shrink.
+            // `{name}` is `[^/]+` (stop at the next slash); `{**name}` is `.+`
+            // (run to the end, crossing slashes). Greedy: take the longest run,
+            // then shrink and backtrack — matching Python's greedy `.+`/`[^/]+`.
             let mut max = pi;
-            while max < path.len() && path[max] != '/' {
-                max += 1;
+            if *recursive {
+                max = path.len();
+            } else {
+                while max < path.len() && path[max] != '/' {
+                    max += 1;
+                }
             }
             let mut end = max;
             while end > pi {

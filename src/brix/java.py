@@ -158,7 +158,12 @@ class JarAction(Action):
             )
 
     def lower(self) -> list[Action]:
-        classes = GlobData(f"{self.classes_dir}/{{name}}.class")
+        # Recursive `{**name}` so class tracking reaches packaged classes
+        # (`com/foo/Bar.class`), not just default-package ones — otherwise a
+        # changed packaged class re-runs javac but not the jar step, leaving a
+        # stale jar. Realizes through the overlay-aware `find()`, so it also sees
+        # freshly compiled classes staged under an atomic build.
+        classes = GlobData(f"{self.classes_dir}/{{**name}}.class")
         if self.javac_worker is not None:
             inputs: dict[str, DataExpr] = {
                 "options": _options_expr(self.options),
@@ -205,7 +210,7 @@ class JarAction(Action):
             inputs={
                 "jar": self.jar_tool,
                 "classes_dir": FileData(self.classes_dir),
-                "classes": GlobData(f"{self.classes_dir}/{{name}}.class"),
+                "classes": classes,  # recursive glob — reruns on any class change
                 **jar_inputs,
             },
             outputs={"output": self.output_file},

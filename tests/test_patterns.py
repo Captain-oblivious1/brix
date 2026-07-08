@@ -57,6 +57,32 @@ def test_find_concrete(tmp_path):
     assert PathPattern("b.txt").find(tmp_path) == []
 
 
+def test_recursive_binding_matches_across_segments():
+    p = PathPattern("build/classes/{**rel}.class")
+    assert p.binding_names == ("rel",)
+    assert not p.is_concrete
+    assert p.literal_prefix_dir == "build/classes"
+    assert p.match("build/classes/App.class") == {"rel": "App"}
+    assert p.match("build/classes/com/foo/Bar.class") == {"rel": "com/foo/Bar"}
+    assert p.match("build/classes/x.txt") is None  # wrong extension
+    assert p.match("other/App.class") is None  # wrong prefix
+    assert p.substitute({"rel": "com/foo/Bar"}) == "build/classes/com/foo/Bar.class"
+    # A plain {name} still matches only one segment.
+    assert PathPattern("src/{name}.java").match("src/a/b.java") is None
+
+
+def test_recursive_find_walks_nested(tmp_path):
+    (tmp_path / "build/classes/com/foo").mkdir(parents=True)
+    (tmp_path / "build/classes/App.class").write_text("a")
+    (tmp_path / "build/classes/com/foo/Bar.class").write_text("b")
+    (tmp_path / "build/classes/com/foo/notes.txt").write_text("n")  # excluded
+    found = PathPattern("build/classes/{**rel}.class").find(tmp_path)
+    assert found == [
+        ("build/classes/App.class", {"rel": "App"}),
+        ("build/classes/com/foo/Bar.class", {"rel": "com/foo/Bar"}),
+    ]
+
+
 def test_overlaps_concrete():
     assert overlaps(PathPattern("a/b.c"), PathPattern("a/b.c"))
     assert not overlaps(PathPattern("a/b.c"), PathPattern("a/x.c"))
