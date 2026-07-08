@@ -144,10 +144,19 @@ These are self-contained and come with tests. No Fable needed.
 
 **Correctness fixes** (holes found in the "what might we be missing?" review):
 
-- **Track Java classes in real packages.** brix only tracks Java class files at
-  the top level right now, not ones in package folders like `com/foo/Bar.class`.
-  So cleaning up a leftover class after you delete its source doesn't fully work
-  for real (packaged) Java code.
+- **Stale jar when a packaged Java class changes — a confirmed correctness bug.**
+  `JarAction` tracks class files with a top-level-only `{name}.class` glob (a
+  glob's `{name}` is one path segment). So editing a class in a package folder
+  (`com/foo/Bar`) re-runs `javac` but **not** the jar step — the rebuilt jar
+  keeps the old class. Demonstrated by `test_packaged_class_change_updates_jar`
+  (currently `xfail`). This is a wrong incremental build, not just a cleanup gap,
+  and it hits any real (packaged) Java project. The fix needs an *overlay-aware*
+  match over nested paths — `iter_files`-based `RegexData` doesn't see staged
+  outputs under an atomic build, so the real fix is **recursive-glob (`**`)
+  support in `PathPattern`** (used via the overlay-aware `find()`), which also
+  ripples into the Rust port's pattern matcher and golden fixtures — so it's a
+  bigger job than a one-line correctness fix. Related: cleaning up an orphaned
+  packaged `.class` after its source is deleted needs the same nested matching.
 - **Let you say "run B after A" without a shared file.** Today brix works out
   ordering only from files — A makes a file, B reads it. Some steps need to be
   ordered without sharing a file, like "start the service, then run tests against

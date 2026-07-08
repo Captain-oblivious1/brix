@@ -101,3 +101,65 @@ def test_jar_builds_and_runs(tmp_path):
     second = builder().build()
     assert second.success
     assert all(r.source == "replayed" for r in second.process_results)
+
+
+@needs_jdk
+@pytest.mark.xfail(
+    reason="Known bug: JarAction tracks classes with a top-level-only {name}.class "
+    "glob, so changing a packaged class (com/foo/Bar) re-runs javac but not the "
+    "jar step -> stale jar. Fix needs an overlay-aware nested-path match "
+    "(recursive-glob support in PathPattern); see the TODO.",
+    strict=True,
+)
+def test_packaged_class_change_updates_jar(tmp_path):
+    """Changing a class in a *package* folder (com/foo/Bar) must re-run the jar
+    step, not just javac — otherwise the jar keeps the stale class (a wrong
+    incremental build). The default-package `App` calls into `com.foo.Bar`."""
+    import subprocess
+
+    from brix import AtomicBuilder, IncrementalBuilder
+
+    (tmp_path / "src/main/java/com/foo").mkdir(parents=True)
+    (tmp_path / "src/main/java/App.java").write_text(
+        "public class App { public static void main(String[] a)"
+        " { System.out.println(com.foo.Bar.msg()); } }\n"
+    )
+
+    def write_bar(value: str):
+        (tmp_path / "src/main/java/com/foo/Bar.java").write_text(
+            f'package com.foo; public class Bar {{ public static String msg()'
+            f' {{ return "{value}"; }} }}\n'
+        )
+
+    write_bar("one")
+
+    def create_graph():
+        graph = Graph()
+        d = graph.data
+        graph.add(
+            java.JarAction(
+                source_files=d.glob("src/main/java/{cls}.java")
+                + d.glob("src/main/java/com/foo/{cls}.java"),
+                output_file=d.file("build/libs/app.jar"),
+                entry_point="App",
+            )
+        )
+        return graph
+
+    def builder():
+        return AtomicBuilder(IncrementalBuilder(create_graph, root=tmp_path))
+
+    def jar_output() -> str:
+        return subprocess.run(
+            ["java", "-jar", str(tmp_path / "build/libs/app.jar")],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    assert builder().build().success
+    assert jar_output() == "one"
+
+    write_bar("two")  # change only the packaged class
+    third = builder().build()
+    assert third.success
+    assert jar_output() == "two"  # not "one" — the jar must not go stale
