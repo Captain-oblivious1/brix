@@ -131,8 +131,6 @@ subtleties (the "do-not-reinterpret" list). Items are tagged below.
 ### Opus queue (ready now — Fable-independent, test-guarded)
 
 *Correctness fixes (from the "gaps" analysis):*
-- TS/JS transitive import & bundle dependency tracking (the header-tracking
-  fix's counterpart for the JS/TS half)
 - Java packaged-class output tracking (nested package dirs, not just default)
 - "Run B after A" ordering edges (dependencies with no shared file)
 - Warn/error when two actions declare the same output
@@ -154,6 +152,15 @@ subtleties (the "do-not-reinterpret" list). Items are tagged below.
 - document the public plug-in protocols (`CacheStore` / `ContentIdentity` /
   `ChangeDetector`)
 - Go / protobuf content-identity plugins (when those languages arrive)
+- **TS/JS build support** — a `ts.py` like `cpp.py`/`java.py` (today you'd run
+  `tsc`/a bundler as a raw `ExternalProcessAction`; there is *no* TS/JS build
+  sugar yet). As part of it, transitive-import dependency tracking — the
+  header-tracking analog — reusing the general depfile mechanism
+  (`ExternalProcessAction.depfile` + fingerprint fold) with a **TS-format
+  scanner** (`tsc --listFiles` / bundler metafile), not the Makefile
+  `scan_depfile`. Note: the `ts-dts` *content-identity* plugin already exists;
+  this is the missing *build layer*, distinct from the [Blocked] JS/TS
+  **authoring** binding in track 3.
 
 *Bigger, still Opus (design-first — sketch before building):*
 - affected-target determination ("only build what my change touched" — a
