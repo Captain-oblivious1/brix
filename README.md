@@ -133,11 +133,14 @@ below is tagged with the model that should do it.
    everything that hasn't changed, sharing the same metadata file Python
    writes), the shared result cache (a fresh checkout builds instantly from
    results any earlier build stored — Rust and Python can even share one
-   cache directory), and now atomic builds (all-or-nothing commits through
-   a staging area, including the held-for-review flow). All three build
-   layers now run in pure Rust. **What's left: persistent workers, the
-   Python↔Rust boundary**, and then switching brix to run on the Rust
-   engine by default.
+   cache directory), atomic builds (all-or-nothing commits through
+   a staging area, including the held-for-review flow), and now the
+   Python↔Rust boundary itself: set `BRIX_ENGINE=rust` and every
+   builder's `build()` runs on the Rust engine — same graph, same
+   progress events, same results — falling back to Python only for the
+   pieces not yet ported. **What's left: persistent workers and the
+   content-identity plugins** (the two fallback cases), and then
+   switching brix to run on the Rust engine by default.
    **[Fable]** — the trickiest part of the whole project; one subtle ordering
    bug here breaks builds, so it needs the most careful model reviewing it
    line by line.
@@ -765,6 +768,34 @@ build inputs that come from memory or a database instead of files, and a C++
   `cargo test` is 18 unit + 9 golden + 58 behavioral; clippy clean;
   Python suite 190. Persistent workers and the PyO3 boundary are the
   remaining slices.
+- **Rust port, phase 3 slice 6 — the PyO3 boundary** (`rust/brix-py/`,
+  `src/brix/engine.py`, `src/brix/lowering.py`): set `BRIX_ENGINE=rust`
+  and every builder's `build()` crosses into the Rust engine — same
+  user-facing API, same reporter events, same `BuildResult`. The
+  boundary is one function, `brix_py.build(spec_json, config_json,
+  on_event=None) -> result_json`: three JSON strings in the shapes
+  pinned by `docs/boundary-schema.md`, deliberately language-neutral so
+  the future JS/TS binding is the same crate with a different FFI
+  prologue. The GIL is released for the whole build and re-acquired per
+  event; a reporter exception doesn't tear down the build mid-flight —
+  it re-raises once the build finishes. The graph→spec lowering moved
+  from `rust/golden/generate.py` into `brix/lowering.py` (goldens stayed
+  byte-identical); builders grew `layer_specs()` (their layer stack as
+  wire configs) and `source_graph()`. Two additive wire extensions
+  (user-approved): `build_begin` now carries the plan's nodes, and the
+  result JSON carries the final plan (expanded/inserted nodes included)
+  — the Python side synthesizes `build_end` from the returned result.
+  Graphs the port can't take yet — workers, `identity=` plugins, custom
+  Python cache stores — fall back silently to the Python engine;
+  `BRIX_ENGINE=rust` without a built extension raises instead of
+  quietly benchmarking the wrong engine. Extension discovery: installed
+  `brix_py` module → `$BRIX_RUST_ENGINE_LIB` → `rust/target/{release,
+  debug}` (built with `cargo build -p brix-py`, no maturin needed).
+  Boundary pins in `tests/test_rust_engine.py`; the whole Python suite
+  passes on **both** engines (197 with `BRIX_ENGINE=rust`, 197 without —
+  unsupported graphs exercising the fallback). `cargo test` is 18 unit +
+  9 golden + 58 behavioral; clippy clean across the workspace.
+  Persistent workers are the remaining slice.
 
 ## Design rules
 

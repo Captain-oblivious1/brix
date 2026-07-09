@@ -77,14 +77,14 @@ Every event is one object with `"event"` plus fields. `Node` refs are
 `{ "id": int, "label": str, "kind": "process" | "expand" }`.
 
 ```
-build_begin          { }
+build_begin          { plan: { nodes: [Node] } }
 node_started         { node }
 process_started      { node }                       // real spawn only; worker thread
 node_completed       { node, status: "done"|"failed", result: ProcessResult?, error: str? }
 node_skipped         { node, why: str }
 collection_realized  { node, members: [str], children: [Node] }
 node_inserted        { node, reason: str }
-build_end            { result: BuildResult }
+build_end            { }        // marker only; the full result is build()'s return value
 ```
 
 ```
@@ -92,8 +92,19 @@ ProcessResult = { action_name, command, argv: [str], exit_code: int|null,
                   signal: int|null, stdout, stderr, source: "process"|"replayed"|"cache" }
 BuildResult   = { success: bool, errors: [str],
                   states: { node_id: "pending"|"running"|"done"|"failed"|"skipped" },
-                  process_results: [ProcessResult] }
+                  node_results: { node_id: ProcessResult },  // per-node result where one exists
+                  process_results: [ProcessResult],
+                  plan: { nodes: [Node] } }          // final plan, inserted/expanded nodes included
 ```
+
+`build_begin.plan` carries the plan as first scheduled; `BuildResult.plan`
+carries the final plan (nodes inserted or expanded during the build
+included), which is why the skin synthesizes its own `build_end`
+reporter call from `build()`'s return value rather than from the marker
+event. `node_results` is the per-node view of `process_results` (the
+skin's state table answers `states.result(node_id)` from it). All three
+additions are additive (still version 1): a consumer that ignores them
+sees the original shapes.
 
 **Ordering contract (decided):** all events except `process_started`
 are emitted from the scheduler thread, in scheduling order — a node's

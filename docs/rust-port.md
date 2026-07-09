@@ -343,8 +343,23 @@ CLI/status stay in Python but depend on core answers:
    `tests/test_atomic.py` + `tests/test_held_staging.py` (minus the
    status/CLI cases, which stay Python until the boundary) — plus the
    full three-layer stack proof (cache hits restored via staging, then
-   committed). Remaining slices: persistent workers, then the PyO3
-   boundary.
+   committed).
+   *Slice 6 — the PyO3 boundary — is DONE*: the `brix-py` cdylib crate
+   exposes one function, `brix_py.build(spec_json, config_json,
+   on_event=None) -> result_json` — three JSON strings per
+   `docs/boundary-schema.md`, GIL released for the whole build,
+   re-acquired per event, callback exceptions stashed and re-raised
+   after the build. Python-side: `brix/lowering.py` (the graph→spec
+   lowering, moved out of `rust/golden/generate.py`, which now imports
+   it — goldens stayed byte-identical), and `brix/engine.py` (extension
+   discovery: installed module → `$BRIX_RUST_ENGINE_LIB` → dev tree;
+   `_EventAdapter` replaying wire events onto Python reporters;
+   `maybe_build` dispatch every builder's `build()` calls first).
+   `BRIX_ENGINE=rust` runs the whole Python suite through the Rust
+   engine; graphs the port can't take yet (workers, `identity=`
+   plugins, custom Python cache stores) silently fall back to the
+   Python engine, while a missing extension raises. Boundary pins in
+   `tests/test_rust_engine.py`. Remaining slice: persistent workers.
 4. **Flip the default**, keep `BRIX_ENGINE=py` working one release,
    verify the animation project (full dryRun cycle, targeted builds,
    clean-then-cache-restore, `view`), then delete the Python engine
@@ -393,8 +408,9 @@ leg (the Rust `Action` carries no worker yet). `tool` atoms and the
 `metadata.json` hash-cache landed with phase-3 slice 3; the cache-store
 layout with slice 4.
 
-**Remaining for phase 3:** the event stream across the boundary and the
-deferred tail above — then the `BRIX_ENGINE` default flip.
+**Remaining for phase 3:** the deferred tail above (workers, `identity=`
+plugins — both currently fall back to the Python engine under
+`BRIX_ENGINE=rust`) — then the `BRIX_ENGINE` default flip.
 
 ## Decisions (were open questions; settled — do not reopen during the port)
 

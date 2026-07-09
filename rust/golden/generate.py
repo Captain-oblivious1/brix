@@ -186,63 +186,9 @@ def gen_shlex():
 # -- planner + targets: spec -> plan.describe() ------------------------------
 
 
-def atom_to_spec(atom):
-    from brix.data import FileData, GlobData, RegexData, ToolData, ValueData
-
-    if isinstance(atom, FileData):
-        d = {"kind": "file", "path": atom.path}
-        if atom.identity is not None:
-            d["identity"] = atom.identity
-        return d
-    if isinstance(atom, GlobData):
-        d = {"kind": "glob", "template": atom.pattern.template}
-        if atom.identity is not None:
-            d["identity"] = atom.identity
-        return d
-    if isinstance(atom, RegexData):
-        return {"kind": "regex", "pattern": atom.regex.pattern}
-    if isinstance(atom, ToolData):
-        return {"kind": "tool", "name": atom.name}
-    if isinstance(atom, ValueData):
-        return {"kind": "value", "text": atom.text}
-    raise TypeError(atom)
-
-
-def expr_to_spec(expr):
-    return [atom_to_spec(a) for a in expr.atoms()]
-
-
-def action_to_spec(action):
-    from brix.actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
-
-    if isinstance(action, ExternalProcessAction):
-        d = {
-            "kind": "process",
-            "command_line": action.command_line,
-            "inputs": {k: expr_to_spec(v) for k, v in action.inputs.items()},
-            "outputs": {k: expr_to_spec(v) for k, v in action.outputs.items()},
-        }
-        if action.name is not None:
-            d["name"] = action.name
-        if action.env:
-            d["env"] = {k: expr_to_spec(v) for k, v in action.env.items()}
-        if action.depfile is not None:
-            d["depfile"] = action.depfile
-        return d
-    if isinstance(action, ExpandAll):
-        return {
-            "kind": "expand",
-            "element": action.element_name,
-            "collection": expr_to_spec(action.collection),
-            "child": action_to_spec(action.child),
-        }
-    if isinstance(action, DeleteFilesAction):
-        return {"kind": "delete", "paths": list(action.paths)}
-    raise TypeError(action)
-
-
-def graph_to_spec(graph):
-    return {"version": 1, "actions": [action_to_spec(a) for a in graph.actions]}
+# The live lowering, shared with the engine boundary (`brix.lowering`), so
+# the golden fixtures and the real Python->Rust wire can never drift apart.
+from brix.lowering import action_to_spec, graph_to_spec  # noqa: E402, F401
 
 
 def graph_upper():

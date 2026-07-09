@@ -57,8 +57,22 @@ class CleanBuilder:
     def layers(self) -> list:
         return []
 
+    def source_graph(self) -> Graph:
+        return self.graph
+
+    def layer_specs(self) -> list[dict] | None:
+        """This builder's layer stack as boundary-schema configs (innermost
+        first), or None when it holds something that can't cross (a custom
+        Python store object). Mirrors `layers()`."""
+        return []
+
     def build(self, jobs: int | None = None, reporter=None,
               targets: list[str] | None = None) -> BuildResult:
+        from . import engine
+
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets)
+        if rust is not None:
+            return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
@@ -93,8 +107,19 @@ class IncrementalBuilder:
         detector = TimeAndHashChangeDetector(self.root, metadata)
         return [IncrementalLayer(metadata, detector)]
 
+    def source_graph(self) -> Graph:
+        return self._supplier()
+
+    def layer_specs(self) -> list[dict] | None:
+        return [{"kind": "incremental", "metadata_dir": str(self.metadata_dir)}]
+
     def build(self, jobs: int | None = None, reporter=None,
               targets: list[str] | None = None) -> BuildResult:
+        from . import engine
+
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets)
+        if rust is not None:
+            return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
@@ -155,8 +180,22 @@ class CacheBuilder:
             store = CacheStore(directory)
         return [CacheLayer(store, detector), *inner_layers]
 
+    def source_graph(self) -> Graph:
+        return self.inner.source_graph()
+
+    def layer_specs(self) -> list[dict] | None:
+        inner = self.inner.layer_specs()
+        if inner is None or self._store is not None:
+            return None  # a Python store object can't cross the boundary
+        return [{"kind": "cache", "cache_dir": str(self.cache_dir)}, *inner]
+
     def build(self, jobs: int | None = None, reporter=None,
               targets: list[str] | None = None) -> BuildResult:
+        from . import engine
+
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets)
+        if rust is not None:
+            return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
@@ -180,10 +219,24 @@ class AtomicBuilder:
 
         return [*self.inner.layers(), AtomicLayer(self.staging_dir, hold=hold)]
 
+    def source_graph(self) -> Graph:
+        return self.inner.source_graph()
+
+    def layer_specs(self, hold: bool = False) -> list[dict] | None:
+        inner = self.inner.layer_specs()
+        if inner is None:
+            return None
+        return [*inner, {"kind": "atomic", "staging_dir": str(self.staging_dir), "hold": hold}]
+
     def build(self, jobs: int | None = None, reporter=None,
               targets: list[str] | None = None, hold: bool = False) -> BuildResult:
         """``hold=True``: build fully but keep outputs in staging for
         review — the workspace changes only at :meth:`commit`."""
+        from . import engine
+
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets, hold=hold)
+        if rust is not None:
+            return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(hold=hold), reporter=reporter)
 
     def commit(self) -> tuple[int, int] | None:
