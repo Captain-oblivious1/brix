@@ -146,18 +146,38 @@ below is tagged with the model that should do it.
    byte-identical digests in Rust, so Java/TS graphs cross the
    boundary too — only a hand-registered custom identity plugin still
    falls back to Python). **The Rust engine is now the default**:
-   `BRIX_ENGINE=py` forces the old engine (kept working for one
-   release), and the animation project builds, replays, restores from
-   cache, and targets correctly on both engines. What's left: one
-   release of soak time, then delete the Python engine internals
-   (keeping the user-facing API classes as thin wrappers).
-   **[Fable]** — the trickiest part of the whole project; one subtle ordering
-   bug here breaks builds, so it needs the most careful model reviewing it
-   line by line.
+   `BRIX_ENGINE=py` forces the old engine, the animation project
+   builds/replays/cache-restores/targets correctly on both engines,
+   `status` and `clean` call the core (phase 4a), and custom cache
+   stores + custom identity plugins cross as extension-trait callbacks
+   (phase 4b) — nothing falls back to the Python engine anymore.
+   **What's left — phase 4c, ON HOLD for soak (Duane's call,
+   2026-07-09): delete the Python engine internals** after the
+   animation project has run on the Rust default for a real work
+   stretch (days, not hours). Agreed deletion boundary: delete the
+   execution half (`executor.py` scheduler, `process.py`/`render.py`,
+   `workers.py` transport, the incremental/cache/atomic `around_node`
+   machinery, `status.py`'s fallback walk); keep the reference math
+   (`patterns`/`planner`/`targets`, `incremental.py` fingerprints,
+   `metadata.py`, `jvmabi`/`tsdts`/`identity`) because
+   `rust/golden/generate.py` generates the byte-parity fixtures from it
+   and Python stays the reference implementation. Consequences to
+   accept at that point: `BRIX_ENGINE=py` becomes a clear error, and a
+   checkout without the compiled extension cannot build (the animation
+   project then hard-requires `cargo build -p brix-py` or a maturin
+   wheel). **[Fable]** — the trickiest part of the whole project; one
+   subtle ordering bug here breaks builds, so it needs the most careful
+   model reviewing it line by line.
 3. **A JavaScript/TypeScript way to write build files** — same features as the
-   Python one, just in their language (`docs/boundary-schema.md`). **[Blocked]**
-   — can't start until the Rust engine (track 2) exists, since both languages are
-   meant to share it.
+   Python one, just in their language (`docs/boundary-schema.md` pins the
+   mirror-API contract: same names, camelCase, async `build()`, plain-object
+   reporters — and the wire shapes the binding speaks). **UNBLOCKED** as of
+   the phase-4 flip: the shared Rust engine exists, is the default, and
+   carries build/status/clean plus the extension traits. The binding is
+   `rust/brix-py` transliterated (napi-rs or similar FFI prologue over the
+   same JSON boundary), and the TS API layer is mechanical against the
+   contract — Opus-sized with a Fable review of the FFI threading
+   (callbacks arrive on build worker threads).
 
 ### Opus queue — ready to do now
 
