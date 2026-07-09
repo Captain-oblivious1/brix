@@ -356,10 +356,26 @@ CLI/status stay in Python but depend on core answers:
    `_EventAdapter` replaying wire events onto Python reporters;
    `maybe_build` dispatch every builder's `build()` calls first).
    `BRIX_ENGINE=rust` runs the whole Python suite through the Rust
-   engine; graphs the port can't take yet (workers, `identity=`
-   plugins, custom Python cache stores) silently fall back to the
-   Python engine, while a missing extension raises. Boundary pins in
-   `tests/test_rust_engine.py`. Remaining slice: persistent workers.
+   engine; graphs the port can't take yet (`identity=` plugins, custom
+   Python cache stores) silently fall back to the Python engine, while
+   a missing extension raises. Boundary pins in
+   `tests/test_rust_engine.py`.
+   *Slice 7 — persistent workers — is DONE*: `workers.rs` mirrors
+   `workers.py` (the JSON line protocol, one request in flight per
+   worker, lazy start, pools per spec, build-end teardown, crash /
+   startup failures as `exit_code: None` uncacheable results with no
+   fallback to spawning). The wire `Process` shape gained the reserved
+   `worker` key (`WorkerSpec`: name, command_line, inputs); worker
+   inputs create dependency edges and the worker's identity joins
+   `action_fingerprint` (golden-pinned for byte-parity — fingerprints
+   are cross-engine cache keys). One deliberate translation: Python
+   keys pools by spec *object* identity, the Rust core by spec
+   *content* (across the JSON boundary every node carries a copy of
+   its spec, so structural identity is the faithful reading). Pinned
+   by `rust/brix-core/tests/workers.rs` — the mirror of
+   `tests/test_workers.py` (same cases, same names). With workers
+   crossing, `tests/test_java_worker.py` also runs on the Rust engine
+   under `BRIX_ENGINE=rust`.
 4. **Flip the default**, keep `BRIX_ENGINE=py` working one release,
    verify the animation project (full dryRun cycle, targeted builds,
    clean-then-cache-restore, `view`), then delete the Python engine
@@ -402,15 +418,14 @@ evolved into `keys.rs` / `content.rs` / `detector.rs` rather than one
 `fingerprint.rs` + `metadata.rs`.
 
 **Deferred tail** (the port *errors* on these rather than emit a possibly
-wrong key): `identity=` content-identity plugins (`jvm-abi`, which need the
-Python plugin registry until the boundary slice) and the `worker` toolchain
-leg (the Rust `Action` carries no worker yet). `tool` atoms and the
-`metadata.json` hash-cache landed with phase-3 slice 3; the cache-store
-layout with slice 4.
+wrong key): `identity=` content-identity plugins (`jvm-abi`), which need
+the Python plugin registry. `tool` atoms and the `metadata.json`
+hash-cache landed with phase-3 slice 3; the cache-store layout with
+slice 4; the `worker` toolchain leg with slice 7.
 
-**Remaining for phase 3:** the deferred tail above (workers, `identity=`
-plugins — both currently fall back to the Python engine under
-`BRIX_ENGINE=rust`) — then the `BRIX_ENGINE` default flip.
+**Remaining for phase 3:** `identity=` plugins (currently fall back to
+the Python engine under `BRIX_ENGINE=rust`) — then the `BRIX_ENGINE`
+default flip.
 
 ## Decisions (were open questions; settled — do not reopen during the port)
 

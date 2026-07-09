@@ -14,6 +14,19 @@ use serde::{Deserialize, Deserializer};
 
 use crate::data::{DataAtom, DataExpr};
 
+/// How to launch a persistent worker (mirrors `WorkerSpec` in
+/// `src/brix/workers.py`): `command_line` renders from `inputs` into the
+/// worker's launch argv exactly like an action's; `name` is diagnostic
+/// identity. Purely an execution transport — a worker-routed action must be
+/// indistinguishable from a spawned one except in speed.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct WorkerSpec {
+    pub name: String,
+    pub command_line: String,
+    #[serde(default, deserialize_with = "ordered_map")]
+    pub inputs: Vec<(String, DataExpr)>,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Action {
@@ -33,6 +46,10 @@ pub enum Action {
         /// identity: never part of `action_key`.
         #[serde(default)]
         depfile: Option<String>,
+        /// A worker executes this action as a request instead of spawning it;
+        /// None spawns a process (mirrors `ExternalProcessAction.worker`).
+        #[serde(default)]
+        worker: Option<WorkerSpec>,
     },
     Expand {
         element: String,
@@ -88,10 +105,18 @@ impl Action {
     }
 
     /// Path atoms among the action's inputs (drives dependency inference and
-    /// target-selection needs). Worker inputs are a later phase.
+    /// target-selection needs). A worker's own inputs (e.g. a bootstrap-built
+    /// worker jar) are inputs this action needs present, so they create
+    /// dependency edges like any other input (mirrors `planner.input_atoms`).
     pub fn input_atoms(&self) -> Vec<DataAtom> {
         match self {
-            Action::Process { inputs, .. } => path_atoms(inputs),
+            Action::Process { inputs, worker, .. } => {
+                let mut atoms = path_atoms(inputs);
+                if let Some(spec) = worker {
+                    atoms.extend(path_atoms(&spec.inputs));
+                }
+                atoms
+            }
             Action::Expand { collection, child, .. } => {
                 let mut atoms: Vec<DataAtom> =
                     collection.iter().filter(|a| a.is_path_atom()).cloned().collect();
@@ -116,7 +141,7 @@ impl Action {
     /// Expand shape. Mirrors `ExpandAll.substitute`.
     pub fn substitute(&self, bindings: &[(String, String)]) -> Action {
         match self {
-            Action::Process { name, command_line, inputs, outputs, env, depfile } => {
+            Action::Process { name, command_line, inputs, outputs, env, depfile, worker } => {
                 // `name` and `depfile` substitute by plain `{key}` -> value
                 // string replacement (mirrors `ExternalProcessAction.substitute`).
                 let replace_keys = |s: &str| {
@@ -133,6 +158,9 @@ impl Action {
                     outputs: subst_pairs(outputs, bindings),
                     env: subst_pairs(env, bindings),
                     depfile: depfile.as_deref().map(replace_keys),
+                    // The worker passes through untouched (a shared spec, not
+                    // per-member data) — mirrors Python's `worker=self.worker`.
+                    worker: worker.clone(),
                 }
             }
             Action::Expand { element, collection, child } => {

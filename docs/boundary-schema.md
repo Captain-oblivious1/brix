@@ -24,7 +24,10 @@ Action        = Process | Expand | Delete
 Process       = { "kind": "process", "name": str, "command_line": str,
                   "inputs": { key: DataExpr }, "outputs": { key: DataExpr },
                   "env": { key: DataExpr },           // env may be {}
-                  "depfile": str? }                   // absent = no depfile
+                  "depfile": str?,                    // absent = no depfile
+                  "worker": WorkerSpec? }             // absent = spawn a process
+WorkerSpec    = { "name": str, "command_line": str,
+                  "inputs": { key: DataExpr } }
 Expand        = { "kind": "expand", "element": str,
                   "collection": DataExpr, "child": Action }   // child may be Expand
 Delete        = { "kind": "delete", "paths": [str] }
@@ -47,10 +50,15 @@ after a successful run; it is not identity (never part of `action_key`).
 It was always part of the Python `ExternalProcessAction` but was missing
 from this shape when it was first pinned — added (still version 1: it is
 optional and additive, both engines default it to absent) when the Rust
-incremental layer ported it. The typed helpers (`cpp`, `java`) lower
-**before** this boundary and never appear in it. WorkerSpec (same doc)
-adds `"worker": { "name": str, "command_line": str, "inputs": {...} }`
-to Process when it lands — reserve the key.
+incremental layer ported it. `worker` routes the action's rendered argv
+to a persistent worker instead of spawning (`src/brix/workers.py` pins
+the request/response protocol); the spec's `command_line` + `inputs`
+render into the worker's launch argv with the ordinary rules, its input
+path atoms create dependency edges like the action's own, and its
+identity joins the action fingerprint (a rebuilt worker jar invalidates
+what the worker built). Also optional and additive — landed with the
+Rust workers slice, still version 1. The typed helpers (`cpp`, `java`)
+lower **before** this boundary and never appear in it.
 
 ## Build config (skin → core)
 

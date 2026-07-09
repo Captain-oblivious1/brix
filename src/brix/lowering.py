@@ -7,8 +7,8 @@ these functions so the fixtures and the live engine boundary can never
 drift apart.
 
 ``supports_rust_engine`` reports whether a graph can cross the boundary
-*today*: workers and content-identity plugins live on the Python side until
-their port lands, so a graph using them stays on the Python engine.
+*today*: content-identity plugins live on the Python side until their port
+lands, so a graph using them stays on the Python engine.
 """
 
 from __future__ import annotations
@@ -58,6 +58,12 @@ def action_to_spec(action: Action) -> dict:
             d["env"] = {k: expr_to_spec(v) for k, v in action.env.items()}
         if action.depfile is not None:
             d["depfile"] = action.depfile
+        if action.worker is not None:
+            d["worker"] = {
+                "name": action.worker.name,
+                "command_line": action.worker.command_line,
+                "inputs": {k: expr_to_spec(v) for k, v in action.worker.inputs.items()},
+            }
         return d
     if isinstance(action, ExpandAll):
         return {
@@ -77,8 +83,11 @@ def graph_to_spec(graph: Graph) -> dict:
 
 def _atoms_of(action: Action):
     if isinstance(action, ExternalProcessAction):
-        for exprs in (action.inputs, action.outputs, action.env):
-            for expr in exprs.values():
+        exprs = [action.inputs, action.outputs, action.env]
+        if action.worker is not None:
+            exprs.append(action.worker.inputs)
+        for group in exprs:
+            for expr in group.values():
                 yield from expr.atoms()
     elif isinstance(action, ExpandAll):
         yield from action.collection.atoms()
@@ -86,9 +95,9 @@ def _atoms_of(action: Action):
 
 
 def supports_rust_engine(graph: Graph) -> bool:
-    """Can this graph cross the boundary today? Workers and `identity=`
-    content-identity plugins are still Python-side; a graph using them
-    builds on the Python engine until those ports land."""
+    """Can this graph cross the boundary today? `identity=` content-identity
+    plugins are still Python-side (they need the plugin registry); a graph
+    using them builds on the Python engine until that port lands."""
     for action in graph.actions:
         stack = [action]
         while stack:
@@ -99,8 +108,6 @@ def supports_rust_engine(graph: Graph) -> bool:
                     return False
                 continue
             if isinstance(current, ExternalProcessAction):
-                if current.worker is not None:
-                    return False
                 if any(getattr(a, "identity", None) for a in _atoms_of(current)):
                     return False
     return True

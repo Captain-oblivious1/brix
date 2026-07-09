@@ -34,8 +34,9 @@ pub mod report;
 pub mod shlex;
 pub mod spec;
 pub mod targets;
+pub mod workers;
 
-pub use actions::Action;
+pub use actions::{Action, WorkerSpec};
 pub use atomic::{commit_staging, discard_staging, AtomicLayer};
 pub use cache::{CacheLayer, CacheStore, CacheStoreProtocol, TwoTierCacheStore};
 pub use content::action_fingerprint;
@@ -53,3 +54,4 @@ pub use planner::plan_graph;
 pub use process::{run_process, ProcessResult};
 pub use report::{NullReporter, Reporter};
 pub use spec::{parse, GraphSpec};
+pub use workers::WorkerRegistry;

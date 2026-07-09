@@ -134,13 +134,14 @@ below is tagged with the model that should do it.
    writes), the shared result cache (a fresh checkout builds instantly from
    results any earlier build stored — Rust and Python can even share one
    cache directory), atomic builds (all-or-nothing commits through
-   a staging area, including the held-for-review flow), and now the
-   Python↔Rust boundary itself: set `BRIX_ENGINE=rust` and every
+   a staging area, including the held-for-review flow), the
+   Python↔Rust boundary itself (set `BRIX_ENGINE=rust` and every
    builder's `build()` runs on the Rust engine — same graph, same
-   progress events, same results — falling back to Python only for the
-   pieces not yet ported. **What's left: persistent workers and the
-   content-identity plugins** (the two fallback cases), and then
-   switching brix to run on the Rust engine by default.
+   progress events, same results), and now persistent workers (the
+   warm-compiler transport that makes Java builds fast runs in Rust
+   too, so worker-routed builds cross the boundary). **What's left:
+   the content-identity plugins** (the one remaining fallback case),
+   and then switching brix to run on the Rust engine by default.
    **[Fable]** — the trickiest part of the whole project; one subtle ordering
    bug here breaks builds, so it needs the most careful model reviewing it
    line by line.
@@ -796,6 +797,26 @@ build inputs that come from memory or a database instead of files, and a C++
   unsupported graphs exercising the fallback). `cargo test` is 18 unit +
   9 golden + 58 behavioral; clippy clean across the workspace.
   Persistent workers are the remaining slice.
+- **Rust port, phase 3 slice 7 — persistent workers**
+  (`rust/brix-core/src/workers.rs`): the warm-compiler transport runs in
+  Rust. Ported behavior-for-behavior from `workers.py`: the JSON
+  line protocol over the worker's stdin/stdout, one request in flight
+  per worker process, lazy start on first request, pools per spec, all
+  workers terminated at build end; a worker crash or startup failure is
+  an `exit_code: None` result — never cached, never a silent fallback
+  to spawning. The wire `Process` shape gained its reserved `worker`
+  key; worker inputs create dependency edges (a bootstrap-built worker
+  jar's producer runs first) and the worker's command + inputs join the
+  action fingerprint, now golden-pinned for byte-parity (fingerprints
+  are cache keys shared across engines). One deliberate translation:
+  pools are keyed by spec content rather than Python's object identity
+  — across the JSON boundary every node carries a copy of its spec.
+  Pinned by `rust/brix-core/tests/workers.rs`, the mirror of
+  `tests/test_workers.py` (same cases, same names). With this, worker
+  graphs cross the boundary under `BRIX_ENGINE=rust` (the Java worker
+  tests included); the suite is 197 on both engines, `cargo test` 18
+  unit + 9 golden + 63 behavioral, clippy clean. Content-identity
+  plugins are the last fallback before the default flip.
 
 ## Design rules
 

@@ -7,10 +7,10 @@ change; this module adapts between it and the JSON wire pinned by
 ``docs/boundary-schema.md``.
 
 Graphs the Rust engine cannot take yet fall back silently to the Python
-engine (see ``lowering.supports_rust_engine``): workers and content-identity
-plugins, plus builders configured with a custom Python cache store. That
-keeps ``BRIX_ENGINE=rust`` honest across the whole test suite while those
-ports land.
+engine (see ``lowering.supports_rust_engine``): content-identity plugins,
+plus builders configured with a custom Python cache store. That keeps
+``BRIX_ENGINE=rust`` honest across the whole test suite while those ports
+land.
 
 The extension is looked up as an installed ``brix_py`` module first, then
 ``$BRIX_RUST_ENGINE_LIB``, then the dev tree (``rust/target/{release,debug}``).
@@ -176,7 +176,7 @@ def maybe_build(
 
     graph = builder.source_graph()
     if not lowering.supports_rust_engine(graph):
-        return None  # workers / identity plugins are still Python-side
+        return None  # identity plugins are still Python-side
     spec_json = json.dumps(lowering.graph_to_spec(graph))
     config_json = json.dumps(
         {"root": str(builder.root), "jobs": jobs, "targets": targets, "layers": specs}

@@ -18,5 +18,9 @@
   {
     "spec": "{\"kind\": \"process\", \"command_line\": \"pack {all} {out}\", \"inputs\": {\"all\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}, {\"kind\": \"glob\", \"template\": \"src/{name}.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/pack.txt\"}]}, \"name\": \"union input\"}",
     "fingerprint": "6553c3f27caab81318a16df36a475f51aef87bcfd8e6458235b14e9cdf665fae"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"compile {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"worker routed\", \"worker\": {\"name\": \"w\", \"command_line\": \"run {jar}\", \"inputs\": {\"jar\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}]}}}",
+    "fingerprint": "a66bc1166879e7a925a65d0b137e609a70b2cbe1692f559fa9958c488f7c1120"
   }
 ]

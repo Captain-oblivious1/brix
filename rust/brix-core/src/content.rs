@@ -11,13 +11,14 @@
 //! machine-specific mtime, so they are exercised by behavioral tests, never
 //! golden-pinned.
 //!
-//! Deliberately *not* ported (each returns an error so a caller can never get
-//! a silently-wrong key):
-//!   - `identity=` (content-identity plugins like `jvm-abi`) — need the plugin
-//!     registry, which lives in Python until the boundary slice;
-//!   - the `worker` toolchain leg — the Rust `Action` carries no worker yet.
+//! Also ported: the `worker` toolchain leg — a worker's launch command and
+//! inputs join the fingerprint exactly like Python's (a JDK upgrade or a
+//! rebuilt worker jar invalidates everything that worker built).
 //!
-//! These are the fingerprint's remaining tail, tracked in the README.
+//! Deliberately *not* ported (returns an error so a caller can never get a
+//! silently-wrong key): `identity=` (content-identity plugins like `jvm-abi`)
+//! — they need the plugin registry, which lives in Python. This is the
+//! fingerprint's remaining tail, tracked in the README.
 
 use std::collections::BTreeMap;
 
@@ -146,7 +147,7 @@ pub fn action_fingerprint(
     ctx: &NodeContext,
     det: &TimeAndHashChangeDetector,
 ) -> Result<String, String> {
-    let Action::Process { command_line, inputs, env, .. } = action else {
+    let Action::Process { command_line, inputs, env, worker, .. } = action else {
         return Err("action_fingerprint is only defined for process actions".to_string());
     };
     let mut payload: BTreeMap<String, Value> = BTreeMap::new();
@@ -154,6 +155,16 @@ pub fn action_fingerprint(
     payload.insert("inputs".to_string(), exprs_fp(inputs, ctx, det)?);
     if !env.is_empty() {
         payload.insert("env".to_string(), exprs_fp(env, ctx, det)?);
+    }
+    if let Some(spec) = worker {
+        // The worker is part of the toolchain (its jar/interpreter determine
+        // the output), so its identity joins the fingerprint with the same
+        // atom_fp rules: a JDK upgrade or a rebuilt worker jar invalidates
+        // everything this worker built, exactly like a compiler change.
+        let mut section = BTreeMap::new();
+        section.insert("command".to_string(), Value::str(&spec.command_line));
+        section.insert("inputs".to_string(), exprs_fp(&spec.inputs, ctx, det)?);
+        payload.insert("worker".to_string(), Value::Map(section));
     }
     // Discovered (scanned) dependencies — inputs the tool reported reading
     // last build that the graph didn't declare (C/C++ headers from a

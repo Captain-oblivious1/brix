@@ -26,6 +26,7 @@ use crate::layers::{BuildLayer, NodeProposal};
 use crate::plan::{EdgeTrigger, ExecutionPlan, Node, NodeKind, NodeState, NodeStateTable};
 use crate::process::{run_process, ProcessResult};
 use crate::render::{prepare_output_dirs, render_command, render_env};
+use crate::workers::WorkerRegistry;
 use crate::report::Reporter;
 
 /// The outcome of one `execute()`. (Python's `BuildResult` also carries the
@@ -78,15 +79,26 @@ fn run_delete(action: &Action, ctx: &NodeContext) -> ProcessResult {
     }
 }
 
-fn run_process_node(node: &Node, ctx: &NodeContext) -> ProcessResult {
+fn run_process_node(node: &Node, ctx: &NodeContext, workers: &WorkerRegistry) -> ProcessResult {
     let action = &node.action;
     if let Action::Delete { .. } = action {
         return run_delete(action, ctx);
     }
-    // Worker-routed actions (`action.worker` in Python) are a later slice:
-    // the Rust `Action` has no worker field yet (the boundary schema reserves
-    // the key), so every process action spawns.
     let label = action.label();
+    if let Action::Process { worker: Some(spec), .. } = action {
+        // Same rendering as a spawn (overlay output-redirection included),
+        // but the argv is dispatched to a worker instead of spawned. Env is
+        // not part of the worker protocol; worker actions do not use env= in
+        // v1. (Mirrors `_run_process_node`.)
+        let args = match (|| {
+            prepare_output_dirs(action, ctx)?;
+            crate::shlex::split(&render_command(action, ctx)?)
+        })() {
+            Ok(args) => args,
+            Err(exc) => return ProcessResult::did_not_run(&label, "", format!("brix: {exc}")),
+        };
+        return workers.run(spec, &label, args, ctx);
+    }
     let (command, env) = match (|| {
         prepare_output_dirs(action, ctx)?;
         let command = render_command(action, ctx)?;
@@ -110,13 +122,14 @@ fn run_stacked(
     node: &Node,
     ctx: &NodeContext,
     reporter: &dyn Reporter,
+    workers: &WorkerRegistry,
 ) -> ProcessResult {
     if depth == 0 {
         reporter.process_started(node);
-        return run_process_node(node, ctx);
+        return run_process_node(node, ctx, workers);
     }
     layers[depth - 1].around_node(node, ctx, &|inner_ctx: &NodeContext| {
-        run_stacked(layers, depth - 1, node, inner_ctx, reporter)
+        run_stacked(layers, depth - 1, node, inner_ctx, reporter, workers)
     })
 }
 
@@ -227,6 +240,7 @@ pub fn execute(
     }
     // From here the context is frozen and shared with worker threads.
     let ctx = ctx;
+    let workers = WorkerRegistry::new();
 
     let (job_tx, job_rx) = mpsc::channel::<(usize, Node)>();
     let (done_tx, done_rx) = mpsc::channel::<(usize, ProcessResult)>();
@@ -237,6 +251,7 @@ pub fn execute(
             let job_rx = Arc::clone(&job_rx);
             let done_tx = done_tx.clone();
             let ctx = &ctx;
+            let workers = &workers;
             s.spawn(move || loop {
                 // Hold the lock only for the recv; execution is parallel.
                 let msg = job_rx.lock().unwrap().recv();
@@ -247,7 +262,7 @@ pub fn execute(
                         // future.result(); the build dies either way — here it
                         // dies as a failed node instead of a hang).
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                            || run_stacked(layers, layers.len(), &node, ctx, reporter),
+                            || run_stacked(layers, layers.len(), &node, ctx, reporter, workers),
                         ))
                         .unwrap_or_else(|panic| {
                             let msg = panic_message(&panic);
@@ -473,6 +488,8 @@ pub fn execute(
         drop(job_tx); // closes the job channel: workers exit, scope joins them
     });
 
+    // Scheduler owns worker lifecycles: all terminated at build end (v1).
+    workers.terminate_all();
     let success = errors.is_empty();
     let build_result = BuildResult { success, states, process_results: results, errors };
     for layer in layers {

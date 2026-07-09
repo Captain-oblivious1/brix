@@ -448,14 +448,16 @@ def gen_fs():
 
 # -- content fingerprint: action_fingerprint over the fixture tree -----------
 #
-# Only file/glob/regex/value/union atoms and env — no tool/identity/worker — so
-# the fingerprint is fully determined by the tree's bytes (the Rust port defers
-# those three, erroring rather than guessing). `outputs` are present on the
-# actions but never enter the fingerprint.
+# Only file/glob/regex/value/union atoms, env, and a file-input worker — no
+# tool/identity — so the fingerprint is fully determined by the tree's bytes
+# (tool atoms carry machine-specific stat signatures; identity atoms make the
+# Rust port error rather than guess). `outputs` are present on the actions but
+# never enter the fingerprint. The worker case pins the worker section's
+# byte-parity: fingerprints are cache keys shared across engines.
 
 
 def gen_fingerprints():
-    from brix import ExternalProcessAction, Graph
+    from brix import ExternalProcessAction, Graph, WorkerSpec
     from brix.incremental import action_fingerprint
     from brix.layers import NodeContext
     from brix.metadata import TimeAndHashChangeDetector
@@ -495,6 +497,17 @@ def gen_fingerprints():
             command_line="pack {all} {out}",
             inputs={"all": d.file("tools/upper.py") + d.glob("src/{name}.txt")},
             outputs={"out": d.file("build/pack.txt")},
+        ),
+        ExternalProcessAction(
+            name="worker routed",
+            command_line="compile {src} {out}",
+            worker=WorkerSpec(
+                name="w",
+                command_line="run {jar}",
+                inputs={"jar": d.file("tools/upper.py")},
+            ),
+            inputs={"src": d.file("src/a.txt")},
+            outputs={"out": d.file("build/a.o")},
         ),
     ]
     return [
