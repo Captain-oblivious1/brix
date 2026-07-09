@@ -145,8 +145,12 @@ below is tagged with the model that should do it.
    built-in content identities (`jvm-abi` and `ts-dts` produce
    byte-identical digests in Rust, so Java/TS graphs cross the
    boundary too — only a hand-registered custom identity plugin still
-   falls back to Python). **What's left: switching brix to run on the
-   Rust engine by default.**
+   falls back to Python). **The Rust engine is now the default**:
+   `BRIX_ENGINE=py` forces the old engine (kept working for one
+   release), and the animation project builds, replays, restores from
+   cache, and targets correctly on both engines. What's left: one
+   release of soak time, then delete the Python engine internals
+   (keeping the user-facing API classes as thin wrappers).
    **[Fable]** — the trickiest part of the whole project; one subtle ordering
    bug here breaks builds, so it needs the most careful model reviewing it
    line by line.
@@ -863,6 +867,26 @@ build inputs that come from memory or a database instead of files, and a C++
   directories (`rights/intro`) build fine under bare `{video}`
   (`test_same_collection_expansions_build_end_to_end`). Pinned by mirrored
   plan/pattern tests (same names) and new golden overlap + plan cases.
+
+- **Rust port, phase 4 (part 1) — the Rust engine is the default**
+  (`src/brix/engine.py`): `BRIX_ENGINE` unset now runs the Rust engine;
+  `BRIX_ENGINE=py` forces the Python engine (kept working one release);
+  an explicit `BRIX_ENGINE=rust` with no built extension still raises,
+  but the *default* quietly falls back to Python so a pure-Python
+  checkout keeps building. Verified on the animation project end-to-end
+  (its stale venv `brix.pth` re-pointed via `pip install -e`): full
+  dryRun build (106 nodes), no-op rebuild all-replayed on *both* engines
+  against the same metadata, targeted `build wealth` (12-node plan),
+  `clean` then full cache restore (94 hits), `status`. Two animation
+  `brix.py` updates rode along (uncommitted there): `{video:*}` on the
+  videos glob — bare `{video}` would read every scene/helper/`__init__`
+  as a video, and path shape alone cannot distinguish `rights3/Fence.py`
+  (helper) from a future `rights/intro.py` (nested video); when videos
+  move into subdirectories, compute the list in `create_graph` (sibling-
+  directory test) instead — and a nested-capable scene regex
+  (`(?P<video>.+)`). Suite: 206 both engines; `cargo test` 25 unit +
+  9 golden + 81 behavioral; clippy clean. Remaining for phase 4: one
+  release of soak, then delete the Python engine internals.
 
 ## Design rules
 

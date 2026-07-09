@@ -149,8 +149,28 @@ def test_reporter_exception_reraised(tmp_path, monkeypatch):
         IncrementalBuilder(make_graph, root=tmp_path).build(reporter=Exploding())
 
 
-def test_python_engine_by_default(tmp_path, monkeypatch):
+def test_rust_engine_by_default(tmp_path, monkeypatch):
+    # The phase-4 flip: with BRIX_ENGINE unset, build() crosses the boundary.
     monkeypatch.delenv("BRIX_ENGINE", raising=False)
+    write_workspace(tmp_path, {"a": "x"})
+    builder = IncrementalBuilder(make_graph, root=tmp_path)
+    result = engine.maybe_build(builder)
+    assert result is not None and result.success
+
+
+def test_engine_py_forces_python(tmp_path, monkeypatch):
+    # Kept working one release after the flip (docs/rust-port.md phase 4).
+    monkeypatch.setenv("BRIX_ENGINE", "py")
+    builder = IncrementalBuilder(make_graph, root=tmp_path)
+    assert engine.maybe_build(builder) is None
+
+
+def test_default_without_extension_falls_back(tmp_path, monkeypatch):
+    # A pure-Python checkout (no cargo build) must keep building: the
+    # *default* quietly runs the Python engine when the extension is missing;
+    # only an explicit BRIX_ENGINE=rust is loud about it.
+    monkeypatch.delenv("BRIX_ENGINE", raising=False)
+    monkeypatch.setattr(engine, "_extension_cache", None)
     builder = IncrementalBuilder(make_graph, root=tmp_path)
     assert engine.maybe_build(builder) is None
 
@@ -209,7 +229,7 @@ def test_identity_replays_across_engines(tmp_path, monkeypatch):
     # engine recomputes the fingerprint over the same workspace and must
     # replay, not rerun — byte-equal cache keys proven behaviorally.
     write_identity_workspace(tmp_path)
-    monkeypatch.delenv("BRIX_ENGINE", raising=False)
+    monkeypatch.setenv("BRIX_ENGINE", "py")
     first = IncrementalBuilder(graph_with_identity, root=tmp_path).build()
     assert first.success
 

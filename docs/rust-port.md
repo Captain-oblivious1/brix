@@ -400,6 +400,18 @@ CLI/status stay in Python but depend on core answers:
    verify the animation project (full dryRun cycle, targeted builds,
    clean-then-cache-restore, `view`), then delete the Python engine
    internals, keeping the API wrappers.
+   *The flip is DONE*: unset `BRIX_ENGINE` runs the Rust engine;
+   `py` forces the Python engine; an explicit `rust` with no built
+   extension raises, while the default falls back to Python (a
+   pure-Python checkout keeps building). Animation verified end-to-end
+   on both engines against shared metadata — which caught one real
+   inference bug, fixed in both engines: same-collection expansions'
+   bindings are now unified during edge inference (`overlaps`'
+   `shared=` / `overlaps_shared`), because recursive-by-default
+   `{video}` otherwise splits `out/{video}.mpg` vs
+   `out/{video}/{scene}.mpg` two ways and fabricates a
+   combine↔finalize cycle. Remaining: one release of soak, then the
+   deletion.
 
 Phases 1–2 are safe for a cheaper model working alone against the golden
 tests. Phase 3 is where the do-not-reinterpret list matters most —
@@ -444,8 +456,10 @@ in the skin's runtime (graphs using one fall back to the Python engine).
 slice 3; the cache-store layout with slice 4; the `worker` toolchain leg
 with slice 7; the built-in identities (`jvm-abi`, `ts-dts`) with slice 8.
 
-**Remaining for phase 3:** nothing — phase 3 is complete. Next is the
-`BRIX_ENGINE` default flip (phase 4).
+**Remaining for phase 3:** nothing — phase 3 is complete. The phase-4
+default flip has landed too (see the phasing above); what remains of
+phase 4 is one release of soak time with `BRIX_ENGINE=py` available,
+then deleting the Python engine internals.
 
 ## Decisions (were open questions; settled — do not reopen during the port)
 

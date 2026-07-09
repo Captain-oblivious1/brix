@@ -1,21 +1,24 @@
 """The Rust engine boundary: run `build()` on `brix-core` via `brix_py`.
 
-Set ``BRIX_ENGINE=rust`` and every builder's ``build()`` crosses this
-boundary instead of running the Python executor — same graph, same layer
-stack, same events, same ``BuildResult``. The user-facing API does not
-change; this module adapts between it and the JSON wire pinned by
-``docs/boundary-schema.md``.
+The Rust engine is the **default**: every builder's ``build()`` crosses
+this boundary instead of running the Python executor — same graph, same
+layer stack, same events, same ``BuildResult``. The user-facing API does
+not change; this module adapts between it and the JSON wire pinned by
+``docs/boundary-schema.md``. Set ``BRIX_ENGINE=py`` to force the Python
+engine (kept working for one release after the flip; see
+``docs/rust-port.md`` phase 4).
 
-Graphs the Rust engine cannot take yet fall back silently to the Python
-engine (see ``lowering.supports_rust_engine``): content-identity plugins,
-plus builders configured with a custom Python cache store. That keeps
-``BRIX_ENGINE=rust`` honest across the whole test suite while those ports
-land.
+Graphs the Rust engine cannot take fall back silently to the Python
+engine (see ``lowering.supports_rust_engine``): custom skin-registered
+content-identity plugins, plus builders configured with a custom Python
+cache store.
 
 The extension is looked up as an installed ``brix_py`` module first, then
 ``$BRIX_RUST_ENGINE_LIB``, then the dev tree (``rust/target/{release,debug}``).
-With ``BRIX_ENGINE=rust`` set and no extension anywhere, ``build()`` raises —
-a silent fallback there would quietly benchmark the wrong engine.
+No extension anywhere: the *default* falls back to the Python engine (a
+pure-Python checkout must keep building), but an explicit
+``BRIX_ENGINE=rust`` raises — a silent fallback there would quietly
+benchmark the wrong engine.
 """
 
 from __future__ import annotations
@@ -70,7 +73,7 @@ def _extension():
 
 
 def rust_requested() -> bool:
-    return os.environ.get("BRIX_ENGINE", "py") == "rust"
+    return os.environ.get("BRIX_ENGINE", "rust") == "rust"
 
 
 class _EventAdapter:
@@ -165,10 +168,12 @@ def maybe_build(
         return None
     module = _extension()
     if module is None:
-        raise RuntimeError(
-            "BRIX_ENGINE=rust but the brix_py extension was not found; "
-            "build it with `cargo build -p brix-py` (or set BRIX_RUST_ENGINE_LIB)"
-        )
+        if os.environ.get("BRIX_ENGINE") == "rust":
+            raise RuntimeError(
+                "BRIX_ENGINE=rust but the brix_py extension was not found; "
+                "build it with `cargo build -p brix-py` (or set BRIX_RUST_ENGINE_LIB)"
+            )
+        return None  # defaulted, no extension: a pure-Python install still builds
     specs = builder.layer_specs(hold=hold) if hold is not None else builder.layer_specs()
     if specs is None:
         return None  # a custom Python store can't cross; Python engine runs it
