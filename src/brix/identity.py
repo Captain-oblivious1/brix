@@ -20,8 +20,10 @@ The built-ins (``jvm-abi``, ``ts-dts``) are also implemented in the Rust core
 (`rust/brix-core/src/identity.rs`) so every skin gets them; the digests are
 cross-engine cache keys, so the Python code here remains the **reference
 implementation**, and a version bump in one implementation must land in both.
-A *custom* plugin registered here exists only in this skin — graphs using one
-stay on the Python engine (`lowering.supports_rust_engine`).
+A *custom* plugin registered here crosses the boundary as the
+``content_identity`` extension trait: the engine calls its ``digest`` back
+per file (from build worker threads), and its digests cache in
+metadata.json under the same versioned tag either engine would use.
 """
 
 from __future__ import annotations

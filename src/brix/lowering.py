@@ -6,11 +6,11 @@ against. The golden-fixture generator (``rust/golden/generate.py``) imports
 these functions so the fixtures and the live engine boundary can never
 drift apart.
 
-``supports_rust_engine`` reports whether a graph can cross the boundary
-*today*: the built-in content identities (``jvm-abi``, ``ts-dts``) are
-ported into the core, so only a graph using a *custom* skin-registered
-identity plugin stays on the Python engine (the core has no way to call
-back into a skin's plugin per file).
+``custom_identity_names`` collects the identity names a graph uses that are
+not built into the core (``jvm-abi``, ``ts-dts``): the engine boundary
+resolves them against the skin's registry and passes their ``digest``
+callables across as the ``content_identity`` extension trait — every graph
+crosses; an unregistered name raises before the build starts.
 """
 
 from __future__ import annotations
@@ -101,29 +101,28 @@ def _atoms_of(action: Action):
 _RUST_IDENTITIES = frozenset({"jvm-abi", "ts-dts"})
 
 
-def _custom_identity(atoms) -> bool:
-    return any(
-        name not in _RUST_IDENTITIES
-        for name in (getattr(a, "identity", None) for a in atoms)
-        if name is not None
-    )
+def custom_identity_names(graph: Graph) -> set[str]:
+    """The identity names this graph uses that the core does not build in.
+    The engine boundary resolves each against the skin's registry (loud on a
+    typo) and hands the core their digest callables — the `content_identity`
+    extension trait of docs/boundary-schema.md."""
+    names: set[str] = set()
 
+    def collect(atoms):
+        names.update(
+            name
+            for name in (getattr(a, "identity", None) for a in atoms)
+            if name is not None and name not in _RUST_IDENTITIES
+        )
 
-def supports_rust_engine(graph: Graph) -> bool:
-    """Can this graph cross the boundary today? The built-in content
-    identities are ported into the core; a *custom* skin-registered identity
-    plugin is not (the core cannot call back into a skin per file), so a
-    graph using one builds on the Python engine."""
     for action in graph.actions:
         stack = [action]
         while stack:
             current = stack.pop()
             if isinstance(current, ExpandAll):
                 stack.append(current.child)
-                if _custom_identity(current.collection.atoms()):
-                    return False
+                collect(current.collection.atoms())
                 continue
             if isinstance(current, ExternalProcessAction):
-                if _custom_identity(_atoms_of(current)):
-                    return False
-    return True
+                collect(_atoms_of(current))
+    return names

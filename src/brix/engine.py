@@ -8,10 +8,11 @@ not change; this module adapts between it and the JSON wire pinned by
 engine (kept working for one release after the flip; see
 ``docs/rust-port.md`` phase 4).
 
-Graphs the Rust engine cannot take fall back silently to the Python
-engine (see ``lowering.supports_rust_engine``): custom skin-registered
-content-identity plugins, plus builders configured with a custom Python
-cache store.
+Everything crosses. Custom cache stores and custom skin-registered
+content-identity plugins ride along as the extension traits of
+``docs/boundary-schema.md``: the store's methods and each plugin's
+``digest`` are Python callables the core invokes across the boundary
+(from build worker threads — they must not assume the main thread).
 
 The extension is looked up as an installed ``brix_py`` module first, then
 ``$BRIX_RUST_ENGINE_LIB``, then the dev tree (``rust/target/{release,debug}``).
@@ -155,10 +156,9 @@ def _result_from_json(text: str, root: Path) -> "BuildResult":
     )
 
 
-def _engine_for(graph) -> "object | None":
-    """The extension module if the Rust engine should handle this graph,
-    else None (Python engine). Shared dispatch: honors BRIX_ENGINE, the
-    missing-extension rules, and the custom-identity fallback."""
+def _engine_for() -> "object | None":
+    """The extension module if the Rust engine should run, else None (Python
+    engine). Honors BRIX_ENGINE and the missing-extension rules."""
     if not rust_requested():
         return None
     module = _extension()
@@ -169,11 +169,62 @@ def _engine_for(graph) -> "object | None":
                 "build it with `cargo build -p brix-py` (or set BRIX_RUST_ENGINE_LIB)"
             )
         return None  # defaulted, no extension: a pure-Python install still works
-    from . import lowering
-
-    if not lowering.supports_rust_engine(graph):
-        return None  # custom skin-registered identity: Python engine owns it
     return module
+
+
+def _identity_callbacks(graph) -> dict | None:
+    """The graph's custom identity names resolved against the skin registry:
+    ``{name: (tag, digest_callable)}`` for the `content_identity` extension
+    trait, or None when the graph only uses built-ins. An unregistered name
+    raises here (ValueError), before anything runs — the same loudness the
+    Python engine has at fingerprint time."""
+    from . import identity, lowering
+
+    names = lowering.custom_identity_names(graph)
+    if not names:
+        return None
+    callbacks = {}
+    for name in sorted(names):
+        plugin = identity.get(name)  # raises ValueError on an unknown name
+
+        def digest(path_str, _plugin=plugin):
+            return _plugin.digest(Path(path_str))
+
+        callbacks[name] = (identity.tag(plugin), digest)
+    return callbacks
+
+
+class _RootContext:
+    """What a cache store's `restore` receives across the boundary: the
+    output-root view of the node context (the built-in store shape only ever
+    uses ``ctx.output_root``; richer context does not cross)."""
+
+    def __init__(self, output_root: Path) -> None:
+        self.output_root = output_root
+
+
+class _StoreShim:
+    """A skin `CacheStoreProtocol` store behind the wire call shapes of
+    docs/boundary-schema.md: `restore` receives the output root as a path
+    string, `store` receives the result as a dict and outputs as
+    ``{logical: physical_str}``. Exceptions propagate — the core's cache
+    layer treats them as a miss / skipped populate, exactly like Python's."""
+
+    def __init__(self, store) -> None:
+        self._store = store
+
+    def load(self, fingerprint: str):
+        return self._store.load(fingerprint)
+
+    def restore(self, fingerprint: str, entry: dict, output_root: str) -> bool:
+        return bool(self._store.restore(fingerprint, entry, _RootContext(Path(output_root))))
+
+    def store(self, fingerprint: str, result: dict, outputs: dict) -> None:
+        self._store.store(
+            fingerprint,
+            ProcessResult(**result),
+            {logical: Path(physical) for logical, physical in outputs.items()},
+        )
 
 
 def maybe_status(
@@ -186,7 +237,7 @@ def maybe_status(
     """`compute_status` through the core: the parsed StatusReport wire dict,
     or None to run the Python implementation. Raises what the Python
     implementation would raise (bad targets, unknown identity: ValueError)."""
-    module = _engine_for(graph)
+    module = _engine_for()
     if module is None:
         return None
     from . import lowering
@@ -198,14 +249,19 @@ def maybe_status(
         "targets": targets,
     }
     return json.loads(
-        module.status(json.dumps(lowering.graph_to_spec(graph)), json.dumps(config))
+        module.status(
+            json.dumps(lowering.graph_to_spec(graph)),
+            json.dumps(config),
+            _identity_callbacks(graph),
+        )
     )
 
 
 def maybe_clean(graph, root: Path, metadata_dir) -> int | None:
     """The CLI's `clean` through the core: files removed, or None to run the
-    Python implementation."""
-    module = _engine_for(graph)
+    Python implementation. (Clean never fingerprints, so identity plugins
+    are not consulted.)"""
+    module = _engine_for()
     if module is None:
         return None
     from . import lowering
@@ -225,24 +281,37 @@ def maybe_build(
     hold: bool | None = None,
 ) -> "BuildResult | None":
     """The Rust-engine path for a builder's ``build()``, or None to run the
-    Python engine (not requested, or the graph/builder can't cross yet)."""
-    if not rust_requested():
-        return None
-    graph = builder.source_graph()
-    module = _engine_for(graph)
+    Python engine (not requested, or a builder whose ``layer_specs`` is
+    None — a custom builder class the boundary doesn't know)."""
+    module = _engine_for()
     if module is None:
         return None
     specs = builder.layer_specs(hold=hold) if hold is not None else builder.layer_specs()
     if specs is None:
-        return None  # a custom Python store can't cross; Python engine runs it
+        return None  # a layer stack the boundary can't express
     from . import lowering
 
+    graph = builder.source_graph()
+    # Lift live store objects out of the specs: the JSON marks the slot,
+    # the shim crosses separately as the cache_store extension trait.
+    stores: list = []
+    wire_specs: list[dict] = []
+    for spec in specs:
+        if spec.get("kind") == "cache" and "store" in spec:
+            stores.append(_StoreShim(spec["store"]))
+            wire_specs.append({"kind": "cache", "custom_store": True})
+        else:
+            stores.append(None)
+            wire_specs.append(spec)
     spec_json = json.dumps(lowering.graph_to_spec(graph))
     config_json = json.dumps(
-        {"root": str(builder.root), "jobs": jobs, "targets": targets, "layers": specs}
+        {"root": str(builder.root), "jobs": jobs, "targets": targets, "layers": wire_specs}
     )
     adapter = _EventAdapter(reporter, builder.root) if reporter is not None else None
-    result = _result_from_json(module.build(spec_json, config_json, adapter), builder.root)
+    result = _result_from_json(
+        module.build(spec_json, config_json, adapter, stores, _identity_callbacks(graph)),
+        builder.root,
+    )
     if reporter is not None:
         reporter.build_end(result)
     return result

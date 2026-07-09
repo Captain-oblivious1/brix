@@ -41,17 +41,18 @@ fn hash_value(h: Option<String>) -> Value {
 /// digest]`, or `[tag:raw, byte_hash]` when the plugin cannot interpret the
 /// file (mirrors `_identity_material`). Deterministic for the same bytes, so
 /// a cross-machine disagreement can only miss, never make a stale hit. An
-/// unknown identity name errors loudly (before the fallback).
+/// unknown identity name — not a built-in and not in the skin's
+/// `content_identity` extension — errors loudly (before the fallback).
 fn identity_material(
     name: &str,
     physical: &std::path::Path,
     det: &TimeAndHashChangeDetector,
 ) -> Result<[Value; 2], String> {
-    let Some(tag) = crate::identity::tag(name) else {
-        return Err(format!("unknown content identity '{name}' (not a built-in)"));
+    let Some(tag) = det.identity_tag(name) else {
+        return Err(format!("unknown content identity '{name}'"));
     };
     Ok(match det.identity_digest(physical, name) {
-        Ok(digest) => [Value::str(tag), hash_value(digest)],
+        Ok(digest) => [Value::str(&tag), hash_value(digest)],
         Err(_) => [Value::str(format!("{tag}:raw")), hash_value(det.hash_file(physical))],
     })
 }

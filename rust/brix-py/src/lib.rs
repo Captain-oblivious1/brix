@@ -151,10 +151,134 @@ impl Reporter for PyReporter {
     }
 }
 
+/// A JSON value as the equivalent Python object (via the `json` module — no
+/// extra conversion dependency; these cross rarely, not per-file).
+fn to_py_json<'py>(py: Python<'py>, value: &Value) -> PyResult<Bound<'py, PyAny>> {
+    py.import("json")?.call_method1("loads", (value.to_string(),))
+}
+
+/// A Python object as a JSON value. Errs on non-JSON-able objects — a
+/// custom store's entries must be plain data (documented in
+/// docs/boundary-schema.md); the cache layer treats the error as a miss.
+fn from_py_json(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Value> {
+    let text: String = py.import("json")?.call_method1("dumps", (obj,))?.extract()?;
+    serde_json::from_str(&text).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// The skin's custom content-identity plugins: `name -> (tag, digest)`
+/// resolved by the skin (Python's `identity` registry), with each `digest`
+/// a callable invoked per file across the boundary. A raising digest maps
+/// to `Err`, which the engine turns into the `tag:raw` byte-hash fallback —
+/// the same contract a Python-engine plugin has.
+struct PyCustomIdentities {
+    map: std::collections::HashMap<String, (String, Py<PyAny>)>,
+}
+
+impl brix_core::identity::CustomIdentities for PyCustomIdentities {
+    fn tag(&self, name: &str) -> Option<String> {
+        self.map.get(name).map(|(tag, _)| tag.clone())
+    }
+
+    fn digest(&self, name: &str, path: &std::path::Path) -> Result<String, String> {
+        let (_, digest) = self.map.get(name).ok_or_else(|| format!("unknown identity {name}"))?;
+        Python::attach(|py| {
+            digest
+                .call1(py, (path.to_string_lossy(),))
+                .and_then(|obj| obj.extract::<String>(py))
+                .map_err(|e| e.to_string())
+        })
+    }
+}
+
+/// A skin cache store behind the wire call shapes (`load` / `restore` /
+/// `store`, docs/boundary-schema.md). Entries cross as JSON; the store
+/// object itself is the skin-side shim (`engine._StoreShim`), which adapts
+/// these shapes back to the user's `CacheStoreProtocol` object. Any Python
+/// exception becomes `Err`, which the cache layer treats as a miss or a
+/// skipped populate — same resilience as a Python-engine store.
+struct PyCacheStore {
+    store: Py<PyAny>,
+}
+
+impl brix_core::cache::CacheStoreProtocol for PyCacheStore {
+    fn load(&self, fingerprint: &str) -> Result<Option<brix_core::cache::Entry>, String> {
+        Python::attach(|py| {
+            let entry = self
+                .store
+                .call_method1(py, "load", (fingerprint,))
+                .map_err(|e| e.to_string())?;
+            if entry.is_none(py) {
+                return Ok(None);
+            }
+            from_py_json(py, entry.bind(py)).map(Some).map_err(|e| e.to_string())
+        })
+    }
+
+    fn restore(
+        &self,
+        fingerprint: &str,
+        entry: &brix_core::cache::Entry,
+        ctx: &brix_core::NodeContext,
+    ) -> Result<bool, String> {
+        Python::attach(|py| {
+            let entry_obj = to_py_json(py, entry).map_err(|e| e.to_string())?;
+            let output_root = ctx.output_root.to_string_lossy();
+            self.store
+                .call_method1(py, "restore", (fingerprint, entry_obj, output_root))
+                .and_then(|ok| ok.extract::<bool>(py))
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    fn store(
+        &self,
+        fingerprint: &str,
+        result: &ProcessResult,
+        outputs: &std::collections::BTreeMap<String, std::path::PathBuf>,
+    ) -> Result<(), String> {
+        Python::attach(|py| {
+            let result_obj = to_py_json(
+                py,
+                &serde_json::to_value(result).expect("result serializes"),
+            )
+            .map_err(|e| e.to_string())?;
+            let outputs_obj: std::collections::BTreeMap<String, String> = outputs
+                .iter()
+                .map(|(logical, physical)| {
+                    (logical.clone(), physical.to_string_lossy().to_string())
+                })
+                .collect();
+            self.store
+                .call_method1(py, "store", (fingerprint, result_obj, outputs_obj))
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+    }
+}
+
+type IdentityMap = std::collections::HashMap<String, (String, Py<PyAny>)>;
+
+fn custom_identities(
+    identities: Option<IdentityMap>,
+) -> Option<std::sync::Arc<dyn brix_core::identity::CustomIdentities>> {
+    identities.map(|map| {
+        std::sync::Arc::new(PyCustomIdentities { map })
+            as std::sync::Arc<dyn brix_core::identity::CustomIdentities>
+    })
+}
+
 /// The layer stack from the config's `layers` list (innermost-first, like
 /// Python's `layers()`). The cache layer shares the incremental layer's
 /// detector when one is configured — the same wiring as `CacheBuilder`.
-fn build_layers(config: &Value, root: &str) -> Result<Vec<Box<dyn BuildLayer>>, String> {
+/// `stores[i]`, when set, is the skin store shim backing layer `i`;
+/// `custom` is the skin's `content_identity` extension, injected into every
+/// detector so fingerprints resolve custom identity names.
+fn build_layers(
+    config: &Value,
+    root: &str,
+    stores: &[Option<Py<PyAny>>],
+    custom: Option<std::sync::Arc<dyn brix_core::identity::CustomIdentities>>,
+) -> Result<Vec<Box<dyn BuildLayer>>, String> {
     let empty = Vec::new();
     let configs = match config.get("layers") {
         None | Some(Value::Null) => &empty,
@@ -173,11 +297,13 @@ fn build_layers(config: &Value, root: &str) -> Result<Vec<Box<dyn BuildLayer>>, 
             let metadata =
                 std::sync::Arc::new(BuildMetadata::with_directory(root, dir));
             metadata.load();
-            incremental = Some(IncrementalLayer::new(metadata));
+            let detector = brix_core::TimeAndHashChangeDetector::with_metadata(metadata.clone())
+                .with_custom_identities(custom.clone());
+            incremental = Some(IncrementalLayer::with_detector(metadata, detector));
         }
     }
     let mut layers: Vec<Box<dyn BuildLayer>> = Vec::new();
-    for entry in configs {
+    for (index, entry) in configs.iter().enumerate() {
         match entry.get("kind").and_then(|k| k.as_str()) {
             Some("incremental") => {
                 layers.push(Box::new(incremental.take().ok_or_else(|| {
@@ -185,20 +311,31 @@ fn build_layers(config: &Value, root: &str) -> Result<Vec<Box<dyn BuildLayer>>, 
                 })?));
             }
             Some("cache") => {
-                let dir = entry
-                    .get("cache_dir")
-                    .and_then(|d| d.as_str())
-                    .unwrap_or("build/.brix-cache");
                 let detector = incremental
                     .as_ref()
                     .map(|layer| layer.detector.clone())
-                    .unwrap_or_default();
-                let resolved =
-                    brix_core::cache::resolve_cache_dir(std::path::Path::new(root), dir);
-                layers.push(Box::new(CacheLayer::new(
-                    Box::new(CacheStore::new(resolved)),
-                    detector,
-                )));
+                    .unwrap_or_else(|| {
+                        brix_core::TimeAndHashChangeDetector::default()
+                            .with_custom_identities(custom.clone())
+                    });
+                let store: Box<dyn brix_core::cache::CacheStoreProtocol> =
+                    match stores.get(index).and_then(|s| s.as_ref()) {
+                        Some(shim) => Box::new(PyCacheStore {
+                            store: Python::attach(|py| shim.clone_ref(py)),
+                        }),
+                        None => {
+                            let dir = entry
+                                .get("cache_dir")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or("build/.brix-cache");
+                            let resolved = brix_core::cache::resolve_cache_dir(
+                                std::path::Path::new(root),
+                                dir,
+                            );
+                            Box::new(CacheStore::new(resolved))
+                        }
+                    };
+                layers.push(Box::new(CacheLayer::new(store, detector)));
             }
             Some("atomic") => {
                 let dir = entry
@@ -217,13 +354,18 @@ fn build_layers(config: &Value, root: &str) -> Result<Vec<Box<dyn BuildLayer>>, 
 /// Run one build. `spec_json` and `config_json` are the wire shapes from
 /// `docs/boundary-schema.md`; the return value is the BuildResult JSON
 /// (final plan included). `on_event` receives each event as a JSON string.
+/// `stores` (aligned with `config.layers`) carries skin cache-store shims;
+/// `identities` is the skin's `content_identity` extension as
+/// `{name: (tag, digest_callable)}` — both per the extension-trait shapes.
 #[pyfunction]
-#[pyo3(signature = (spec_json, config_json, on_event=None))]
+#[pyo3(signature = (spec_json, config_json, on_event=None, stores=None, identities=None))]
 fn build(
     py: Python<'_>,
     spec_json: &str,
     config_json: &str,
     on_event: Option<Py<PyAny>>,
+    stores: Option<Vec<Option<Py<PyAny>>>>,
+    identities: Option<IdentityMap>,
 ) -> PyResult<String> {
     let config: Value = serde_json::from_str(config_json)
         .map_err(|e| PyValueError::new_err(format!("bad config: {e}")))?;
@@ -240,7 +382,9 @@ fn build(
     let spec = brix_core::spec::parse(spec_json).map_err(PyValueError::new_err)?;
     let mut plan = brix_core::planner::plan_graph(spec.actions, &root, targets.as_deref())
         .map_err(PyValueError::new_err)?;
-    let layers = build_layers(&config, &root).map_err(PyValueError::new_err)?;
+    let custom = custom_identities(identities);
+    let layers = build_layers(&config, &root, &stores.unwrap_or_default(), custom)
+        .map_err(PyValueError::new_err)?;
     let layer_refs: Vec<&dyn BuildLayer> = layers.iter().map(|b| b.as_ref()).collect();
 
     let reporter: Option<PyReporter> =
@@ -299,8 +443,15 @@ fn parse_inspect_config(spec_json: &str, config_json: &str) -> PyResult<InspectC
 /// targets?}`. Raises ValueError where Python's `compute_status` raises
 /// (bad targets, unknown identity).
 #[pyfunction]
-fn status(py: Python<'_>, spec_json: &str, config_json: &str) -> PyResult<String> {
+#[pyo3(signature = (spec_json, config_json, identities=None))]
+fn status(
+    py: Python<'_>,
+    spec_json: &str,
+    config_json: &str,
+    identities: Option<IdentityMap>,
+) -> PyResult<String> {
     let cfg = parse_inspect_config(spec_json, config_json)?;
+    let custom = custom_identities(identities);
     let report = py
         .detach(|| {
             brix_core::status::compute_status(
@@ -309,6 +460,7 @@ fn status(py: Python<'_>, spec_json: &str, config_json: &str) -> PyResult<String
                 &cfg.metadata_dir,
                 &cfg.staging_dir,
                 cfg.targets.as_deref(),
+                custom,
             )
         })
         .map_err(PyValueError::new_err)?;

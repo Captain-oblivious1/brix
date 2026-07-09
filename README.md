@@ -904,6 +904,25 @@ build inputs that come from memory or a database instead of files, and a C++
   `tests/test_status.py`, same names — a cross-engine parity sweep, and
   new boundary-dispatch tests in `tests/test_rust_engine.py`.
 
+- **Rust port, phase 4b — extension traits: custom stores and identity
+  plugins cross the boundary** (`rust/brix-py/src/lib.rs`,
+  `src/brix/engine.py`, `builders.py`, `lowering.py`;
+  `rust/brix-core/src/identity.rs` gained the `CustomIdentities` seam
+  threaded through the change detector): the last two Python-engine
+  fallbacks are gone. A `CacheBuilder(store=...)` store rides the build
+  as the `cache_store` trait — the Rust cache layer calls its
+  `load`/`restore`/`store` back across the boundary (entries cross as
+  JSON; a store exception is a miss/skipped populate, never a failed
+  build), so the HTTP/two-tier cache tests now exercise the Rust engine
+  end-to-end. A custom `identity.register(...)` plugin rides as the
+  `content_identity` trait: the engine calls its `digest` per file (from
+  worker threads), caches under the same versioned tag, honors the
+  raise-means-`:raw` fallback, and an unregistered name raises before
+  anything runs. `supports_rust_engine` is gone — every graph crosses.
+  Wire contract notes in `docs/boundary-schema.md`. Suite: 209 both
+  engines (custom-store and custom-identity crossing tests included);
+  clippy clean.
+
 ## Design rules
 
 Settled — a fresh session should treat these as fixed unless Duane reopens

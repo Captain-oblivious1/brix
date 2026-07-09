@@ -98,7 +98,7 @@ fn build(root: &Path) {
 
 fn status(root: &Path) -> StatusReport {
     let spec = brix_core::spec::parse(&upper_combine_spec()).unwrap();
-    compute_status(spec.actions, root, "build/.brix", "build/staging", None).unwrap()
+    compute_status(spec.actions, root, "build/.brix", "build/staging", None, None).unwrap()
 }
 
 fn by_label(report: &StatusReport) -> HashMap<String, (String, String)> {

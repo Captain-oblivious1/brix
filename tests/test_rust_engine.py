@@ -240,21 +240,29 @@ def test_identity_replays_across_engines(tmp_path, monkeypatch):
     assert (tmp_path / "runs.log").read_text() == "copy\n"  # ran exactly once
 
 
-def test_custom_identity_falls_back(tmp_path, monkeypatch):
-    # A skin-registered plugin lives in Python; the core cannot call it, so
-    # the graph builds on the Python engine.
+def test_custom_identity_crosses_the_boundary(tmp_path, monkeypatch):
+    # A skin-registered plugin crosses as the content_identity extension
+    # trait: the Rust engine calls its digest back per file, and an
+    # impl-only change (same digest) replays instead of rerunning.
     monkeypatch.setenv("BRIX_ENGINE", "rust")
     from brix import identity
+
+    calls: list[str] = []
 
     class Custom:
         name = "my-abi"
         version = "1"
 
         def digest(self, path):
-            return "X"
+            calls.append(str(path))
+            # The identity: the first line only (the "API surface").
+            return path.read_text().splitlines()[0]
 
     identity.register(Custom())
     try:
+        (tmp_path / "dep.bin").write_text("api v1\nimpl detail\n")
+        (tmp_path / "tools").mkdir()
+        (tmp_path / "tools/copy.py").write_text(COPY_TOOL)
 
         def graph_with_custom():
             from brix import ExternalProcessAction, Graph
@@ -262,38 +270,99 @@ def test_custom_identity_falls_back(tmp_path, monkeypatch):
             graph = Graph()
             graph.add(
                 ExternalProcessAction(
-                    name="x",
-                    command_line="{f}",
-                    inputs={"f": graph.data.file("x.bin", identity="my-abi")},
-                    outputs={"out": graph.data.file("build/out")},
+                    name="use dep",
+                    command_line="{python} {tool} {f} {out}",
+                    inputs={
+                        "python": graph.data.tool(sys.executable),
+                        "tool": graph.data.file("tools/copy.py"),
+                        "f": graph.data.file("dep.bin", identity="my-abi"),
+                    },
+                    outputs={"out": graph.data.file("build/out.bin")},
                 )
             )
             return graph
 
         builder = IncrementalBuilder(graph_with_custom, root=tmp_path)
-        assert engine.maybe_build(builder) is None  # Python engine runs it
+        result = engine.maybe_build(builder)
+        assert result is not None and result.success
+        assert calls, "custom digest was never called through the Rust engine"
+
+        # Impl-only change: same first line -> same identity digest -> replay.
+        (tmp_path / "dep.bin").write_text("api v1\nreworked impl\n")
+        second = IncrementalBuilder(graph_with_custom, root=tmp_path).build()
+        assert all(r.source == "replayed" for r in second.process_results)
+        # API change -> rebuild.
+        (tmp_path / "dep.bin").write_text("api v2\nreworked impl\n")
+        third = IncrementalBuilder(graph_with_custom, root=tmp_path).build()
+        assert any(r.source == "process" for r in third.process_results)
     finally:
         identity._REGISTRY.pop("my-abi", None)
 
 
-def test_custom_store_falls_back(tmp_path, monkeypatch):
+def test_unregistered_identity_is_loud(tmp_path, monkeypatch):
     monkeypatch.setenv("BRIX_ENGINE", "rust")
 
-    class NullStore:
-        def load(self, fingerprint):
-            return None
+    def graph_with_typo():
+        from brix import ExternalProcessAction, Graph
 
-        def restore(self, fingerprint, entry, output_root):
-            return False
+        graph = Graph()
+        graph.add(
+            ExternalProcessAction(
+                name="x",
+                command_line="{f}",
+                inputs={"f": graph.data.file("x.bin", identity="no-such-identity")},
+                outputs={"out": graph.data.file("build/out")},
+            )
+        )
+        return graph
+
+    with pytest.raises(ValueError, match="no-such-identity"):
+        engine.maybe_build(IncrementalBuilder(graph_with_typo, root=tmp_path))
+
+
+def test_custom_store_crosses_the_boundary(tmp_path, monkeypatch):
+    # A custom store crosses as the cache_store extension trait: the Rust
+    # engine's cache layer calls its load/restore/store back across the
+    # boundary (per the wire shapes: restore gets an output-root string;
+    # store gets a result dict and {logical: physical} path strings).
+    monkeypatch.setenv("BRIX_ENGINE", "rust")
+    write_workspace(tmp_path, {"a": "hi"})
+
+    class RecordingStore:
+        def __init__(self):
+            self.loads, self.stored = [], {}
+
+        def load(self, fingerprint):
+            self.loads.append(fingerprint)
+            return self.stored.get(fingerprint)
+
+        def restore(self, fingerprint, entry, ctx):
+            for logical, text in entry["blobs"].items():
+                dest = ctx.output_root / logical
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(text)
+            return True
 
         def store(self, fingerprint, result, outputs):
-            pass
+            self.stored[fingerprint] = {
+                "result": {**result.__dict__, "source": "process"},
+                "blobs": {l: p.read_text() for l, p in outputs.items()},
+            }
 
-    builder = CacheBuilder(
-        IncrementalBuilder(make_graph, root=tmp_path), store=NullStore()
-    )
-    assert builder.layer_specs() is None
-    assert engine.maybe_build(builder) is None
+    store = RecordingStore()
+    builder = CacheBuilder(IncrementalBuilder(make_graph, root=tmp_path), store=store)
+    result = engine.maybe_build(builder)
+    assert result is not None and result.success
+    assert store.loads and store.stored  # consulted, then populated
+
+    # A fresh workspace restores from the same store object: cache source.
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    write_workspace(other, {"a": "hi"})
+    second = CacheBuilder(IncrementalBuilder(make_graph, root=other), store=store).build()
+    assert second.success
+    assert any(r.source == "cache" for r in second.process_results)
+    assert (other / "build/upper/a.txt").read_text() == "HI"
 
 
 def test_missing_extension_is_loud(tmp_path, monkeypatch):
@@ -325,19 +394,24 @@ def test_status_and_clean_cross_the_boundary(tmp_path, monkeypatch):
     assert not (tmp_path / "build/.brix").exists()
 
 
-def test_status_with_custom_identity_falls_back(tmp_path, monkeypatch):
+def test_status_with_custom_identity_crosses(tmp_path, monkeypatch):
+    # status fingerprints through the same content_identity extension.
     monkeypatch.setenv("BRIX_ENGINE", "rust")
     from brix import identity
+
+    calls: list[str] = []
 
     class Custom:
         name = "status-abi"
         version = "1"
 
         def digest(self, path):
+            calls.append(str(path))
             return "X"
 
     identity.register(Custom())
     try:
+        (tmp_path / "x.bin").write_text("data")
 
         def graph_with_custom():
             from brix import ExternalProcessAction, Graph
@@ -354,7 +428,11 @@ def test_status_with_custom_identity_falls_back(tmp_path, monkeypatch):
             return graph
 
         graph = graph_with_custom()
-        assert engine.maybe_status(graph, tmp_path, "build/.brix", "build/staging", None) is None
-        assert engine.maybe_clean(graph, tmp_path, "build/.brix") is None
+        raw = engine.maybe_status(graph, tmp_path, "build/.brix", "build/staging", None)
+        assert raw is not None
+        assert raw["actions"][0]["state"] == "never built"
+        result = IncrementalBuilder(graph_with_custom, root=tmp_path).build()
+        assert not result.success  # "{f}" isn't runnable; the digest still ran
+        assert calls, "custom digest was never called for status/build"
     finally:
         identity._REGISTRY.pop("status-abi", None)

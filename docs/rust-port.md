@@ -410,8 +410,16 @@ CLI/status stay in Python but depend on core answers:
    `shared=` / `overlaps_shared`), because recursive-by-default
    `{video}` otherwise splits `out/{video}.mpg` vs
    `out/{video}/{scene}.mpg` two ways and fabricates a
-   combine↔finalize cycle. Remaining: one release of soak, then the
-   deletion.
+   combine↔finalize cycle.
+   *Phase 4a is DONE*: `status` and `clean` call the core (see the
+   Decisions list below).
+   *Phase 4b is DONE*: the `cache_store` and `content_identity`
+   extension traits are live — custom Python stores and skin-registered
+   identity plugins cross the boundary as callables the core invokes
+   (shapes + contract notes in `docs/boundary-schema.md`), so nothing
+   falls back to the Python engine anymore except a missing extension
+   under the *default*. Remaining: one release of soak, then the
+   deletion (4c).
 
 Phases 1–2 are safe for a cheaper model working alone against the golden
 tests. Phase 3 is where the do-not-reinterpret list matters most —

@@ -165,6 +165,22 @@ content_identity:  name, version, digest(path) -> str
 dependency_scanner (future): scan(node, result) -> [logical_path]
 ```
 
+`cache_store` and `content_identity` are implemented (phase 4b): a
+custom store or plugin rides `build`/`status` as callables the core
+invokes across the boundary. Contract notes, binding for every skin:
+paths cross as strings; a store's `entry` must be plain JSON-able data
+(an entry that isn't serializes to an error, which the cache layer
+treats as a miss); `restore`'s third argument is the output root — the
+Python skin wraps it in an output-root-only context for existing
+`CacheStoreProtocol` stores, and no richer context crosses; a raising
+`digest` means "cannot interpret this file" and falls back to `tag:raw`
+byte hashing, while an *unregistered* identity name is a loud error
+before anything runs. Callbacks arrive on build worker threads, and an
+exception from a store is a cache miss / skipped populate, never a
+failed build — the same resilience contract the layers have in-process.
+`change_detector` has no skin-side seam yet; `dependency_scanner`
+remains future.
+
 ---
 
 # The TS mirror API

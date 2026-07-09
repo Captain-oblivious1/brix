@@ -162,6 +162,15 @@ pub struct IncrementalLayer {
 impl IncrementalLayer {
     pub fn new(metadata: std::sync::Arc<BuildMetadata>) -> Self {
         let detector = TimeAndHashChangeDetector::with_metadata(metadata.clone());
+        Self::with_detector(metadata, detector)
+    }
+
+    /// A layer over a caller-built detector — how the boundary injects the
+    /// skin's `content_identity` extension into fingerprinting.
+    pub fn with_detector(
+        metadata: std::sync::Arc<BuildMetadata>,
+        detector: TimeAndHashChangeDetector,
+    ) -> Self {
         IncrementalLayer { metadata, detector, pending_memberships: Mutex::new(HashMap::new()) }
     }
 

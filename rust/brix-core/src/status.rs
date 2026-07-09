@@ -157,12 +157,14 @@ pub fn compute_status(
     metadata_dir: &str,
     staging_dir: &str,
     targets: Option<&[String]>,
+    custom_identities: Option<std::sync::Arc<dyn crate::identity::CustomIdentities>>,
 ) -> Result<StatusReport, String> {
     let root_str = root.to_string_lossy().to_string();
     let plan = plan_graph(actions, &root_str, targets)?;
     let metadata = BuildMetadata::with_directory(root, metadata_dir);
     metadata.load();
-    let det = TimeAndHashChangeDetector::with_metadata(std::sync::Arc::new(metadata));
+    let det = TimeAndHashChangeDetector::with_metadata(std::sync::Arc::new(metadata))
+        .with_custom_identities(custom_identities);
     // The detector owns the metadata handle now; keep a reader for records.
     let metadata = det.metadata.as_ref().unwrap().clone();
     let mut ctx = NodeContext::for_root(root);

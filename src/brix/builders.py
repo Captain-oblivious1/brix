@@ -185,8 +185,13 @@ class CacheBuilder:
 
     def layer_specs(self) -> list[dict] | None:
         inner = self.inner.layer_specs()
-        if inner is None or self._store is not None:
-            return None  # a Python store object can't cross the boundary
+        if inner is None:
+            return None
+        if self._store is not None:
+            # The live store object rides the spec; the engine boundary
+            # lifts it out and sends it across as the cache_store extension
+            # trait (docs/boundary-schema.md) — the core calls back into it.
+            return [{"kind": "cache", "store": self._store}, *inner]
         return [{"kind": "cache", "cache_dir": str(self.cache_dir)}, *inner]
 
     def build(self, jobs: int | None = None, reporter=None,
