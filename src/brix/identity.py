@@ -15,6 +15,13 @@ stored, staged, restored, and compared for output-intactness still uses bytes
 The versioned tag ``<name>@<version>`` is part of the fingerprint payload, so
 bumping a plugin's ``version`` cleanly invalidates everything it fingerprinted.
 Bump it on **any** change to extraction or normalization.
+
+The built-ins (``jvm-abi``, ``ts-dts``) are also implemented in the Rust core
+(`rust/brix-core/src/identity.rs`) so every skin gets them; the digests are
+cross-engine cache keys, so the Python code here remains the **reference
+implementation**, and a version bump in one implementation must land in both.
+A *custom* plugin registered here exists only in this skin — graphs using one
+stay on the Python engine (`lowering.supports_rust_engine`).
 """
 
 from __future__ import annotations

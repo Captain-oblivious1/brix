@@ -1,5 +1,7 @@
 # Brix
 
+test
+
 A build-system toolkit: define build graphs in ordinary Python while the
 engine handles planning, dependency inference, and parallel execution.
 
@@ -137,11 +139,14 @@ below is tagged with the model that should do it.
    a staging area, including the held-for-review flow), the
    Python↔Rust boundary itself (set `BRIX_ENGINE=rust` and every
    builder's `build()` runs on the Rust engine — same graph, same
-   progress events, same results), and now persistent workers (the
+   progress events, same results), persistent workers (the
    warm-compiler transport that makes Java builds fast runs in Rust
-   too, so worker-routed builds cross the boundary). **What's left:
-   the content-identity plugins** (the one remaining fallback case),
-   and then switching brix to run on the Rust engine by default.
+   too, so worker-routed builds cross the boundary), and now the
+   built-in content identities (`jvm-abi` and `ts-dts` produce
+   byte-identical digests in Rust, so Java/TS graphs cross the
+   boundary too — only a hand-registered custom identity plugin still
+   falls back to Python). **What's left: switching brix to run on the
+   Rust engine by default.**
    **[Fable]** — the trickiest part of the whole project; one subtle ordering
    bug here breaks builds, so it needs the most careful model reviewing it
    line by line.
@@ -817,6 +822,27 @@ build inputs that come from memory or a database instead of files, and a C++
   tests included); the suite is 197 on both engines, `cargo test` 18
   unit + 9 golden + 63 behavioral, clippy clean. Content-identity
   plugins are the last fallback before the default flip.
+
+- **Rust port, phase 3 slice 8 — built-in content identities**
+  (`rust/brix-core/src/jvmabi.rs`, `tsdts.rs`, `identity.rs`): the
+  `jvm-abi` and `ts-dts` plugins are implemented in the core, so every
+  skin — the future JS/TS one included — gets ABI-fingerprinted Java/TS
+  builds without calling back into Python per file. Byte-identical
+  digests: `rust/brix-core/tests/identity.rs` (the mirror of
+  `tests/test_content_identity.py` + `tests/test_ts_dts_identity.py`)
+  asserts the exact digests Python pins over the same committed `.class`
+  fixtures, and the fingerprint tail (`["jvm-abi@1", digest]`, or
+  `["jvm-abi@1:raw", byte_hash]` when a file can't be parsed) is
+  golden-pinned. Identity digests cache in `metadata.json` under their
+  versioned tag, interoperably with Python-written entries. Python stays
+  the reference implementation — an algorithm change bumps the version
+  tag in *both* implementations (docs/boundary-schema.md). The engine
+  fallback narrowed accordingly: only a custom skin-registered identity
+  keeps a graph on the Python engine, and `tests/test_rust_engine.py`
+  now proves a Python-engine build replays as all-fresh on the Rust
+  engine through shared metadata. Suite is 199 on both engines,
+  `cargo test` 21 unit + 9 golden + 81 behavioral, clippy clean. Phase 3
+  is complete; next is the `BRIX_ENGINE` default flip.
 
 ## Design rules
 

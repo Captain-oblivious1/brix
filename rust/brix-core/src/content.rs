@@ -13,12 +13,13 @@
 //!
 //! Also ported: the `worker` toolchain leg — a worker's launch command and
 //! inputs join the fingerprint exactly like Python's (a JDK upgrade or a
-//! rebuilt worker jar invalidates everything that worker built).
-//!
-//! Deliberately *not* ported (returns an error so a caller can never get a
-//! silently-wrong key): `identity=` (content-identity plugins like `jvm-abi`)
-//! — they need the plugin registry, which lives in Python. This is the
-//! fingerprint's remaining tail, tracked in the README.
+//! rebuilt worker jar invalidates everything that worker built) — and the
+//! built-in `identity=` content identities (`jvm-abi`, `ts-dts`): the
+//! fingerprint tail is `[tag, digest]` (e.g. `["jvm-abi@1", "<hex>"]`), or
+//! `[tag:raw, byte_hash]` when the plugin cannot interpret the file. An
+//! identity name the core does not know still returns an error (a custom
+//! skin-registered plugin — the skin's engine owns those graphs), so a
+//! caller can never get a silently-wrong key.
 
 use std::collections::BTreeMap;
 
@@ -36,6 +37,25 @@ fn hash_value(h: Option<String>) -> Value {
     }
 }
 
+/// The fingerprint tail for a file carrying a content identity: `[tag,
+/// digest]`, or `[tag:raw, byte_hash]` when the plugin cannot interpret the
+/// file (mirrors `_identity_material`). Deterministic for the same bytes, so
+/// a cross-machine disagreement can only miss, never make a stale hit. An
+/// unknown identity name errors loudly (before the fallback).
+fn identity_material(
+    name: &str,
+    physical: &std::path::Path,
+    det: &TimeAndHashChangeDetector,
+) -> Result<[Value; 2], String> {
+    let Some(tag) = crate::identity::tag(name) else {
+        return Err(format!("unknown content identity '{name}' (not a built-in)"));
+    };
+    Ok(match det.identity_digest(physical, name) {
+        Ok(digest) => [Value::str(tag), hash_value(digest)],
+        Err(_) => [Value::str(format!("{tag}:raw")), hash_value(det.hash_file(physical))],
+    })
+}
+
 fn atom_fp(
     atom: &DataAtom,
     ctx: &NodeContext,
@@ -43,10 +63,11 @@ fn atom_fp(
 ) -> Result<Value, String> {
     match atom {
         DataAtom::File { path, identity } => {
-            if identity.is_some() {
-                return Err(format!("content-identity atoms are not ported: file {path}"));
-            }
             let physical = ctx.read_path(path);
+            if let Some(name) = identity {
+                let [tag, digest] = identity_material(name, &physical, det)?;
+                return Ok(Value::List(vec![Value::str("file"), Value::str(path), tag, digest]));
+            }
             Ok(Value::List(vec![
                 Value::str("file"),
                 Value::str(path),
@@ -54,17 +75,17 @@ fn atom_fp(
             ]))
         }
         DataAtom::Glob { template, identity } => {
-            if identity.is_some() {
-                return Err(format!("content-identity atoms are not ported: glob {template}"));
-            }
             let pattern = PathPattern::new(template)?;
-            let entries = ctx
-                .find(&pattern)
-                .into_iter()
-                .map(|(logical, physical, _)| {
-                    Value::List(vec![Value::str(&logical), hash_value(det.hash_file(&physical))])
-                })
-                .collect();
+            let mut entries = Vec::new();
+            for (logical, physical, _) in ctx.find(&pattern) {
+                entries.push(Value::List(match identity {
+                    Some(name) => {
+                        let [tag, digest] = identity_material(name, &physical, det)?;
+                        vec![Value::str(&logical), tag, digest]
+                    }
+                    None => vec![Value::str(&logical), hash_value(det.hash_file(&physical))],
+                }));
+            }
             Ok(Value::List(vec![
                 Value::str("glob"),
                 Value::str(template),

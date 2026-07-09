@@ -376,6 +376,26 @@ CLI/status stay in Python but depend on core answers:
    `tests/test_workers.py` (same cases, same names). With workers
    crossing, `tests/test_java_worker.py` also runs on the Rust engine
    under `BRIX_ENGINE=rust`.
+   *Slice 8 — built-in content identities — is DONE*: `jvmabi.rs` and
+   `tsdts.rs` mirror `jvmabi.py`/`tsdts.py`, registered under the same
+   versioned tags (`jvm-abi@1`, `ts-dts@1`) in `identity.rs`; the
+   fingerprint tail (`[tag, digest]`, or `[tag:raw, byte_hash]` when the
+   plugin errors) is byte-identical (golden-pinned over the committed
+   `tests/fixtures/jvmabi` class bytes; `rust/brix-core/tests/identity.rs`
+   asserts the exact digests pinned in `tests/test_content_identity.py`).
+   Identity digests are cached in `metadata.json` under their tag with
+   the same stat-signature validation as byte hashes, interoperably with
+   Python-written entries. **Python remains the reference
+   implementation**: an algorithm change is a version bump, and a bump
+   in one implementation must land in both (the tag joins the cache
+   key, so an unsynchronized bump splits the cache, never corrupts it).
+   Where Python's polymorphic sort would raise on malformed class files,
+   Rust uses a total type-rank order — a divergence there can only cause
+   a rebuild, never a stale hit. `supports_rust_engine` narrowed: only a
+   *custom* skin-registered identity (not `jvm-abi`/`ts-dts`) falls back
+   to the Python engine now, and `tests/test_rust_engine.py` proves a
+   Python-engine build replays byte-for-byte on the Rust engine through
+   shared metadata.
 4. **Flip the default**, keep `BRIX_ENGINE=py` working one release,
    verify the animation project (full dryRun cycle, targeted builds,
    clean-then-cache-restore, `view`), then delete the Python engine
@@ -418,14 +438,14 @@ evolved into `keys.rs` / `content.rs` / `detector.rs` rather than one
 `fingerprint.rs` + `metadata.rs`.
 
 **Deferred tail** (the port *errors* on these rather than emit a possibly
-wrong key): `identity=` content-identity plugins (`jvm-abi`), which need
-the Python plugin registry. `tool` atoms and the `metadata.json`
-hash-cache landed with phase-3 slice 3; the cache-store layout with
-slice 4; the `worker` toolchain leg with slice 7.
+wrong key): *custom* skin-registered content-identity plugins, which live
+in the skin's runtime (graphs using one fall back to the Python engine).
+`tool` atoms and the `metadata.json` hash-cache landed with phase-3
+slice 3; the cache-store layout with slice 4; the `worker` toolchain leg
+with slice 7; the built-in identities (`jvm-abi`, `ts-dts`) with slice 8.
 
-**Remaining for phase 3:** `identity=` plugins (currently fall back to
-the Python engine under `BRIX_ENGINE=rust`) — then the `BRIX_ENGINE`
-default flip.
+**Remaining for phase 3:** nothing — phase 3 is complete. Next is the
+`BRIX_ENGINE` default flip (phase 4).
 
 ## Decisions (were open questions; settled — do not reopen during the port)
 

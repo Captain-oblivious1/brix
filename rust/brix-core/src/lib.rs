@@ -21,7 +21,9 @@ pub mod detector;
 pub mod executor;
 pub mod fingerprint;
 pub mod fsutil;
+pub mod identity;
 pub mod incremental;
+pub mod jvmabi;
 pub mod keys;
 pub mod layers;
 pub mod metadata;
@@ -34,6 +36,7 @@ pub mod report;
 pub mod shlex;
 pub mod spec;
 pub mod targets;
+pub mod tsdts;
 pub mod workers;
 
 pub use actions::{Action, WorkerSpec};

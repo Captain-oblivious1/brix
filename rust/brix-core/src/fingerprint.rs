@@ -25,6 +25,9 @@ pub enum Value {
     Null,
     Bool(bool),
     Int(i64),
+    /// Python ints are unbounded; this covers the 64-bit unsigned values the
+    /// payloads actually carry (raw IEEE-754 double bits in `jvm-abi`).
+    UInt(u64),
     Str(String),
     List(Vec<Value>),
     Map(BTreeMap<String, Value>),
@@ -62,6 +65,7 @@ fn write_value(out: &mut String, value: &Value) {
         Value::Bool(true) => out.push_str("true"),
         Value::Bool(false) => out.push_str("false"),
         Value::Int(n) => out.push_str(&n.to_string()),
+        Value::UInt(n) => out.push_str(&n.to_string()),
         Value::Str(s) => write_string(out, s),
         Value::List(items) => {
             out.push('[');

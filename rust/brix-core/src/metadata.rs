@@ -132,6 +132,27 @@ impl BuildMetadata {
         });
     }
 
+    /// A cached content-identity digest under its versioned tag (e.g.
+    /// `jvm-abi@1`) — same stat validation as the byte hash, so an unchanged
+    /// file costs one stat whether it is byte- or identity-hashed.
+    pub fn cached_identity(&self, path_key: &str, signature: &[i64], tag: &str) -> Option<String> {
+        self.section("files", |files| {
+            let entry = files.get(path_key)?.as_object()?;
+            if entry.get("sig") == Some(&sig_value(signature)) {
+                entry.get(tag)?.as_str().map(str::to_string)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn store_identity(&self, path_key: &str, signature: &[i64], tag: &str, digest: &str) {
+        self.section_mut("files", |files| {
+            let entry = entry_for(files, path_key, signature);
+            entry.insert(tag.to_string(), Value::String(digest.to_string()));
+        });
+    }
+
     // -- action records --------------------------------------------------------
 
     pub fn action_record(&self, key: &str) -> Option<Value> {

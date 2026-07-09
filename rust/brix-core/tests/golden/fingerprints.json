@@ -22,5 +22,21 @@
   {
     "spec": "{\"kind\": \"process\", \"command_line\": \"compile {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"worker routed\", \"worker\": {\"name\": \"w\", \"command_line\": \"run {jar}\", \"inputs\": {\"jar\": [{\"kind\": \"file\", \"path\": \"tools/upper.py\"}]}}}",
     "fingerprint": "a66bc1166879e7a925a65d0b137e609a70b2cbe1692f559fa9958c488f7c1120"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"javac -cp {cp} App.java\", \"inputs\": {\"cp\": [{\"kind\": \"file\", \"path\": \"lib/Lib.class\", \"identity\": \"jvm-abi\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/App.class\"}]}, \"name\": \"jvm-abi class file\"}",
+    "fingerprint": "651ec0194ecf0cd123016e311508c967da66d1011f7cf7d4aee9011fd81f61ea"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"javac -cp {cp} App.java\", \"inputs\": {\"cp\": [{\"kind\": \"file\", \"path\": \"lib/util.jar\", \"identity\": \"jvm-abi\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/App.class\"}]}, \"name\": \"jvm-abi jar\"}",
+    "fingerprint": "bfda3aba35388bf33633f8f936df8109a7496cbf8d109c10f1d6eb1de003947e"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"javac -cp {cp} App.java\", \"inputs\": {\"cp\": [{\"kind\": \"glob\", \"template\": \"lib/{n}.jar\", \"identity\": \"jvm-abi\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/App.class\"}]}, \"name\": \"jvm-abi glob with raw fallback\"}",
+    "fingerprint": "af350000c710a7e0ced0ac701a219c2bc3ea45f2d489a8a18391d54e1adc7e8f"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"tsc -p .\", \"inputs\": {\"api\": [{\"kind\": \"file\", \"path\": \"lib/api.d.ts\", \"identity\": \"ts-dts\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/consumer.js\"}]}, \"name\": \"ts-dts\"}",
+    "fingerprint": "25d2c30aab4c7727b1fed3fa3417848d120304fa8648d25bf20d8228a591be05"
   }
 ]

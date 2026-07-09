@@ -66,6 +66,31 @@ impl TimeAndHashChangeDetector {
         }
         hash_bytes(path)
     }
+
+    /// The content-identity digest of a file, cached like `hash_file` and
+    /// validated by the same stat signature (mirrors `identity_digest`).
+    /// `Ok(None)` if missing or not a regular file; `Err` propagates the
+    /// plugin's error on a file it cannot interpret — the caller decides the
+    /// fallback (`:raw`). `name` must be a built-in (`identity::tag`).
+    pub fn identity_digest(&self, path: &Path, name: &str) -> Result<Option<String>, String> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let Some(sig) = self.stat_signature(path) else {
+            return Ok(None);
+        };
+        let tag = crate::identity::tag(name).expect("caller gates on identity::tag");
+        if let Some(meta) = &self.metadata {
+            let key = path.to_string_lossy();
+            if let Some(cached) = meta.cached_identity(&key, &sig, tag) {
+                return Ok(Some(cached));
+            }
+            let digest = crate::identity::digest(name, path)?; // caller falls back to :raw
+            meta.store_identity(&key, &sig, tag, &digest);
+            return Ok(Some(digest));
+        }
+        crate::identity::digest(name, path).map(Some)
+    }
 }
 
 fn hash_bytes(path: &Path) -> Option<String> {

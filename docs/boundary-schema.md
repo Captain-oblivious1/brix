@@ -44,7 +44,17 @@ uses Python-compatible named groups (the core must match Python's `re`
 semantics for the subset used: named groups, character classes,
 quantifiers — no lookbehind is promised). `identity` names a registered
 content-identity plugin (`docs/java-fast-builds.md`); absent means byte
-hashing. `depfile` is the logical path of a Makefile-format dependency
+hashing. The built-ins (`jvm-abi`, `ts-dts`) are implemented in the core
+so every skin gets them; a name the core does not know is a loud error
+there, and a skin whose graph uses a custom skin-registered plugin must
+keep that graph on its own engine (the Python skin's
+`supports_rust_engine` does exactly this). The digests are cross-engine
+cache keys, so the Python implementations (`src/brix/jvmabi.py`,
+`src/brix/tsdts.py`) remain the reference: an algorithm change is a
+version bump in the plugin's tag (`jvm-abi@1`), and a bump in one
+implementation must land in both — the tag joins the cache key, so an
+unsynchronized bump splits the cache rather than corrupting it, but it
+must not happen. `depfile` is the logical path of a Makefile-format dependency
 file the tool writes (`cc -MMD -MF`), scanned by the incremental layer
 after a successful run; it is not identity (never part of `action_key`).
 It was always part of the Python `ExternalProcessAction` but was missing

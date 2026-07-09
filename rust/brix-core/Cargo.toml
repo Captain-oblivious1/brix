@@ -9,6 +9,9 @@ sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
+# Jar reading for the jvm-abi content identity (jvmabi.rs). Deflate only —
+# jars are plain zip archives; no encryption/zstd/etc.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"  # SIGTERM for graceful worker teardown (workers.rs)

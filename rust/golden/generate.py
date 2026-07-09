@@ -390,8 +390,11 @@ def gen_regex():
 # The tree is written here and committed, so the Rust tests read the identical
 # bytes: content hashing is sha256-of-bytes, which is mtime-independent, so a
 # git checkout (which resets mtimes) reproduces the same digests. Fixtures use
-# only file/glob/regex/value atoms — no tool (PATH/mtime), identity (plugin), or
-# worker — so every value is fully determined by the tree's bytes and layout.
+# file/glob/regex/value atoms plus the built-in identities — no tool atoms
+# (PATH/mtime) — so every value is fully determined by the tree's bytes and
+# layout. The identity fixtures reuse the committed .class bytes from
+# tests/fixtures/jvmabi (javac output is not byte-deterministic, so they are
+# checked in, never rebuilt here) and a jar written with a fixed zip timestamp.
 
 TREE_ROOT = ROOT / "rust" / "golden" / "tree"
 
@@ -401,14 +404,31 @@ TREE = {
     "src/nested/c.txt": "gamma\n",
     "src/notes.md": "notes\n",
     "tools/upper.py": "print('x')\n",
+    # ts-dts: comments and formatting are normalized away, so the digest is a
+    # function of the declaration text alone.
+    "lib/api.d.ts": "// public API\nexport declare function greet(name: string): string;\n",
+    # jvm-abi on a file the plugin cannot parse: the fingerprint must carry the
+    # `jvm-abi@1:raw` byte-hash fallback, pinned here.
+    "lib/notajar.jar": "not a jar at all\n",
 }
+
+JVMABI_FIXTURE = ROOT / "tests" / "fixtures" / "jvmabi" / "base.class"
 
 
 def write_tree():
+    import zipfile
+
     for rel, content in TREE.items():
         path = TREE_ROOT / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+    class_bytes = JVMABI_FIXTURE.read_bytes()
+    (TREE_ROOT / "lib" / "Lib.class").write_bytes(class_bytes)
+    # A fixed zip timestamp makes the jar's bytes (and so its byte hash, used
+    # by non-identity paths) reproducible; the ABI digest ignores it anyway.
+    with zipfile.ZipFile(TREE_ROOT / "lib" / "util.jar", "w") as z:
+        info = zipfile.ZipInfo("abidemo/Lib.class", date_time=(1980, 1, 1, 0, 0, 0))
+        z.writestr(info, class_bytes)
 
 
 FIND_TEMPLATES = [
@@ -448,12 +468,13 @@ def gen_fs():
 
 # -- content fingerprint: action_fingerprint over the fixture tree -----------
 #
-# Only file/glob/regex/value/union atoms, env, and a file-input worker — no
-# tool/identity — so the fingerprint is fully determined by the tree's bytes
-# (tool atoms carry machine-specific stat signatures; identity atoms make the
-# Rust port error rather than guess). `outputs` are present on the actions but
-# never enter the fingerprint. The worker case pins the worker section's
-# byte-parity: fingerprints are cache keys shared across engines.
+# File/glob/regex/value/union atoms, env, a file-input worker, and the
+# built-in identities (`jvm-abi`, `ts-dts`) — no tool atoms, which carry
+# machine-specific stat signatures — so the fingerprint is fully determined
+# by the tree's bytes. `outputs` are present on the actions but never enter
+# the fingerprint. The worker and identity cases pin those sections'
+# byte-parity: fingerprints are cache keys shared across engines, so the
+# Rust ABI digests must agree with Python's to the byte.
 
 
 def gen_fingerprints():
@@ -508,6 +529,32 @@ def gen_fingerprints():
             ),
             inputs={"src": d.file("src/a.txt")},
             outputs={"out": d.file("build/a.o")},
+        ),
+        ExternalProcessAction(
+            name="jvm-abi class file",
+            command_line="javac -cp {cp} App.java",
+            inputs={"cp": d.file("lib/Lib.class", identity="jvm-abi")},
+            outputs={"out": d.file("build/App.class")},
+        ),
+        ExternalProcessAction(
+            name="jvm-abi jar",
+            command_line="javac -cp {cp} App.java",
+            inputs={"cp": d.file("lib/util.jar", identity="jvm-abi")},
+            outputs={"out": d.file("build/App.class")},
+        ),
+        ExternalProcessAction(
+            name="jvm-abi glob with raw fallback",
+            # Matches util.jar (ABI digest) and notajar.jar (`:raw` byte hash)
+            # in one expression: both identity tails in a single fingerprint.
+            command_line="javac -cp {cp} App.java",
+            inputs={"cp": d.glob("lib/{n}.jar", identity="jvm-abi")},
+            outputs={"out": d.file("build/App.class")},
+        ),
+        ExternalProcessAction(
+            name="ts-dts",
+            command_line="tsc -p .",
+            inputs={"api": d.file("lib/api.d.ts", identity="ts-dts")},
+            outputs={"out": d.file("build/consumer.js")},
         ),
     ]
     return [
