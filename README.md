@@ -1,5 +1,7 @@
 # Brix
 
+git test
+
 A build-system toolkit: define build graphs in ordinary Python while the
 engine handles planning, dependency inference, and parallel execution.
 
