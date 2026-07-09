@@ -155,6 +155,68 @@ def _result_from_json(text: str, root: Path) -> "BuildResult":
     )
 
 
+def _engine_for(graph) -> "object | None":
+    """The extension module if the Rust engine should handle this graph,
+    else None (Python engine). Shared dispatch: honors BRIX_ENGINE, the
+    missing-extension rules, and the custom-identity fallback."""
+    if not rust_requested():
+        return None
+    module = _extension()
+    if module is None:
+        if os.environ.get("BRIX_ENGINE") == "rust":
+            raise RuntimeError(
+                "BRIX_ENGINE=rust but the brix_py extension was not found; "
+                "build it with `cargo build -p brix-py` (or set BRIX_RUST_ENGINE_LIB)"
+            )
+        return None  # defaulted, no extension: a pure-Python install still works
+    from . import lowering
+
+    if not lowering.supports_rust_engine(graph):
+        return None  # custom skin-registered identity: Python engine owns it
+    return module
+
+
+def maybe_status(
+    graph,
+    root: Path,
+    metadata_dir,
+    staging_dir,
+    targets: list[str] | None,
+) -> dict | None:
+    """`compute_status` through the core: the parsed StatusReport wire dict,
+    or None to run the Python implementation. Raises what the Python
+    implementation would raise (bad targets, unknown identity: ValueError)."""
+    module = _engine_for(graph)
+    if module is None:
+        return None
+    from . import lowering
+
+    config = {
+        "root": str(root),
+        "metadata_dir": str(metadata_dir),
+        "staging_dir": str(staging_dir),
+        "targets": targets,
+    }
+    return json.loads(
+        module.status(json.dumps(lowering.graph_to_spec(graph)), json.dumps(config))
+    )
+
+
+def maybe_clean(graph, root: Path, metadata_dir) -> int | None:
+    """The CLI's `clean` through the core: files removed, or None to run the
+    Python implementation."""
+    module = _engine_for(graph)
+    if module is None:
+        return None
+    from . import lowering
+
+    config = {"root": str(root), "metadata_dir": str(metadata_dir)}
+    raw = json.loads(
+        module.clean(json.dumps(lowering.graph_to_spec(graph)), json.dumps(config))
+    )
+    return int(raw["removed"])
+
+
 def maybe_build(
     builder,
     jobs: int | None = None,
@@ -166,22 +228,15 @@ def maybe_build(
     Python engine (not requested, or the graph/builder can't cross yet)."""
     if not rust_requested():
         return None
-    module = _extension()
+    graph = builder.source_graph()
+    module = _engine_for(graph)
     if module is None:
-        if os.environ.get("BRIX_ENGINE") == "rust":
-            raise RuntimeError(
-                "BRIX_ENGINE=rust but the brix_py extension was not found; "
-                "build it with `cargo build -p brix-py` (or set BRIX_RUST_ENGINE_LIB)"
-            )
-        return None  # defaulted, no extension: a pure-Python install still builds
+        return None
     specs = builder.layer_specs(hold=hold) if hold is not None else builder.layer_specs()
     if specs is None:
         return None  # a custom Python store can't cross; Python engine runs it
     from . import lowering
 
-    graph = builder.source_graph()
-    if not lowering.supports_rust_engine(graph):
-        return None  # identity plugins are still Python-side
     spec_json = json.dumps(lowering.graph_to_spec(graph))
     config_json = json.dumps(
         {"root": str(builder.root), "jobs": jobs, "targets": targets, "layers": specs}

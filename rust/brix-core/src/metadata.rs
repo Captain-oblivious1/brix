@@ -159,6 +159,12 @@ impl BuildMetadata {
         self.section("actions", |actions| actions.get(key).cloned())
     }
 
+    /// Every action record (mirrors `action_records` — `clean` collects the
+    /// recorded outputs of actions the current graph no longer declares).
+    pub fn action_records(&self) -> Map<String, Value> {
+        self.section("actions", |actions| actions.clone())
+    }
+
     pub fn record_action(&self, key: &str, record: Value) {
         self.section_mut("actions", |actions| {
             actions.insert(key.to_string(), record);

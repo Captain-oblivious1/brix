@@ -146,8 +146,9 @@ fn atom_repr(atom: &DataAtom) -> String {
 }
 
 /// Realize the collection (through the overlay) and return sorted unique
-/// element bindings (mirrors `_collection_members`).
-fn collection_members(action: &Action, ctx: &NodeContext) -> Result<Vec<String>, String> {
+/// element bindings (mirrors `_collection_members`). Also used by `status`,
+/// which asks "what are the members right now?" without executing.
+pub(crate) fn collection_members(action: &Action, ctx: &NodeContext) -> Result<Vec<String>, String> {
     let Action::Expand { element, collection, .. } = action else { unreachable!() };
     let mut members: Vec<String> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();

@@ -55,7 +55,11 @@ pub fn scan_depfile(path: &Path) -> Vec<String> {
 /// Reads through the overlay: an output produced earlier in this build lives
 /// in staging; one committed by a previous build lives in the workspace.
 /// Either satisfies freshness. Mirrors `outputs_intact`.
-fn outputs_intact(record: &Value, ctx: &NodeContext, det: &TimeAndHashChangeDetector) -> bool {
+pub(crate) fn outputs_intact(
+    record: &Value,
+    ctx: &NodeContext,
+    det: &TimeAndHashChangeDetector,
+) -> bool {
     let Some(outputs) = record.get("outputs").and_then(|o| o.as_object()) else {
         return true; // absent key: Python's .get("outputs", {}) — nothing to check
     };

@@ -204,6 +204,13 @@ def _clean(graph_supplier, root: Path, metadata_dir: str | Path) -> int:
     """Delete declared outputs (concrete and currently realized), every
     output recorded in metadata, and the metadata store itself."""
     graph = graph_supplier() if callable(graph_supplier) else graph_supplier
+
+    from . import engine
+
+    removed = engine.maybe_clean(graph, root, metadata_dir)
+    if removed is not None:
+        return removed
+
     plan = plan_graph(graph, root)
     metadata = BuildMetadata(root, metadata_dir)
     metadata.load()

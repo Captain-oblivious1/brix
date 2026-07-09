@@ -302,3 +302,59 @@ def test_missing_extension_is_loud(tmp_path, monkeypatch):
     builder = IncrementalBuilder(make_graph, root=tmp_path)
     with pytest.raises(RuntimeError, match="brix_py extension was not found"):
         engine.maybe_build(builder)
+
+
+def test_status_and_clean_cross_the_boundary(tmp_path, monkeypatch):
+    # compute_status and the CLI's clean are thin clients over core calls
+    # (docs/rust-port.md: "status and clean call the core").
+    monkeypatch.setenv("BRIX_ENGINE", "rust")
+    write_workspace(tmp_path, {"a": "hi"})
+    graph = make_graph()
+    raw = engine.maybe_status(graph, tmp_path, "build/.brix", "build/staging", None)
+    assert raw is not None
+    assert all(a["state"] == "never built" for a in raw["actions"])
+
+    result = IncrementalBuilder(make_graph, root=tmp_path).build()
+    assert result.success
+    raw = engine.maybe_status(graph, tmp_path, "build/.brix", "build/staging", None)
+    assert all(a["state"] == "fresh" for a in raw["actions"])
+
+    removed = engine.maybe_clean(graph, tmp_path, "build/.brix")
+    assert removed == 1  # build/upper/a.txt, the graph's one output
+    assert not (tmp_path / "build/upper/a.txt").exists()
+    assert not (tmp_path / "build/.brix").exists()
+
+
+def test_status_with_custom_identity_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRIX_ENGINE", "rust")
+    from brix import identity
+
+    class Custom:
+        name = "status-abi"
+        version = "1"
+
+        def digest(self, path):
+            return "X"
+
+    identity.register(Custom())
+    try:
+
+        def graph_with_custom():
+            from brix import ExternalProcessAction, Graph
+
+            graph = Graph()
+            graph.add(
+                ExternalProcessAction(
+                    name="x",
+                    command_line="{f}",
+                    inputs={"f": graph.data.file("x.bin", identity="status-abi")},
+                    outputs={"out": graph.data.file("build/out")},
+                )
+            )
+            return graph
+
+        graph = graph_with_custom()
+        assert engine.maybe_status(graph, tmp_path, "build/.brix", "build/staging", None) is None
+        assert engine.maybe_clean(graph, tmp_path, "build/.brix") is None
+    finally:
+        identity._REGISTRY.pop("status-abi", None)

@@ -35,6 +35,7 @@ pub mod render;
 pub mod report;
 pub mod shlex;
 pub mod spec;
+pub mod status;
 pub mod targets;
 pub mod tsdts;
 pub mod workers;

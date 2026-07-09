@@ -133,6 +133,28 @@ interleave arbitrarily between other nodes' events, but always after
 its own node's `node_started` and before its `node_completed`. The core
 holds no lock while emitting; a slow consumer stalls only its own event.
 
+## Status and clean (skin → core, no-build entry points)
+
+`status(spec, config)` and `clean(spec, config)` take the same graph spec
+as `build` with a smaller config — `{ "root": str, "metadata_dir": str?,
+"staging_dir": str?, "targets": [str]|null }` (directory defaults as in
+the layer config; `clean` ignores `staging_dir`/`targets`). Nothing
+executes. Rendering and exit codes stay in the skin.
+
+```
+StatusReport  = { actions: [ { label, state, detail,
+                               last_result: ProcessResult|null } ],
+                  pending_deletions: [ { expansion, member, paths: [str] } ],
+                  staged_files: [str], staged_deletions: [str],
+                  interrupted_commit: bool, held: bool }
+CleanResult   = { removed: int }      // files deleted; metadata dir removed too
+```
+
+`state` is one of `fresh`, `never built`, `inputs changed`, `outputs
+missing or modified`, `failed last build`, `outdated` — exactly the
+strings `src/brix/status.py` defines (they are user-visible in the CLI).
+Additive, still version 1.
+
 ## Extension traits (skin → core, optional; call shapes)
 
 ```

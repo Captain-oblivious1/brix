@@ -888,6 +888,22 @@ build inputs that come from memory or a database instead of files, and a C++
   9 golden + 81 behavioral; clippy clean. Remaining for phase 4: one
   release of soak, then delete the Python engine internals.
 
+- **Rust port, phase 4a — `status` and `clean` call the core**
+  (`rust/brix-core/src/status.rs`, `brix_py.status`/`brix_py.clean`,
+  `src/brix/status.py`/`cli.py` as thin clients): the freshness decision
+  now exists once — `compute_status` and the CLI's `clean` cross the
+  boundary like `build` does (wire shapes in `docs/boundary-schema.md`;
+  rendering and exit codes stay Python). The report is the same walk the
+  incremental layer would do at node-ready time: per-action
+  fresh/never-built/inputs-changed/outputs-missing/failed states,
+  pending deletions for vanished expansion members, staged/held atomic
+  state, and outdated-propagation downstream of dirty work. Graphs with
+  a custom skin-registered identity still fall back to the Python
+  implementation (until the extension-trait slice). Pinned by
+  `rust/brix-core/tests/status.rs` — the core cases of
+  `tests/test_status.py`, same names — a cross-engine parity sweep, and
+  new boundary-dispatch tests in `tests/test_rust_engine.py`.
+
 ## Design rules
 
 Settled — a fresh session should treat these as fixed unless Duane reopens

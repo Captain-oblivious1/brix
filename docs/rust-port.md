@@ -474,3 +474,7 @@ then deleting the Python engine internals.
 - **`status` and `clean` call the core.** Freshness logic exists once;
   the Python `compute_status`/`_clean` become thin clients over core
   calls, same as `build`. (CLI rendering and exit codes stay Python.)
+  *DONE* (phase 4a): `status.rs` + `brix_py.status`/`brix_py.clean`,
+  wire shapes in `docs/boundary-schema.md`, mirrored by
+  `rust/brix-core/tests/status.rs` (the core cases of
+  `tests/test_status.py`, same names).

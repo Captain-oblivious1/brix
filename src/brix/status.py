@@ -140,6 +140,29 @@ def _action_status(action, ctx, detector, metadata) -> ActionStatus:
     return ActionStatus(action.label, FRESH, last_result=last_result)
 
 
+def _report_from_wire(raw: dict) -> StatusReport:
+    """The core's StatusReport JSON (docs/boundary-schema.md) as the same
+    dataclasses the Python implementation builds."""
+    return StatusReport(
+        actions=[
+            ActionStatus(
+                label=a["label"],
+                state=a["state"],
+                detail=a.get("detail", ""),
+                last_result=(
+                    ProcessResult(**a["last_result"]) if a.get("last_result") else None
+                ),
+            )
+            for a in raw["actions"]
+        ],
+        pending_deletions=[PendingDeletion(**d) for d in raw["pending_deletions"]],
+        staged_files=list(raw["staged_files"]),
+        staged_deletions=list(raw["staged_deletions"]),
+        interrupted_commit=raw["interrupted_commit"],
+        held=raw["held"],
+    )
+
+
 def compute_status(
     graph_supplier,
     root: str | Path = ".",
@@ -149,6 +172,12 @@ def compute_status(
 ) -> StatusReport:
     graph: Graph = graph_supplier() if callable(graph_supplier) else graph_supplier
     root = Path(root).resolve()
+
+    from . import engine
+
+    raw = engine.maybe_status(graph, root, metadata_dir, staging_dir, targets)
+    if raw is not None:
+        return _report_from_wire(raw)
     plan = plan_graph(graph, root, targets)
     metadata = BuildMetadata(root, metadata_dir)
     metadata.load()

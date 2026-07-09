@@ -259,9 +259,84 @@ fn build(
     Ok(result_json(&result, &plan).to_string())
 }
 
+/// The parsed prologue of a no-build entry point: the spec's actions plus
+/// the config's root, directory knobs, and targets.
+struct InspectConfig {
+    actions: Vec<brix_core::Action>,
+    root: String,
+    metadata_dir: String,
+    staging_dir: String,
+    targets: Option<Vec<String>>,
+}
+
+fn parse_inspect_config(spec_json: &str, config_json: &str) -> PyResult<InspectConfig> {
+    let config: Value = serde_json::from_str(config_json)
+        .map_err(|e| PyValueError::new_err(format!("bad config: {e}")))?;
+    let root = config
+        .get("root")
+        .and_then(|r| r.as_str())
+        .ok_or_else(|| PyValueError::new_err("config.root is required"))?
+        .to_string();
+    let metadata_dir = config
+        .get("metadata_dir")
+        .and_then(|d| d.as_str())
+        .unwrap_or("build/.brix")
+        .to_string();
+    let staging_dir = config
+        .get("staging_dir")
+        .and_then(|d| d.as_str())
+        .unwrap_or("build/staging")
+        .to_string();
+    let targets: Option<Vec<String>> = config.get("targets").and_then(|t| t.as_array()).map(|l| {
+        l.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+    });
+    let spec = brix_core::spec::parse(spec_json).map_err(PyValueError::new_err)?;
+    Ok(InspectConfig { actions: spec.actions, root, metadata_dir, staging_dir, targets })
+}
+
+/// Build-state inspection without building: the StatusReport JSON of
+/// `docs/boundary-schema.md`. Config: `{root, metadata_dir?, staging_dir?,
+/// targets?}`. Raises ValueError where Python's `compute_status` raises
+/// (bad targets, unknown identity).
+#[pyfunction]
+fn status(py: Python<'_>, spec_json: &str, config_json: &str) -> PyResult<String> {
+    let cfg = parse_inspect_config(spec_json, config_json)?;
+    let report = py
+        .detach(|| {
+            brix_core::status::compute_status(
+                cfg.actions,
+                std::path::Path::new(&cfg.root),
+                &cfg.metadata_dir,
+                &cfg.staging_dir,
+                cfg.targets.as_deref(),
+            )
+        })
+        .map_err(PyValueError::new_err)?;
+    Ok(brix_core::status::report_to_json(&report))
+}
+
+/// Delete declared and recorded outputs plus the metadata store; returns
+/// `{"removed": n}`. Config: `{root, metadata_dir?}`.
+#[pyfunction]
+fn clean(py: Python<'_>, spec_json: &str, config_json: &str) -> PyResult<String> {
+    let cfg = parse_inspect_config(spec_json, config_json)?;
+    let removed = py
+        .detach(|| {
+            brix_core::status::clean(
+                cfg.actions,
+                std::path::Path::new(&cfg.root),
+                &cfg.metadata_dir,
+            )
+        })
+        .map_err(PyValueError::new_err)?;
+    Ok(json!({ "removed": removed }).to_string())
+}
+
 #[pymodule]
 fn brix_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
+    m.add_function(wrap_pyfunction!(status, m)?)?;
+    m.add_function(wrap_pyfunction!(clean, m)?)?;
     m.add("__engine__", "rust")?;
     Ok(())
 }
