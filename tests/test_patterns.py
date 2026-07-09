@@ -107,3 +107,46 @@ def test_overlaps_pattern_vs_pattern():
     assert overlaps(PathPattern("build/obj/{name}.o"), PathPattern("build/obj/{name}.o"))
     assert overlaps(PathPattern("build/{a}.o"), PathPattern("build/{b}.o"))
     assert not overlaps(PathPattern("build/obj/{name}.o"), PathPattern("src/{name}.cpp"))
+
+
+def test_overlaps_shared_binding_is_rigid():
+    # A shared binding holds the same value on both sides, so a recursive
+    # {video} can no longer be split two ways: out/{video}.mpg vs
+    # out/{video}/{scene}.mpg collide as out/a/b.mpg without sharing
+    # (video="a/b" vs video="a", scene="b") but never with it.
+    a = PathPattern("out/{video}.mpg")
+    b = PathPattern("out/{video}/{scene}.mpg")
+    assert overlaps(a, b)
+    assert not overlaps(a, b, shared=frozenset({"video"}))
+    # The real dependency survives: identical tails still overlap.
+    raw = PathPattern("out/{video}.raw.mpg")
+    assert overlaps(raw, raw, shared=frozenset({"video"}))
+    # Same-value equality also kills the shortest-stem shape.
+    assert overlaps(PathPattern("{video}.mpg"), PathPattern("{video}.raw.mpg"))
+    assert not overlaps(
+        PathPattern("{video}.mpg"), PathPattern("{video}.raw.mpg"), shared=frozenset({"video"})
+    )
+
+
+def test_overlaps_shared_only_strips_aligned_prefixes():
+    # An unshared or misaligned binding falls through to the conservative
+    # check unchanged — sharing never invents an overlap and never removes
+    # one that rigidity cannot rule out.
+    a = PathPattern("out/{video}.mpg")
+    b = PathPattern("out/{video}/{scene}.mpg")
+    assert overlaps(a, b, shared=frozenset({"scene"}))  # video not shared
+    # Different literal prefixes: nothing strips, ordinary answer stands.
+    assert not overlaps(
+        PathPattern("x/{v}.mpg"), PathPattern("y/{v}.mpg"), shared=frozenset({"v"})
+    )
+    # A shared binding at different positions is not stripped: the answer is
+    # whatever the conservative check says (here its documented probe
+    # under-approximation — v="a" would collide — unchanged by sharing).
+    assert overlaps(PathPattern("a/{v}.txt"), PathPattern("{v}/a.txt")) == overlaps(
+        PathPattern("a/{v}.txt"), PathPattern("{v}/a.txt"), shared=frozenset({"v"})
+    )
+    # One side fully consumed: equal templates overlap, an extension does not.
+    assert overlaps(PathPattern("{v}.txt"), PathPattern("{v}.txt"), shared=frozenset({"v"}))
+    assert not overlaps(
+        PathPattern("{v}.txt"), PathPattern("{v}.txt.bak"), shared=frozenset({"v"})
+    )

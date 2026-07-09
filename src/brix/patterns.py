@@ -117,7 +117,7 @@ class PathPattern:
         return f"PathPattern({self.template!r})"
 
 
-def overlaps(a: PathPattern, b: PathPattern) -> bool:
+def overlaps(a: PathPattern, b: PathPattern, shared: frozenset[str] = frozenset()) -> bool:
     """Conservatively decide whether two patterns can name the same path.
 
     Concrete-vs-concrete and concrete-vs-pattern are exact. Pattern-vs-pattern
@@ -125,6 +125,17 @@ def overlaps(a: PathPattern, b: PathPattern) -> bool:
     that matches a single path segment, then tested against the other side.
     This can under-approximate exotic overlaps (mixed literal/binding segments
     that interleave), which is acceptable for the prototype.
+
+    ``shared`` names bindings that hold the *same value* on both sides — the
+    planner passes the element names of expansions that iterate the same
+    collection (`combine {video}` and `finalize {video}` over one `videos`
+    glob). A shared binding consumes the identical span in any path both
+    patterns could name, so the matching prefix (identical literals + shared
+    bindings) is stripped and the ordinary conservative check runs on the
+    tails: ``out/{video}.mpg`` vs ``out/{video}/{scene}.mpg`` can then never
+    collide (`.mpg` vs `/{scene}.mpg`), while ``out/{video}.raw.mpg`` vs
+    itself still does. Stripping only ever *removes* provably-impossible
+    overlaps; anything not aligned falls through to the conservative check.
     """
     if a.is_concrete and b.is_concrete:
         return a.template == b.template
@@ -132,6 +143,69 @@ def overlaps(a: PathPattern, b: PathPattern) -> bool:
         return b.match(a.template) is not None
     if b.is_concrete:
         return a.match(b.template) is not None
+    if shared:
+        rest_a, rest_b = _strip_shared_prefix(a.template, b.template, shared)
+        if (rest_a, rest_b) != (a.template, b.template):
+            if not rest_a or not rest_b:
+                # One side fully consumed: the paths are equal iff both are.
+                return rest_a == rest_b
+            return overlaps(PathPattern(rest_a), PathPattern(rest_b))
     probe_a = a.substitute({name: _PROBE for name in a.binding_names})
     probe_b = b.substitute({name: _PROBE for name in b.binding_names})
     return b.match(probe_a) is not None or a.match(probe_b) is not None
+
+
+def _tokens(template: str) -> list[tuple[str, ...]]:
+    """A template as ``("lit", text)`` / ``("bind", name, "{name...}")``."""
+    out: list[tuple[str, ...]] = []
+    pos = 0
+    for m in _BINDING_RE.finditer(template):
+        if m.start() > pos:
+            out.append(("lit", template[pos : m.start()]))
+        out.append(("bind", m.group(1), m.group(0)))
+        pos = m.end()
+    if pos < len(template):
+        out.append(("lit", template[pos:]))
+    return out
+
+
+def _strip_shared_prefix(a: str, b: str, shared: frozenset[str]) -> tuple[str, str]:
+    """Strip the longest common prefix where both templates carry identical
+    literal text or the same shared binding. In any path both patterns could
+    name under shared-binding equality, that prefix occupies the same span on
+    both sides, so overlap of the full patterns reduces to overlap of the
+    tails. Stops at the first divergence (differing literals, unshared or
+    differently-named bindings) and returns the remaining templates."""
+    ta, tb = _tokens(a), _tokens(b)
+    i = j = 0
+    while i < len(ta) and j < len(tb):
+        ka, kb = ta[i], tb[j]
+        if ka[0] == "lit" and kb[0] == "lit":
+            la, lb = ka[1], kb[1]
+            n = 0
+            while n < len(la) and n < len(lb) and la[n] == lb[n]:
+                n += 1
+            if n < len(la) and n < len(lb):
+                # Diverging characters: the tails start with different
+                # literals, which the ordinary check will reject.
+                ta[i] = ("lit", la[n:])
+                tb[j] = ("lit", lb[n:])
+                break
+            if n == len(la):
+                i += 1
+            else:
+                ta[i] = ("lit", la[n:])
+            if n == len(lb):
+                j += 1
+            else:
+                tb[j] = ("lit", lb[n:])
+        elif ka[0] == "bind" and kb[0] == "bind" and ka[1] == kb[1] and ka[1] in shared:
+            # The same value on both sides (whatever the `:*` constraint says;
+            # constraints only narrow which values exist, never the span one
+            # occupies), so the same span: strip and keep aligning.
+            i += 1
+            j += 1
+        else:
+            break
+    rebuild = lambda tokens: "".join(t[2] if t[0] == "bind" else t[1] for t in tokens)  # noqa: E731
+    return rebuild(ta[i:]), rebuild(tb[j:])

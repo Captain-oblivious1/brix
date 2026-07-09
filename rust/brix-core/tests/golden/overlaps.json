@@ -43,5 +43,89 @@
     "a": "a/{x}/b.txt",
     "b": "a/{y}/b.txt",
     "overlaps": true
+  },
+  {
+    "a": "out/{video}.mpg",
+    "b": "out/{video}/{scene}.mpg",
+    "shared": [],
+    "overlaps": true
+  },
+  {
+    "a": "out/{video}.mpg",
+    "b": "out/{video}/{scene}.mpg",
+    "shared": [
+      "video"
+    ],
+    "overlaps": false
+  },
+  {
+    "a": "out/{video}.mpg",
+    "b": "out/{video}/{scene}.mpg",
+    "shared": [
+      "scene"
+    ],
+    "overlaps": true
+  },
+  {
+    "a": "out/{video}.raw.mpg",
+    "b": "out/{video}.raw.mpg",
+    "shared": [
+      "video"
+    ],
+    "overlaps": true
+  },
+  {
+    "a": "{video}.mpg",
+    "b": "{video}.raw.mpg",
+    "shared": [],
+    "overlaps": true
+  },
+  {
+    "a": "{video}.mpg",
+    "b": "{video}.raw.mpg",
+    "shared": [
+      "video"
+    ],
+    "overlaps": false
+  },
+  {
+    "a": "{v}.txt",
+    "b": "{v}.txt",
+    "shared": [
+      "v"
+    ],
+    "overlaps": true
+  },
+  {
+    "a": "{v}.txt",
+    "b": "{v}.txt.bak",
+    "shared": [
+      "v"
+    ],
+    "overlaps": false
+  },
+  {
+    "a": "x/{v}.mpg",
+    "b": "y/{v}.mpg",
+    "shared": [
+      "v"
+    ],
+    "overlaps": false
+  },
+  {
+    "a": "a/{v}.txt",
+    "b": "{v}/a.txt",
+    "shared": [
+      "v"
+    ],
+    "overlaps": false
+  },
+  {
+    "a": "src/{video:*}.py",
+    "b": "src/{video}.py",
+    "shared": [
+      "video"
+    ],
+    "overlaps": true
   }
 ]

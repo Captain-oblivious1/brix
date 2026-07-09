@@ -9,7 +9,7 @@ use std::path::Path;
 
 use brix_core::data::DataAtom;
 use brix_core::fingerprint::{digest, Value};
-use brix_core::patterns::{overlaps, PathPattern};
+use brix_core::patterns::{overlaps, overlaps_shared, PathPattern};
 use brix_core::shlex;
 use brix_core::TimeAndHashChangeDetector;
 use serde_json::Value as J;
@@ -130,12 +130,27 @@ fn overlaps_match_python() {
     for case in cases.as_array().unwrap() {
         let a = PathPattern::new(case["a"].as_str().unwrap()).unwrap();
         let b = PathPattern::new(case["b"].as_str().unwrap()).unwrap();
+        // Entries with a "shared" list pin the rigid-binding refinement
+        // (`overlaps_shared`); the rest pin the base conservative check.
+        let got = match case.get("shared") {
+            Some(shared) => {
+                let names: Vec<String> = shared
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_string())
+                    .collect();
+                overlaps_shared(&a, &b, &names)
+            }
+            None => overlaps(&a, &b),
+        };
         assert_eq!(
-            overlaps(&a, &b),
+            got,
             case["overlaps"].as_bool().unwrap(),
-            "overlaps {} ~ {}",
+            "overlaps {} ~ {} (shared {:?})",
             case["a"],
-            case["b"]
+            case["b"],
+            case.get("shared")
         );
     }
 }

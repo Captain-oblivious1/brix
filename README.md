@@ -844,6 +844,26 @@ build inputs that come from memory or a database instead of files, and a C++
   `cargo test` 21 unit + 9 golden + 81 behavioral, clippy clean. Phase 3
   is complete; next is the `BRIX_ENGINE` default flip.
 
+- **Same-collection binding unification in dependency inference**
+  (`patterns.py`/`planner.py`, mirrored in `rust/brix-core/src/patterns.rs`/
+  `planner.rs`): found live on the animation project the moment the Rust
+  engine tried it — `combine {video}` and `finalize {video}` both expand one
+  `videos` collection, and with recursive-by-default `{video}` the planner
+  read `finalize`'s `out/{video}.mpg` output as overlapping `combine`'s
+  `out/{video}/{scene}.mpg` input (`out/a/b.mpg` splits as video `a/b` *or*
+  video `a` + scene `b`), reported a false combine↔finalize cycle, and
+  skipped both. Both engines failed identically — parity held; the
+  inference was wrong. Fix: when two expansions iterate structurally-equal
+  collections under the same element name, their binding holds the same
+  value in any realized pair, so `overlaps` strips the matching prefix
+  (identical literals + shared bindings, which occupy the same span) and
+  runs the ordinary conservative check on the tails — sharing only ever
+  removes provably-impossible overlaps, so a missed strip degrades to the
+  old conservative edge, never to a missed dependency. Nested video
+  directories (`rights/intro`) build fine under bare `{video}`
+  (`test_same_collection_expansions_build_end_to_end`). Pinned by mirrored
+  plan/pattern tests (same names) and new golden overlap + plan cases.
+
 ## Design rules
 
 Settled — a fresh session should treat these as fixed unless Duane reopens

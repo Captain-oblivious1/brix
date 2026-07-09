@@ -71,6 +71,75 @@ def test_plan_infers_generator_to_expand_edge():
     assert any(e.from_id == 0 and e.to_id == 1 for e in plan.edges)
 
 
+def test_same_collection_expansions_do_not_false_cycle():
+    # The animation shape: combine and finalize both expand one `videos`
+    # collection. finalize's output out/{video}.mpg overlaps combine's input
+    # out/{video}/{scene}.mpg only by splitting a recursive {video} two ways
+    # (video="a/b" vs video="a", scene="b") — impossible when both iterate
+    # the same member, so the planner must keep combine -> finalize (the
+    # .raw.mpg handoff) and not invent the reverse edge.
+    graph = Graph()
+    data = graph.data
+    videos = data.glob("src/{video}.py")
+    graph.add(
+        ExpandAll(
+            element_name="video",
+            collection=videos,
+            child=ExternalProcessAction(
+                name="combine {video}",
+                command_line="combine {scenes} {raw}",
+                inputs={"scenes": data.glob("out/{video}/{scene}.mpg")},
+                outputs={"raw": data.file("out/{video}.raw.mpg")},
+            ),
+        ),
+        ExpandAll(
+            element_name="video",
+            collection=videos,
+            child=ExternalProcessAction(
+                name="finalize {video}",
+                command_line="finalize {raw} {mpg}",
+                inputs={"raw": data.file("out/{video}.raw.mpg")},
+                outputs={"mpg": data.file("out/{video}.mpg")},
+            ),
+        ),
+    )
+    plan = CleanBuilder(graph).plan()
+    assert any(e.from_id == 0 and e.to_id == 1 for e in plan.edges)  # combine -> finalize
+    assert not any(e.from_id == 1 and e.to_id == 0 for e in plan.edges)
+
+
+def test_different_collections_keep_the_conservative_edge():
+    # Same shape, but the expansions iterate *different* collections: their
+    # {video}s are independent values, so the conservative overlap (and the
+    # cycle it implies) must stay — sharing is only inferred, never assumed.
+    graph = Graph()
+    data = graph.data
+    graph.add(
+        ExpandAll(
+            element_name="video",
+            collection=data.glob("src/{video}.py"),
+            child=ExternalProcessAction(
+                name="combine {video}",
+                command_line="combine {scenes} {raw}",
+                inputs={"scenes": data.glob("out/{video}/{scene}.mpg")},
+                outputs={"raw": data.file("out/{video}.raw.mpg")},
+            ),
+        ),
+        ExpandAll(
+            element_name="video",
+            collection=data.glob("other/{video}.toml"),
+            child=ExternalProcessAction(
+                name="finalize {video}",
+                command_line="finalize {raw} {mpg}",
+                inputs={"raw": data.file("out/{video}.raw.mpg")},
+                outputs={"mpg": data.file("out/{video}.mpg")},
+            ),
+        ),
+    )
+    plan = CleanBuilder(graph).plan()
+    assert any(e.from_id == 1 and e.to_id == 0 for e in plan.edges)
+
+
 def test_plan_no_edge_between_unrelated_actions():
     graph = Graph()
     data = graph.data

@@ -53,5 +53,40 @@
     "kind": "action_key",
     "spec": "{\"kind\": \"process\", \"command_line\": \"mk {src} {o}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"videos/{scene}.py\"}]}, \"outputs\": {\"o\": [{\"kind\": \"file\", \"path\": \"build/{scene}.out\"}]}, \"name\": \"render {scene}\"}",
     "key": "54942bcab18f7e7861c4fe710c76dae2f4fa64d18eb1b45f0999a70bf1c00377"
+  },
+  {
+    "kind": "membership_key",
+    "spec": "{\"kind\": \"expand\", \"element\": \"video\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/videos/{video}.py\"}], \"child\": {\"kind\": \"expand\", \"element\": \"scene\", \"collection\": [{\"kind\": \"regex\", \"pattern\": \"src/scenes/(?P<video>.+)/(?P<scene>[0-9][^/]*)\\\\.py\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"render {source} {mpg}\", \"inputs\": {\"source\": [{\"kind\": \"file\", \"path\": \"src/scenes/{video}/{scene}.py\"}]}, \"outputs\": {\"mpg\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}/{scene}.mpg\"}]}, \"name\": \"render {video}/{scene}\"}}}",
+    "key": "e7b7cbc89c3c99be0edbee2a06de46054b98d98af0a6c423de725c2b607baf59"
+  },
+  {
+    "kind": "membership_key",
+    "spec": "{\"kind\": \"expand\", \"element\": \"scene\", \"collection\": [{\"kind\": \"regex\", \"pattern\": \"src/scenes/(?P<video>.+)/(?P<scene>[0-9][^/]*)\\\\.py\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"render {source} {mpg}\", \"inputs\": {\"source\": [{\"kind\": \"file\", \"path\": \"src/scenes/{video}/{scene}.py\"}]}, \"outputs\": {\"mpg\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}/{scene}.mpg\"}]}, \"name\": \"render {video}/{scene}\"}}",
+    "key": "f979288f519f059a6165e7b9c3e8ee08ad90d032b228e3184730020ae11885e4"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"render {source} {mpg}\", \"inputs\": {\"source\": [{\"kind\": \"file\", \"path\": \"src/scenes/{video}/{scene}.py\"}]}, \"outputs\": {\"mpg\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}/{scene}.mpg\"}]}, \"name\": \"render {video}/{scene}\"}",
+    "key": "0afaf9707323fb365326c224bbbeeeb94b0990515aac66e2e31ae28aa00149cb"
+  },
+  {
+    "kind": "membership_key",
+    "spec": "{\"kind\": \"expand\", \"element\": \"video\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/videos/{video}.py\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"combine {scenes} {raw}\", \"inputs\": {\"scenes\": [{\"kind\": \"glob\", \"template\": \"out/videos/{video}/{scene}.mpg\"}]}, \"outputs\": {\"raw\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.raw.mpg\"}]}, \"name\": \"combine {video}\"}}",
+    "key": "e7b7cbc89c3c99be0edbee2a06de46054b98d98af0a6c423de725c2b607baf59"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"combine {scenes} {raw}\", \"inputs\": {\"scenes\": [{\"kind\": \"glob\", \"template\": \"out/videos/{video}/{scene}.mpg\"}]}, \"outputs\": {\"raw\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.raw.mpg\"}]}, \"name\": \"combine {video}\"}",
+    "key": "928f72575bdfc89e69f4c62368afc7d93c2dbd8dbd5c9e8351d3b7e0a767a15f"
+  },
+  {
+    "kind": "membership_key",
+    "spec": "{\"kind\": \"expand\", \"element\": \"video\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/videos/{video}.py\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"finalize {raw} {mpg}\", \"inputs\": {\"raw\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.raw.mpg\"}]}, \"outputs\": {\"mpg\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.mpg\"}]}, \"name\": \"finalize {video}\"}}",
+    "key": "e7b7cbc89c3c99be0edbee2a06de46054b98d98af0a6c423de725c2b607baf59"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"finalize {raw} {mpg}\", \"inputs\": {\"raw\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.raw.mpg\"}]}, \"outputs\": {\"mpg\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.mpg\"}]}, \"name\": \"finalize {video}\"}",
+    "key": "da189575d1ebbb7eaf733ee92cc3d2817737e0bf07c12112ffadd6af49a8168b"
   }
 ]

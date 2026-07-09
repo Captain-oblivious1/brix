@@ -272,3 +272,83 @@ def test_dependency_cycle_reported(tmp_path):
     result = CleanBuilder(graph, root=tmp_path).build()
     assert not result.success
     assert any("cycle" in e for e in result.errors)
+
+
+def render_combine_finalize_graph() -> Graph:
+    """The animation shape: render scenes per video, combine each video's
+    scenes, finalize each video — three expansions over one `videos`
+    collection, with bare (recursive) `{video}` bindings throughout so a
+    video may live in a nested directory (`rights/intro`)."""
+    graph = Graph()
+    data = graph.data
+    videos = data.glob("src/videos/{video}.py")
+    graph.add(
+        ExpandAll(
+            element_name="video",
+            collection=videos,
+            child=ExpandAll(
+                element_name="scene",
+                collection=data.regex(r"src/scenes/(?P<video>.+)/(?P<scene>[0-9][^/]*)\.py"),
+                child=ExternalProcessAction(
+                    name="render {video}/{scene}",
+                    command_line="{python} {tool} {source} {mpg}",
+                    inputs={
+                        "python": data.tool(sys.executable),
+                        "tool": data.file("tools/upper.py"),
+                        "source": data.file("src/scenes/{video}/{scene}.py"),
+                    },
+                    outputs={"mpg": data.file("out/videos/{video}/{scene}.mpg")},
+                ),
+            ),
+        ),
+        ExpandAll(
+            element_name="video",
+            collection=videos,
+            child=ExternalProcessAction(
+                name="combine {video}",
+                command_line="{python} {tool} {scenes} {raw}",
+                inputs={
+                    "python": data.tool(sys.executable),
+                    "tool": data.file("tools/concat.py"),
+                    "scenes": data.glob("out/videos/{video}/{scene}.mpg"),
+                },
+                outputs={"raw": data.file("out/videos/{video}.raw.mpg")},
+            ),
+        ),
+        ExpandAll(
+            element_name="video",
+            collection=videos,
+            child=ExternalProcessAction(
+                name="finalize {video}",
+                command_line="{python} {tool} {raw} {mpg}",
+                inputs={
+                    "python": data.tool(sys.executable),
+                    "tool": data.file("tools/upper.py"),
+                    "raw": data.file("out/videos/{video}.raw.mpg"),
+                },
+                outputs={"mpg": data.file("out/videos/{video}.mpg")},
+            ),
+        ),
+    )
+    return graph
+
+
+def test_same_collection_expansions_build_end_to_end(tmp_path):
+    # Would deadlock as a false combine <-> finalize cycle if the planner
+    # compared their recursive {video}s independently (see test_plan.py);
+    # must build clean, nested video directory included.
+    write_workspace(tmp_path, {})
+    (tmp_path / "src/videos/rights").mkdir(parents=True)
+    (tmp_path / "src/videos/wealth.py").write_text("")
+    (tmp_path / "src/videos/rights/intro.py").write_text("")
+    (tmp_path / "src/scenes/wealth").mkdir(parents=True)
+    (tmp_path / "src/scenes/rights/intro").mkdir(parents=True)
+    (tmp_path / "src/scenes/wealth/01_a.py").write_text("alpha ")
+    (tmp_path / "src/scenes/wealth/02_b.py").write_text("beta")
+    (tmp_path / "src/scenes/rights/intro/01_x.py").write_text("xray")
+
+    result = CleanBuilder(render_combine_finalize_graph(), root=tmp_path).build()
+    assert result.success, result.errors
+    assert (tmp_path / "out/videos/wealth.mpg").read_text() == "ALPHA BETA"
+    assert (tmp_path / "out/videos/rights/intro.mpg").read_text() == "XRAY"
+    assert all(result.states.status(n.id) is NodeState.DONE for n in result.plan.nodes)

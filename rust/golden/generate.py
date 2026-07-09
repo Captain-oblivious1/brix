@@ -147,11 +147,37 @@ OVERLAP_PAIRS = [
     ("a/{x}/b.txt", "a/{y}/b.txt"),
 ]
 
+# (a, b, shared): rigid shared bindings — the planner's same-collection
+# expansion refinement. Paired with-and-without entries pin that sharing
+# changes exactly the recursive-split cases and nothing else.
+OVERLAP_SHARED = [
+    ("out/{video}.mpg", "out/{video}/{scene}.mpg", []),
+    ("out/{video}.mpg", "out/{video}/{scene}.mpg", ["video"]),
+    ("out/{video}.mpg", "out/{video}/{scene}.mpg", ["scene"]),
+    ("out/{video}.raw.mpg", "out/{video}.raw.mpg", ["video"]),
+    ("{video}.mpg", "{video}.raw.mpg", []),
+    ("{video}.mpg", "{video}.raw.mpg", ["video"]),
+    ("{v}.txt", "{v}.txt", ["v"]),
+    ("{v}.txt", "{v}.txt.bak", ["v"]),
+    ("x/{v}.mpg", "y/{v}.mpg", ["v"]),
+    ("a/{v}.txt", "{v}/a.txt", ["v"]),  # misaligned: conservative answer stands
+    ("src/{video:*}.py", "src/{video}.py", ["video"]),  # constraint differs, value rigid
+]
+
 
 def gen_overlaps():
     out = []
     for a, b in OVERLAP_PAIRS:
         out.append({"a": a, "b": b, "overlaps": overlaps(PathPattern(a), PathPattern(b))})
+    for a, b, shared in OVERLAP_SHARED:
+        out.append(
+            {
+                "a": a,
+                "b": b,
+                "shared": shared,
+                "overlaps": overlaps(PathPattern(a), PathPattern(b), frozenset(shared)),
+            }
+        )
     return out
 
 
@@ -294,11 +320,62 @@ def graph_regex():
     return g
 
 
+def graph_videos():
+    # The animation shape: three expansions over one `videos` collection with
+    # bare (recursive) {video} bindings. Without the same-collection binding
+    # unification, finalize's out/{video}.mpg output overlaps combine's
+    # out/{video}/{scene}.mpg input (a recursive {video} splits two ways) and
+    # the plan carries a false combine <-> finalize cycle.
+    from brix import ExpandAll, ExternalProcessAction, Graph
+
+    g = Graph()
+    d = g.data
+    videos = d.glob("src/videos/{video}.py")
+    g.add(
+        ExpandAll(
+            "video",
+            videos,
+            ExpandAll(
+                "scene",
+                d.regex(r"src/scenes/(?P<video>.+)/(?P<scene>[0-9][^/]*)\.py"),
+                ExternalProcessAction(
+                    name="render {video}/{scene}",
+                    command_line="render {source} {mpg}",
+                    inputs={"source": d.file("src/scenes/{video}/{scene}.py")},
+                    outputs={"mpg": d.file("out/videos/{video}/{scene}.mpg")},
+                ),
+            ),
+        ),
+        ExpandAll(
+            "video",
+            videos,
+            ExternalProcessAction(
+                name="combine {video}",
+                command_line="combine {scenes} {raw}",
+                inputs={"scenes": d.glob("out/videos/{video}/{scene}.mpg")},
+                outputs={"raw": d.file("out/videos/{video}.raw.mpg")},
+            ),
+        ),
+        ExpandAll(
+            "video",
+            videos,
+            ExternalProcessAction(
+                name="finalize {video}",
+                command_line="finalize {raw} {mpg}",
+                inputs={"raw": d.file("out/videos/{video}.raw.mpg")},
+                outputs={"mpg": d.file("out/videos/{video}.mpg")},
+            ),
+        ),
+    )
+    return g
+
+
 PLAN_CASES = [
     ("upper", graph_upper, [None, ["build/all.txt"], ["build/upper/foo.txt"]]),
     ("cpp", graph_cpp, [None, ["build/bin/app"]]),
     ("stem", graph_stem, [None, ["wealth.mpg"]]),
     ("regex", graph_regex, [None]),
+    ("videos", graph_videos, [None, ["out/videos/wealth.mpg"]]),
 ]
 
 

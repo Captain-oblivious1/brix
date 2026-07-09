@@ -295,6 +295,115 @@ fn probe_bindings(p: &PathPattern) -> Vec<(String, String)> {
     seen
 }
 
+/// `overlaps` with rigid shared bindings (mirrors `patterns.overlaps`'s
+/// `shared=` parameter). `shared` names bindings that hold the *same value*
+/// on both sides — element names of expansions iterating the same collection.
+/// Such a binding consumes the identical span in any path both patterns could
+/// name, so the matching prefix (identical literals + shared bindings) is
+/// stripped and the ordinary conservative check runs on the tails:
+/// `out/{video}.mpg` vs `out/{video}/{scene}.mpg` can then never collide.
+/// Stripping only ever removes provably-impossible overlaps; anything not
+/// aligned falls through to the conservative check.
+pub fn overlaps_shared(a: &PathPattern, b: &PathPattern, shared: &[String]) -> bool {
+    if !shared.is_empty() && !a.is_concrete() && !b.is_concrete() {
+        if let Some((rest_a, rest_b)) = strip_shared_prefix(a, b, shared) {
+            if rest_a.is_empty() || rest_b.is_empty() {
+                // One side fully consumed: the paths are equal iff both are.
+                return rest_a == rest_b;
+            }
+            let (pa, pb) = (
+                PathPattern::new(&rest_a).expect("non-empty tail"),
+                PathPattern::new(&rest_b).expect("non-empty tail"),
+            );
+            return overlaps(&pa, &pb);
+        }
+    }
+    overlaps(a, b)
+}
+
+/// Strip the longest common prefix where both templates carry identical
+/// literal text or the same shared binding (which occupies the same span on
+/// both sides, whatever its `:*` constraint — constraints only narrow which
+/// values exist, never the span one occupies). Returns the remaining
+/// templates, or `None` if nothing was stripped (mirrors
+/// `_strip_shared_prefix`, which signals that by returning the inputs).
+fn strip_shared_prefix(
+    a: &PathPattern,
+    b: &PathPattern,
+    shared: &[String],
+) -> Option<(String, String)> {
+    let mut ta = a.tokens.clone();
+    let mut tb = b.tokens.clone();
+    let (mut i, mut j) = (0usize, 0usize);
+    let mut stripped = false;
+    while i < ta.len() && j < tb.len() {
+        match (&ta[i], &tb[j]) {
+            (Token::Literal(la), Token::Literal(lb)) => {
+                let n = la
+                    .char_indices()
+                    .zip(lb.char_indices())
+                    .take_while(|((_, ca), (_, cb))| ca == cb)
+                    .last()
+                    .map(|((ia, ca), _)| ia + ca.len_utf8())
+                    .unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                stripped = true;
+                if n < la.len() && n < lb.len() {
+                    // Diverging characters: the tails start with different
+                    // literals, which the ordinary check will reject.
+                    ta[i] = Token::Literal(la[n..].to_string());
+                    tb[j] = Token::Literal(lb[n..].to_string());
+                    break;
+                }
+                if n == la.len() {
+                    i += 1;
+                } else {
+                    ta[i] = Token::Literal(la[n..].to_string());
+                }
+                if n == lb.len() {
+                    j += 1;
+                } else {
+                    tb[j] = Token::Literal(lb[n..].to_string());
+                }
+            }
+            (Token::Binding { name: na, .. }, Token::Binding { name: nb, .. })
+                if na == nb && shared.iter().any(|s| s == na) =>
+            {
+                stripped = true;
+                i += 1;
+                j += 1;
+            }
+            _ => break,
+        }
+    }
+    if !stripped {
+        return None;
+    }
+    Some((rebuild(&ta[i..]), rebuild(&tb[j..])))
+}
+
+/// Remaining tokens back into template text. A recursive binding rebuilds as
+/// the bare form — `{name}` and `{name:**}` compile identically, and the
+/// result is only used for a throwaway overlap check.
+fn rebuild(tokens: &[Token]) -> String {
+    let mut out = String::new();
+    for token in tokens {
+        match token {
+            Token::Literal(s) => out.push_str(s),
+            Token::Binding { name, recursive } => {
+                out.push_str(&if *recursive {
+                    format!("{{{name}}}")
+                } else {
+                    format!("{{{name}:*}}")
+                });
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,5 +449,46 @@ mod tests {
         assert!(!p.is_concrete());
         assert_eq!(p.literal_prefix_dir(), "build/upper");
         assert_eq!(PathPattern::new("a/b.txt").unwrap().literal_prefix_dir(), "a");
+    }
+
+    fn pat(t: &str) -> PathPattern {
+        PathPattern::new(t).unwrap()
+    }
+
+    fn shared(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    // Mirrors test_overlaps_shared_binding_is_rigid in tests/test_patterns.py.
+    #[test]
+    fn overlaps_shared_binding_is_rigid() {
+        let a = pat("out/{video}.mpg");
+        let b = pat("out/{video}/{scene}.mpg");
+        assert!(overlaps(&a, &b));
+        assert!(!overlaps_shared(&a, &b, &shared(&["video"])));
+        let raw = pat("out/{video}.raw.mpg");
+        assert!(overlaps_shared(&raw, &raw, &shared(&["video"])));
+        assert!(overlaps(&pat("{video}.mpg"), &pat("{video}.raw.mpg")));
+        assert!(!overlaps_shared(
+            &pat("{video}.mpg"),
+            &pat("{video}.raw.mpg"),
+            &shared(&["video"])
+        ));
+    }
+
+    // Mirrors test_overlaps_shared_only_strips_aligned_prefixes.
+    #[test]
+    fn overlaps_shared_only_strips_aligned_prefixes() {
+        let a = pat("out/{video}.mpg");
+        let b = pat("out/{video}/{scene}.mpg");
+        assert!(overlaps_shared(&a, &b, &shared(&["scene"]))); // video not shared
+        assert!(!overlaps_shared(&pat("x/{v}.mpg"), &pat("y/{v}.mpg"), &shared(&["v"])));
+        // Misaligned shared binding: the conservative answer stands unchanged.
+        assert_eq!(
+            overlaps(&pat("a/{v}.txt"), &pat("{v}/a.txt")),
+            overlaps_shared(&pat("a/{v}.txt"), &pat("{v}/a.txt"), &shared(&["v"]))
+        );
+        assert!(overlaps_shared(&pat("{v}.txt"), &pat("{v}.txt"), &shared(&["v"])));
+        assert!(!overlaps_shared(&pat("{v}.txt"), &pat("{v}.txt.bak"), &shared(&["v"])));
     }
 }

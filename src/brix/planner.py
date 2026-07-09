@@ -2,7 +2,13 @@
 
 Dependency inference: an edge is added from action A to action B when any
 output data atom of A can name the same path as any input data atom of B.
-Pattern-vs-pattern overlap is decided conservatively (see `patterns.overlaps`).
+Pattern-vs-pattern overlap is decided conservatively (see `patterns.overlaps`),
+with one refinement: when A and B are expansions iterating structurally-equal
+collections under the same element name, that binding holds the same value on
+both sides and is compared rigidly. Without this, `combine {video}` producing
+`out/{video}.raw.mpg` and `finalize {video}` producing `out/{video}.mpg` look
+mutually dependent (`out/a/b.mpg` reads as finalize's video `a/b` *or* as
+combine's scene `b` of video `a`) and the planner reports a false cycle.
 """
 
 from __future__ import annotations
@@ -49,7 +55,9 @@ def output_atoms(action: Action) -> list[PathAtom]:
     raise TypeError(f"unknown action type: {action!r}")
 
 
-def _atoms_overlap(out_atom: PathAtom, in_atom: PathAtom) -> bool:
+def _atoms_overlap(
+    out_atom: PathAtom, in_atom: PathAtom, shared: frozenset[str] = frozenset()
+) -> bool:
     # Regex atoms are match-only; compare them against concrete paths only.
     if isinstance(out_atom, RegexData) and isinstance(in_atom, RegexData):
         return False
@@ -59,14 +67,38 @@ def _atoms_overlap(out_atom: PathAtom, in_atom: PathAtom) -> bool:
     if isinstance(in_atom, RegexData):
         pattern = out_atom.pattern
         return pattern.is_concrete and in_atom.match(pattern.template) is not None
-    return overlaps(out_atom.pattern, in_atom.pattern)
+    return overlaps(out_atom.pattern, in_atom.pattern, shared)
+
+
+def _expansion_bindings(action: Action) -> dict[str, tuple[str, ...]]:
+    """Element name -> structural key of the collection it iterates, for the
+    expansion spine of `action` (nested expansions contribute each level)."""
+    binds: dict[str, tuple[str, ...]] = {}
+    current = action
+    while isinstance(current, ExpandAll):
+        binds[current.element_name] = tuple(repr(a) for a in current.collection.atoms())
+        current = current.child
+    return binds
+
+
+def shared_bindings(producer: Action, consumer: Action) -> frozenset[str]:
+    """Binding names that hold the same value on both sides: element names of
+    expansions iterating structurally-equal collections. Both actions expand
+    the same member set under the same name, so in any realized pair of nodes
+    the binding is one value — `patterns.overlaps` compares it rigidly."""
+    pa = _expansion_bindings(producer)
+    if not pa:
+        return frozenset()
+    pb = _expansion_bindings(consumer)
+    return frozenset(name for name, key in pa.items() if pb.get(name) == key)
 
 
 def infer_dependency(producer: Action, consumer: Action) -> str | None:
     """Return an edge reason if `consumer` depends on `producer`, else None."""
+    shared = shared_bindings(producer, consumer)
     for out_atom in output_atoms(producer):
         for in_atom in input_atoms(consumer):
-            if _atoms_overlap(out_atom, in_atom):
+            if _atoms_overlap(out_atom, in_atom, shared):
                 out_text = _atom_text(out_atom)
                 in_text = _atom_text(in_atom)
                 if out_text == in_text:
