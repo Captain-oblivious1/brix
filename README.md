@@ -288,6 +288,19 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **C++ dogfood — fmt built by brix, header tracking validated**
+  (`examples/fmt/`): the C++ counterpart to the JUnit dogfood. Compiles
+  fmt's classic library sources (`format.cc`, `os.cc`) plus a small app via
+  `cpp.CompileSourceAction` + `cpp.LinkApplicationAction`, and validates
+  automatic `#include` header-dep tracking on real headers: editing
+  `include/fmt/os.h` recompiles only `os` (the sole TU including it), editing
+  the widely-included `base.h` recompiles all three — learned from the
+  compiler depfile, nothing declared. A comment-only header edit yielding a
+  byte-identical object correctly lets the link *replay*. `brix.cpp`'s
+  header-dep tracking (the feature the old handoff notes flagged as the
+  gating unbuilt piece — since implemented) now proven on a famous project.
+  Checkout `~/Projects/brix_test/fmt` @ 11.1.4; `fmt.cc` (C++20 module)
+  excluded. Next C++ breadth: a larger multi-source project (e.g. leveldb).
 - **Acceptance benchmark: brix vs Gradle on JUnit 5** (`examples/junit5/benchmark.py`):
   the `docs/java-fast-builds.md` scenarios on the seven platform modules,
   brix vs Gradle 8.14 (`:module:jar` ×7). Best-of-3, one machine: no-op
