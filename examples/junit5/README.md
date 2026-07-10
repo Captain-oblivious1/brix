@@ -56,3 +56,40 @@ builds unless `--no-daemon`.
   signature) cascades.
 - **Warm javac worker** across edit-compile cycles (the JVM stays hot between
   builds; `docs/java-fast-builds.md`).
+
+## Benchmark vs Gradle
+
+`benchmark.py` runs the `docs/java-fast-builds.md` acceptance scenarios for
+brix, and (with `--gradle`) the same seven `:module:jar` tasks under Gradle:
+
+    python examples/junit5/benchmark.py            # brix only
+    python examples/junit5/benchmark.py --gradle   # also Gradle
+
+Best-of-3 wall-clock, one machine (JDK 26 for brix's javac worker; Gradle 8.14
+needs a Java 21 toolchain, provisioned locally under `~/Projects/brix_test/jdk`
+since only JDK 26 is installed):
+
+| scenario                     | brix   | Gradle | 
+|------------------------------|--------|--------|
+| clean build, cold cache      | ~4.3s  |   —    |
+| clean build, warm brix cache | ~1.9s  |   —    |
+| no-op                        | ~0.09s | ~1.1s  |
+| impl-only change (warm)      | ~0.37s | ~1.8s  |
+| impl-only change (no daemon) | ~0.81s |   —    |
+| API change (warm)            | ~1.3s  | ~1.6s  |
+
+Reading it: on the **edit-compile loop** — no-op and implementation-only
+change, the cases that dominate day-to-day work — brix is **~5–12× faster**
+than Gradle on the same modules. On a full API-change cascade the two are
+close (~1.3s vs ~1.6s). The daemon earns its keep: an impl-only change is
+0.37s with the warm worker vs 0.81s spawning javac cold — and even the
+cold-worker number beats Gradle's warm daemon, because brix has no
+per-invocation daemon/configuration tax (a Python start plus the Rust engine,
+~0.1s, vs Gradle's ~1s warm-daemon floor).
+
+Caveat, stated plainly: Gradle's `:module:jar` does strictly more per module
+(multi-release sources, `module-info`, OSGi manifests, resource processing),
+so the absolute times are not a pure compile race. But the incremental
+scenarios measure incremental-detection overhead plus JVM warmth — which *is*
+the edit-compile-loop metric — and that overhead is exactly what brix's model
+avoids.

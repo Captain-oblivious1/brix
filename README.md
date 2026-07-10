@@ -124,13 +124,13 @@ below is tagged with the model that should do it.
    compiler processes now survive *between* builds, adopted by the next
    build through a per-worker holder daemon, with a single
    `worker_idle_timeout` knob (default 15 min; 0 or `--no-daemon` turns it
-   off). What's left: rerun the acceptance benchmark against Gradle
-   (scenarios 4/5 warm — the "faster than Gradle" claim) on the next
-   Java-project session — **[Opus]**: it's measurement against the written
-   spec in `docs/java-fast-builds.md`, with a visibly-wrong-number failure
-   mode; escalate to Fable only if brix unexpectedly loses scenario 4.
-   (The `[Fable]` that used to tag this track covered the build-server
-   implementation, which has landed.)
+   off). **This track is done, and the "faster than Gradle" claim is
+   confirmed**: benchmarked against Gradle 8.14 on JUnit 5's seven platform
+   modules (`examples/junit5/benchmark.py`), brix wins the edit-compile loop
+   ~5–12× (no-op ~0.09s vs ~1.1s; impl-only change ~0.37s vs ~1.8s) and ties
+   a full API-change cascade (~1.3s vs ~1.6s). Remaining polish, if wanted:
+   class-level incremental compilation within a module is deliberately out of
+   scope (see the design doc).
 2. **Rewrite the engine in Rust** — design notes in `docs/rust-port.md` and
    `docs/boundary-schema.md`. The goal: one shared engine that can power *both* a
    Python and a JavaScript/TypeScript way of writing build files, so nobody has
@@ -288,6 +288,19 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **Acceptance benchmark: brix vs Gradle on JUnit 5** (`examples/junit5/benchmark.py`):
+  the `docs/java-fast-builds.md` scenarios on the seven platform modules,
+  brix vs Gradle 8.14 (`:module:jar` ×7). Best-of-3, one machine: no-op
+  ~0.09s vs ~1.1s, impl-only change ~0.37s vs ~1.8s (**~5–12× faster on the
+  edit-compile loop**), API-change cascade ~1.3s vs ~1.6s (tie). The
+  cross-build daemon earns its keep — impl-only is 0.37s warm vs 0.81s
+  spawning javac cold — and even the cold-worker number beats Gradle's warm
+  daemon, since brix carries no per-invocation daemon/config tax. Honest
+  caveat: Gradle's `:jar` does more per module (multi-release, module-info,
+  OSGi), so absolute times aren't a pure compile race — but the incremental
+  overhead brix avoids is exactly the edit-compile-loop cost. Gradle needs a
+  Java 21 toolchain (JDK 26 is the box default), provisioned locally under
+  `~/Projects/brix_test/jdk`.
 - **JUnit 5 dogfood — real Gradle project built by brix** (`examples/junit5/`):
   re-implements the compile graph of a famous Gradle project's seven pure-Java
   `junit-platform-*` modules (`commons → engine → launcher → suite-* / testkit`,
