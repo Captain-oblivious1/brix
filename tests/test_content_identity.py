@@ -33,6 +33,11 @@ EXPECTED = {
     "addmethod": "90c437bf23a6b8c1289b441eec393dcbeee425bf9fff20f05d65f69ecaae441f",
     "constant": "36f7d159f8b658b7b391441a5acc616f76169868764c2c13a1e14dbf0b333b13",
     "annotation": "140b9c778e2bdccc225e15f24c7e11f470777ecc8fec03b656d6f1fe3ecb48d4",
+    # A String-valued annotation element (@Since("1.13")). This is the case
+    # that used to crash the parser (the 's' element value indexes a Utf8
+    # directly, not a String constant) so real Java — every @API(since=...)
+    # class — silently fell back to :raw byte hashing. Regression guard.
+    "strannotation": "0c7e6d76dd379b1a5a9b066729c009090977264e93d9130a6ca09c8b0b79c434",
 }
 
 
@@ -67,6 +72,15 @@ def test_api_changes_each_hash_differently():
     changed = {jvmabi.digest_class(cls(n)) for n in ("addmethod", "constant", "annotation")}
     assert base not in changed
     assert len(changed) == 3  # add-method, constant-value, annotation all distinct
+
+
+def test_string_valued_annotation_is_captured():
+    # The regression: an @Since("1.13")-style String element used to make the
+    # parser raise (leaking raw Utf8 bytes into the ABI) so the whole class
+    # fell back to :raw. It must now parse cleanly and be ABI-relevant —
+    # distinct from base and from the value-less @Deprecated fixture.
+    d = jvmabi.digest_class(cls("strannotation"))
+    assert d not in (jvmabi.digest_class(cls("base")), jvmabi.digest_class(cls("annotation")))
 
 
 def test_jar_abi_impl_only_equal(tmp_path):

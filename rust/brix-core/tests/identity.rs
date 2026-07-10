@@ -17,12 +17,16 @@ use brix_core::{
 // The golden contract, identical to EXPECTED in test_content_identity.py. A
 // change on either side that these do not catch would be a silent cross-engine
 // cache divergence.
-const EXPECTED: [(&str, &str); 5] = [
+const EXPECTED: [(&str, &str); 6] = [
     ("base", "70286f3e666e92342509bcbd9f7f4855ccf3d20c4b6e025ea0f7b7899d137b18"),
     ("impl", "70286f3e666e92342509bcbd9f7f4855ccf3d20c4b6e025ea0f7b7899d137b18"),
     ("addmethod", "90c437bf23a6b8c1289b441eec393dcbeee425bf9fff20f05d65f69ecaae441f"),
     ("constant", "36f7d159f8b658b7b391441a5acc616f76169868764c2c13a1e14dbf0b333b13"),
     ("annotation", "140b9c778e2bdccc225e15f24c7e11f470777ecc8fec03b656d6f1fe3ecb48d4"),
+    // String-valued annotation element (@Since("1.13")) — the case that used
+    // to error out of the parser (into :raw). Same pinned digest as Python:
+    // this line IS the cross-engine parity assertion for the fix.
+    ("strannotation", "0c7e6d76dd379b1a5a9b066729c009090977264e93d9130a6ca09c8b0b79c434"),
 ];
 
 fn cls(name: &str) -> Vec<u8> {

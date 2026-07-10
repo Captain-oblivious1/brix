@@ -218,7 +218,13 @@ def _named_attributes(pool: list, raw: dict) -> dict:
 def _read_element_value(pool: list, r: _Reader):
     tag = r.u1()
     t = chr(tag)
-    if t in "BCDFIJSZs":
+    if t == "s":
+        # A String-valued element: the index points *directly* at a Utf8
+        # constant (not a String constant), so carry it like the `c`/`e`
+        # tags do, not through `_const_value` (which handles loadable
+        # constants and would leak the raw Utf8 bytes).
+        return [t, _utf8(pool, r.u2())]
+    if t in "BCDFIJSZ":  # primitive-valued elements: Integer/Long/Float/Double
         return [t, _const_value(pool, r.u2())]
     if t == "e":  # enum
         return [t, _utf8(pool, r.u2()), _utf8(pool, r.u2())]

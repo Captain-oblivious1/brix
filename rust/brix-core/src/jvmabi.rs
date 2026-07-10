@@ -294,7 +294,15 @@ impl Attributes {
 fn read_element_value(pool: &[Option<Const>], r: &mut Reader) -> Result_<Value> {
     let tag = r.u1()?;
     let t = tag as char;
-    if "BCDFIJSZs".contains(t) {
+    if t == 's' {
+        // A String-valued element: the index points *directly* at a Utf8
+        // constant (not a String constant), so carry it like the `c`/`e`
+        // tags do — routing it through `const_value` (loadable constants)
+        // would error on the Utf8 (mirrors `_read_element_value`).
+        return Ok(Value::List(vec![Value::str("s"), Value::Str(utf8(pool, r.u2()?)?)]));
+    }
+    if "BCDFIJSZ".contains(t) {
+        // Primitive-valued elements: Integer / Long / Float / Double.
         return Ok(Value::List(vec![Value::str(t.to_string()), const_value(pool, r.u2()?)?]));
     }
     Ok(match t {

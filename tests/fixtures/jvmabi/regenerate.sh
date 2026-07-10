@@ -19,10 +19,10 @@ cd "$(dirname "$0")"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-for v in base impl addmethod constant annotation; do
+for v in base impl addmethod constant annotation strannotation; do
     mkdir -p "$tmp/$v"
     cp "src/$v.java" "$tmp/$v/Lib.java"   # a public class must live in Lib.java
     javac -d "$tmp/$v" "$tmp/$v/Lib.java"
     cp "$tmp/$v/abidemo/Lib.class" "$v.class"
 done
-echo "regenerated: base impl addmethod constant annotation (.class)"
+echo "regenerated: base impl addmethod constant annotation strannotation (.class)"
