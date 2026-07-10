@@ -232,3 +232,120 @@ class JarAction(Action):
             outputs={"output": self.output_file},
         )
         return [compile_java, package]
+
+
+def _runtime_union(classpath: list[DataExpr]) -> DataExpr:
+    """Byte-lens view of the classpath jars (`identity=None`): execution
+    depends on the *implementation*, so a test re-runs whenever any byte on
+    its runtime classpath changes — the counterpart to `_classpath_union`,
+    which uses the ABI lens for compilation."""
+    atoms: list = []
+    for expr in classpath:
+        for atom in expr.atoms():
+            if isinstance(atom, FileData):
+                atoms.append(FileData(atom.path))  # drop any identity
+            elif isinstance(atom, GlobData):
+                atoms.append(GlobData(atom.pattern.template))
+            else:
+                atoms.append(atom)
+    return DataUnion(*atoms)
+
+
+def _classpath_paths(classpath: list[DataExpr]) -> list[str]:
+    return [
+        atom.path
+        for expr in classpath
+        for atom in expr.atoms()
+        if isinstance(atom, FileData)
+    ]
+
+
+class JUnitTestAction(Action):
+    """Compile JUnit 5 test sources and run them with the platform console
+    launcher, so brix runs a suite only when its inputs actually change.
+
+    The key move is two lenses on the same ``classpath`` jars: the test
+    *compile* depends on them through ``jvm-abi`` (compilation cares only
+    about the API), while the test *run* depends on them through their
+    **bytes** (execution cares about the implementation). So an
+    implementation-only change to the code under test does not recompile the
+    tests but does re-run them; a change touching nothing on a suite's
+    classpath re-runs nothing.
+
+    The run declares no file outputs, so it replays purely on its input
+    fingerprint: a passing suite is cached like any result (and restored on a
+    clean checkout), while a failing suite is recorded as failed and re-runs
+    until its inputs change.
+
+    ``classpath`` is the code under test (jars). ``console_jar`` is a
+    ``junit-platform-console-standalone`` jar — the runner and the source of
+    the Jupiter API the tests compile against. Tests compile through the warm
+    javac worker (required, for the classpath join).
+    """
+
+    def __init__(
+        self,
+        *,
+        test_sources: DataExpr,
+        classpath: list[DataExpr],
+        console_jar: str,
+        javac_worker: "WorkerSpec",
+        name: str = "junit tests",
+        test_classes_dir: str = "build/test-classes",
+        java: ToolData | None = None,
+        options: list[str] | DataExpr | None = None,
+        select: str = "--scan-class-path",
+    ) -> None:
+        self.test_sources = test_sources
+        self.classpath = classpath
+        self.console_jar = console_jar
+        self.javac_worker = javac_worker
+        self.name = name
+        self.test_classes_dir = test_classes_dir
+        self.java = java if java is not None else ToolData("java")
+        self.options = options
+        self.select = select
+        if javac_worker is None:
+            raise ValueError("JUnitTestAction requires javac_worker= (classpath join)")
+
+    def lower(self) -> list[Action]:
+        test_classes = GlobData(f"{self.test_classes_dir}/{{name}}.class")
+
+        # 1. Compile the tests: classpath = code under test + the console jar
+        #    (which supplies the Jupiter API), through the jvm-abi lens.
+        compile_tests = ExternalProcessAction(
+            name=f"compile {self.name} -> {self.test_classes_dir}",
+            worker=self.javac_worker,
+            command_line=(
+                "--classpath {classpath} --options {options} -d {out} --sources {sources}"
+            ),
+            inputs={
+                "classpath": _classpath_union([*self.classpath, FileData(self.console_jar)]),
+                "options": _options_expr(self.options),
+                "sources": self.test_sources,
+            },
+            outputs={"out": FileData(self.test_classes_dir), "classes": test_classes},
+        )
+
+        # 2. Run the tests: --class-path is the compiled tests + the code under
+        #    test (baked literal paths); those same jars are byte-lens inputs,
+        #    so an implementation change re-runs the suite. No file outputs.
+        cp_flags = " ".join(
+            f"--class-path {p}"
+            for p in [self.test_classes_dir, *_classpath_paths(self.classpath)]
+        )
+        run_tests = ExternalProcessAction(
+            name=f"run {self.name}",
+            command_line=(
+                "{java} -jar {console} execute --disable-banner --details=none"
+                f" --fail-if-no-tests {self.select} {cp_flags}"
+            ),
+            inputs={
+                "java": self.java,
+                "console": FileData(self.console_jar),  # byte lens (framework)
+                "under_test": _runtime_union(self.classpath),  # byte lens: impl matters
+                "tests": test_classes,  # byte lens
+            },
+            outputs={},  # exit code only — replays on the input fingerprint
+        )
+        return [compile_tests, run_tests]

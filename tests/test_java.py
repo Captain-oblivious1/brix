@@ -78,6 +78,44 @@ def test_sources_union_flows_into_javac():
     assert templates == ["src/{c}.java", "build/gen/{c}.java"]
 
 
+def test_junit_test_action_uses_two_lenses():
+    """The heart of selective test-running: the test *compile* depends on the
+    classpath through the jvm-abi lens (API), the test *run* depends on the
+    same jars through their bytes (implementation), and the run has no file
+    outputs so it replays purely on its input fingerprint."""
+    from brix.workers import WorkerSpec
+
+    worker = WorkerSpec(name="javac", command_line="{java} -jar {jar}", inputs={})
+    graph = Graph()
+    graph.add(
+        java.JUnitTestAction(
+            name="mytests",
+            test_sources=data.glob("src/test/java/{n}.java"),
+            classpath=[data.file("build/libs/app.jar")],
+            console_jar="lib/console.jar",
+            javac_worker=worker,
+        )
+    )
+    compile_tests, run_tests = graph.actions
+
+    # Compile: classpath jars carry identity="jvm-abi" (compile cares about API).
+    cp_atoms = list(compile_tests.inputs["classpath"].atoms())
+    cp = {a.path: a.identity for a in cp_atoms}
+    assert cp["build/libs/app.jar"] == "jvm-abi"
+    assert cp["lib/console.jar"] == "jvm-abi"  # the console jar supplies the Jupiter API
+
+    # Run: the code under test is a byte-lens input (no identity — impl matters),
+    # the run has NO file outputs (replays on fingerprint), and drives the
+    # console launcher with --class-path entries.
+    under_test = list(run_tests.inputs["under_test"].atoms())
+    assert [a.path for a in under_test] == ["build/libs/app.jar"]
+    assert all(a.identity is None for a in under_test)  # byte lens
+    assert run_tests.outputs == {}
+    assert "-jar {console}" in run_tests.command_line
+    assert "--class-path build/test-classes" in run_tests.command_line
+    assert "--class-path build/libs/app.jar" in run_tests.command_line
+
+
 needs_jdk = pytest.mark.skipif(
     shutil.which("javac") is None or shutil.which("jar") is None or shutil.which("java") is None,
     reason="no JDK on PATH",
