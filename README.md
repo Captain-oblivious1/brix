@@ -119,11 +119,14 @@ below is tagged with the model that should do it.
 1. **Make Java builds fast** — design notes in `docs/java-fast-builds.md`. Mostly
    done: brix already skips recompiling a Java library's users when only its
    internals changed (not its public interface), and it keeps compiler processes
-   alive so they don't pay startup cost on every file. **What's left: an
-   always-warm build server** — keep those compiler processes alive *between*
-   separate builds, not just within one build. This is the piece that would let
-   brix beat Gradle on the last benchmark. **[Fable]** — fiddly, easy to get
-   subtly wrong.
+   alive so they don't pay startup cost on every file. **The always-warm
+   build server landed** (see Completed: cross-build worker daemon): warm
+   compiler processes now survive *between* builds, adopted by the next
+   build through a per-worker holder daemon, with a single
+   `worker_idle_timeout` knob (default 15 min; 0 or `--no-daemon` turns it
+   off). What's left: rerun the acceptance benchmark against Gradle
+   (scenarios 4/5 warm — the "faster than Gradle" claim) on the next
+   Java-project session. **[Fable]** — fiddly, easy to get subtly wrong.
 2. **Rewrite the engine in Rust** — design notes in `docs/rust-port.md` and
    `docs/boundary-schema.md`. The goal: one shared engine that can power *both* a
    Python and a JavaScript/TypeScript way of writing build files, so nobody has
@@ -942,6 +945,33 @@ build inputs that come from memory or a database instead of files, and a C++
   Wire contract notes in `docs/boundary-schema.md`. Suite: 209 both
   engines (custom-store and custom-identity crossing tests included);
   clippy clean.
+
+- **JVM fast builds, phase 3 — cross-build worker daemon**
+  (`rust/brix-workerd/` new bin crate, `rust/brix-core/src/workers.rs`,
+  `content.rs` `worker_fingerprint`, boundary + CLI knobs): warm workers
+  now survive *between* builds — the edit-compile loop's JVM stays hot.
+  The build process exits, so persistence lives in `brix-workerd`, a
+  small holder daemon per worker: it detaches, owns the worker's pipes,
+  and bridges one build at a time over a Unix socket (short real path in
+  the temp dir; the registry under `<metadata_dir>/workers/<fp16>/`
+  holds pointer files — socket paths are SUN_LEN-limited and workspaces
+  can be deep). The registry key is the worker-section fingerprint
+  already in every action fingerprint, so a JDK upgrade or rebuilt
+  wrapper jar just misses the registry and the orphan idles out —
+  replacement with no kill logic. Sessions end with an explicit release
+  line; any abrupt disconnect (engine crash, discarded-after-garbage
+  worker) poisons the worker and the holder kills it — mid-request state
+  is unknowable, so v1 crash semantics hold exactly. One knob:
+  `worker_idle_timeout` (default 900 s; 0 = no daemon at all, v1 pipes;
+  CLI `--no-daemon` / `--worker-timeout`; env
+  `BRIX_WORKER_IDLE_TIMEOUT`, which `tests/conftest.py` zeroes so suites
+  never leak daemons). Never fingerprint material. Rust engine only —
+  the Python engine keeps v1 until 4c deletes it. Pinned by
+  `rust/brix-workerd/tests/daemon.rs` (adoption by pid equality, idle
+  expiry, fingerprint re-key, crash-not-reused, busy-holder
+  concurrency) and `tests/test_worker_daemon.py` through the full
+  boundary. Suite: 211 both engines; cargo 13 suites; clippy clean.
+  Next: the Gradle acceptance benchmark, scenarios 4/5 warm.
 
 ## Design rules
 

@@ -20,7 +20,7 @@ use serde_json::{json, Map, Value};
 
 use brix_core::atomic::AtomicLayer;
 use brix_core::cache::{CacheLayer, CacheStore};
-use brix_core::executor::{execute, BuildResult};
+use brix_core::executor::BuildResult;
 use brix_core::incremental::IncrementalLayer;
 use brix_core::layers::BuildLayer;
 use brix_core::metadata::BuildMetadata;
@@ -383,16 +383,59 @@ fn build(
     let mut plan = brix_core::planner::plan_graph(spec.actions, &root, targets.as_deref())
         .map_err(PyValueError::new_err)?;
     let custom = custom_identities(identities);
-    let layers = build_layers(&config, &root, &stores.unwrap_or_default(), custom)
+    let layers = build_layers(&config, &root, &stores.unwrap_or_default(), custom.clone())
         .map_err(PyValueError::new_err)?;
     let layer_refs: Vec<&dyn BuildLayer> = layers.iter().map(|b| b.as_ref()).collect();
+
+    // Cross-build worker daemons (docs/java-fast-builds.md v2): one knob.
+    // 0 = no persistence (v1 pipes, terminate at build end). The registry
+    // lives under the metadata dir; a missing brix-workerd binary is only
+    // an error when a worker-routed action actually runs — loud there,
+    // invisible to builds that use no workers.
+    let idle_timeout =
+        config.get("worker_idle_timeout").and_then(|v| v.as_u64()).unwrap_or(900);
+    let workers = if idle_timeout == 0 {
+        brix_core::WorkerRegistry::new()
+    } else {
+        let metadata_dir = config
+            .get("layers")
+            .and_then(|l| l.as_array())
+            .and_then(|layers| {
+                layers.iter().find_map(|entry| {
+                    (entry.get("kind").and_then(|k| k.as_str()) == Some("incremental"))
+                        .then(|| entry.get("metadata_dir").and_then(|d| d.as_str()))
+                        .flatten()
+                })
+            })
+            .unwrap_or("build/.brix");
+        let workerd = config
+            .get("workerd")
+            .and_then(|w| w.as_str())
+            .unwrap_or("brix-workerd")
+            .to_string();
+        brix_core::WorkerRegistry::with_daemon(brix_core::DaemonConfig {
+            registry_dir: std::path::Path::new(&root).join(metadata_dir).join("workers"),
+            idle_timeout,
+            workerd: workerd.into(),
+            detector: brix_core::TimeAndHashChangeDetector::default()
+                .with_custom_identities(custom),
+        })
+    };
 
     let reporter: Option<PyReporter> =
         on_event.map(|callback| PyReporter { callback, error: Mutex::new(None) });
 
     let result = py.detach(|| match &reporter {
-        Some(bridge) => execute(&mut plan, jobs, &layer_refs, bridge),
-        None => execute(&mut plan, jobs, &layer_refs, &NullReporter),
+        Some(bridge) => {
+            brix_core::execute_with_workers(&mut plan, jobs, &layer_refs, bridge, workers)
+        }
+        None => brix_core::execute_with_workers(
+            &mut plan,
+            jobs,
+            &layer_refs,
+            &NullReporter,
+            workers,
+        ),
     });
 
     if let Some(bridge) = reporter {

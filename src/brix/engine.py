@@ -273,12 +273,38 @@ def maybe_clean(graph, root: Path, metadata_dir) -> int | None:
     return int(raw["removed"])
 
 
+def _worker_daemon_config(worker_idle_timeout: int | None) -> dict:
+    """The cross-build worker daemon knobs (docs/java-fast-builds.md v2).
+    One knob: idle seconds, default 900; 0 disables persistence (v1
+    die-at-build-end). Precedence: explicit argument > BRIX_WORKER_IDLE_TIMEOUT
+    > 900. Never fingerprint material. The brix-workerd holder binary is
+    found next to the extension (or $BRIX_WORKERD, or $PATH) — a missing
+    binary only surfaces when a worker-routed action runs, loudly."""
+    if worker_idle_timeout is None:
+        worker_idle_timeout = int(os.environ.get("BRIX_WORKER_IDLE_TIMEOUT", "900"))
+    if worker_idle_timeout <= 0:
+        return {"worker_idle_timeout": 0}
+    workerd = os.environ.get("BRIX_WORKERD")
+    if not workerd:
+        module = _extension()
+        so = getattr(module, "__file__", None)
+        if so:
+            candidate = Path(so).parent / "brix-workerd"
+            if candidate.is_file():
+                workerd = str(candidate)
+    return {
+        "worker_idle_timeout": worker_idle_timeout,
+        "workerd": workerd or "brix-workerd",
+    }
+
+
 def maybe_build(
     builder,
     jobs: int | None = None,
     reporter: "Reporter | None" = None,
     targets: list[str] | None = None,
     hold: bool | None = None,
+    worker_idle_timeout: int | None = None,
 ) -> "BuildResult | None":
     """The Rust-engine path for a builder's ``build()``, or None to run the
     Python engine (not requested, or a builder whose ``layer_specs`` is
@@ -304,9 +330,9 @@ def maybe_build(
             stores.append(None)
             wire_specs.append(spec)
     spec_json = json.dumps(lowering.graph_to_spec(graph))
-    config_json = json.dumps(
-        {"root": str(builder.root), "jobs": jobs, "targets": targets, "layers": wire_specs}
-    )
+    config = {"root": str(builder.root), "jobs": jobs, "targets": targets, "layers": wire_specs}
+    config.update(_worker_daemon_config(worker_idle_timeout))
+    config_json = json.dumps(config)
     adapter = _EventAdapter(reporter, builder.root) if reporter is not None else None
     result = _result_from_json(
         module.build(spec_json, config_json, adapter, stores, _identity_callbacks(graph)),

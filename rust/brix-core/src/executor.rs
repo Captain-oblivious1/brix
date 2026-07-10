@@ -224,6 +224,20 @@ pub fn execute(
     layers: &[&dyn BuildLayer],
     reporter: &dyn Reporter,
 ) -> BuildResult {
+    execute_with_workers(plan, jobs, layers, reporter, WorkerRegistry::new())
+}
+
+/// `execute` with a caller-built worker registry — how the boundary turns
+/// the `worker_idle_timeout` config into cross-build daemons
+/// (`WorkerRegistry::with_daemon`). The plain `execute` is v1: workers die
+/// at build end.
+pub fn execute_with_workers(
+    plan: &mut ExecutionPlan,
+    jobs: Option<usize>,
+    layers: &[&dyn BuildLayer],
+    reporter: &dyn Reporter,
+    workers: WorkerRegistry,
+) -> BuildResult {
     let mut states = NodeStateTable::new();
     let mut ctx = NodeContext::for_root(std::path::PathBuf::from(&plan.root));
     // Python: `jobs or min(32, cpu_count or 4)` — 0 is falsy and falls back.
@@ -241,7 +255,6 @@ pub fn execute(
     }
     // From here the context is frozen and shared with worker threads.
     let ctx = ctx;
-    let workers = WorkerRegistry::new();
 
     let (job_tx, job_rx) = mpsc::channel::<(usize, Node)>();
     let (done_tx, done_rx) = mpsc::channel::<(usize, ProcessResult)>();

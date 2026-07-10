@@ -77,6 +77,15 @@ def main(
         quietness.add_argument(
             "--quiet-replays", action="store_true", help="print only real work"
         )
+        daemon = sub.add_mutually_exclusive_group()
+        daemon.add_argument(
+            "--no-daemon", action="store_true",
+            help="don't keep persistent workers warm between builds",
+        )
+        daemon.add_argument(
+            "--worker-timeout", type=int, default=None, metavar="SECS",
+            help="seconds a warm worker survives between builds (default 900)",
+        )
 
     build_parser = subparsers.add_parser("build", help="build (the default)")
     add_build_options(build_parser, "*")
@@ -125,6 +134,10 @@ def main(
                 print("brix: --stage requires an AtomicBuilder (outermost)", file=sys.stderr)
                 return 2
             kwargs["hold"] = True
+        if args.no_daemon:
+            kwargs["worker_idle_timeout"] = 0
+        elif args.worker_timeout is not None:
+            kwargs["worker_idle_timeout"] = args.worker_timeout
         try:
             targets = resolve_targets()
             result = builder.build(jobs=args.jobs, reporter=reporter, targets=targets, **kwargs)

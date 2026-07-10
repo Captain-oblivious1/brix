@@ -159,6 +159,22 @@ fn exprs_fp(
     Ok(Value::Map(map))
 }
 
+/// The digest of a worker's identity — the same `{command, inputs}` section
+/// that joins every worker-routed action's fingerprint, digested standalone.
+/// This is the cross-build daemon registry key (docs/java-fast-builds.md v2):
+/// same JDK + same wrapper jar ⇒ same key, so a JDK upgrade or a rebuilt jar
+/// simply misses the registry and starts a fresh daemon.
+pub fn worker_fingerprint(
+    spec: &crate::actions::WorkerSpec,
+    ctx: &NodeContext,
+    det: &TimeAndHashChangeDetector,
+) -> Result<String, String> {
+    let mut section = BTreeMap::new();
+    section.insert("command".to_string(), Value::str(&spec.command_line));
+    section.insert("inputs".to_string(), exprs_fp(&spec.inputs, ctx, det)?);
+    Ok(digest(&Value::Map(section)))
+}
+
 /// The content fingerprint of a process action. `Err` for a non-process action
 /// or an atom kind whose port is deferred (see the module docs). The payload
 /// mirrors Python exactly: `command` + `inputs` (and `env` only when

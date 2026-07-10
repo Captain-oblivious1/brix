@@ -67,10 +67,15 @@ class CleanBuilder:
         return []
 
     def build(self, jobs: int | None = None, reporter=None,
-              targets: list[str] | None = None) -> BuildResult:
+              targets: list[str] | None = None,
+              worker_idle_timeout: int | None = None) -> BuildResult:
+        """``worker_idle_timeout``: seconds a persistent worker's daemon
+        stays warm between builds (default 900; 0 = no daemon). Rust engine
+        only; the Python engine always terminates workers at build end."""
         from . import engine
 
-        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets)
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets,
+                                  worker_idle_timeout=worker_idle_timeout)
         if rust is not None:
             return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
@@ -114,10 +119,15 @@ class IncrementalBuilder:
         return [{"kind": "incremental", "metadata_dir": str(self.metadata_dir)}]
 
     def build(self, jobs: int | None = None, reporter=None,
-              targets: list[str] | None = None) -> BuildResult:
+              targets: list[str] | None = None,
+              worker_idle_timeout: int | None = None) -> BuildResult:
+        """``worker_idle_timeout``: seconds a persistent worker's daemon
+        stays warm between builds (default 900; 0 = no daemon). Rust engine
+        only; the Python engine always terminates workers at build end."""
         from . import engine
 
-        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets)
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets,
+                                  worker_idle_timeout=worker_idle_timeout)
         if rust is not None:
             return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
@@ -195,10 +205,15 @@ class CacheBuilder:
         return [{"kind": "cache", "cache_dir": str(self.cache_dir)}, *inner]
 
     def build(self, jobs: int | None = None, reporter=None,
-              targets: list[str] | None = None) -> BuildResult:
+              targets: list[str] | None = None,
+              worker_idle_timeout: int | None = None) -> BuildResult:
+        """``worker_idle_timeout``: seconds a persistent worker's daemon
+        stays warm between builds (default 900; 0 = no daemon). Rust engine
+        only; the Python engine always terminates workers at build end."""
         from . import engine
 
-        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets)
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets,
+                                  worker_idle_timeout=worker_idle_timeout)
         if rust is not None:
             return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
@@ -234,12 +249,15 @@ class AtomicBuilder:
         return [*inner, {"kind": "atomic", "staging_dir": str(self.staging_dir), "hold": hold}]
 
     def build(self, jobs: int | None = None, reporter=None,
-              targets: list[str] | None = None, hold: bool = False) -> BuildResult:
+              targets: list[str] | None = None, hold: bool = False,
+              worker_idle_timeout: int | None = None) -> BuildResult:
         """``hold=True``: build fully but keep outputs in staging for
-        review — the workspace changes only at :meth:`commit`."""
+        review — the workspace changes only at :meth:`commit`.
+        ``worker_idle_timeout``: see `IncrementalBuilder.build`."""
         from . import engine
 
-        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets, hold=hold)
+        rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets, hold=hold,
+                                  worker_idle_timeout=worker_idle_timeout)
         if rust is not None:
             return rust
         return self.plan(targets).run(jobs=jobs, layers=self.layers(hold=hold), reporter=reporter)

@@ -118,15 +118,50 @@ Rules:
   layers never see them; `around_node` wraps request dispatch exactly
   as it wraps spawning today.
 
-### v2 (design for it now, build later): cross-build daemon
+### v2: cross-build daemon (design settled 2026-07; Rust engine only)
 
 The edit-compile loop wants the JVM warm *between* builds. v2 keeps
 worker processes alive after build end, keyed by their worker
-fingerprint, with an idle timeout (default ~15min) and a pidfile/socket
-registry under the metadata dir. A fingerprint change (new JDK, new
-wrapper) kills and replaces the daemon. v1 must not preclude this: the
-per-request `cwd`, the statelessness contract, and keying by worker
-fingerprint are the load-bearing preparations.
+fingerprint. The build process itself exits, so persistence lives in a
+**holder daemon** — `brix-workerd`, a small Rust binary built alongside
+the `brix_py` extension (same discovery rules):
+
+- Instead of spawning the worker directly, the engine spawns
+  `brix-workerd`, which detaches (double-fork/setsid), spawns the real
+  worker child on stdin/stdout pipes, and listens on a Unix socket,
+  bridging **one client at a time** to the worker's pipes. The JSON-line
+  protocol and the workers themselves are byte-for-byte unchanged —
+  the holder is transport plumbing only.
+- Registry: `<metadata_dir>/workers/<worker-fingerprint>/<n>.sock` (+
+  pidfile). The key is the same worker-section fingerprint that joins
+  action fingerprints (rendered launch command + input atom fps), so a
+  JDK upgrade or a rebuilt worker jar changes the key: the next build
+  finds no daemon and starts fresh; the orphan idles out by itself —
+  fingerprint-keyed replacement with no kill logic.
+- Engine lifecycle: `check_out` adopts an idle daemon socket for the
+  fingerprint when one answers (a stale/busy/dead socket is skipped —
+  connect failure deletes the entry and a fresh daemon starts); build
+  end *releases* workers back to their holders instead of terminating.
+  Crash semantics are v1's, unchanged: a crashed or protocol-garbled
+  worker is discarded, never reused, and its registry entry removed.
+- **Idle timeout, one knob**: `worker_idle_timeout` seconds, default
+  900. The holder enforces it (a build that never comes back cannot);
+  on expiry it kills the worker, removes its entry, and exits.
+  **0 disables persistence entirely** — the engine skips the holder and
+  uses v1 direct pipes with terminate-at-build-end; the CLI spells that
+  `--no-daemon`. The timeout rides the boundary *config* (never
+  `WorkerSpec` and never fingerprint material: changing it must not
+  rebuild anything).
+- Concurrent builds: one request in flight per worker still holds; a
+  busy socket just means the pool starts another daemon — parallelism
+  by process count, exactly like v1.
+- Rust engine only. Under `BRIX_ENGINE=py` workers keep v1
+  die-at-build-end semantics until the Python engine internals are
+  deleted (rust-port.md phase 4c); daemon tests gate on the extension.
+
+v1's load-bearing preparations (per-request `cwd`, the statelessness
+contract, fingerprint keying) are exactly what makes this a transport
+change and not a semantics change.
 
 ---
 
