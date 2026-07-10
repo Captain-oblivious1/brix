@@ -129,3 +129,42 @@ class LinkApplicationAction(Action):
                 outputs={"output": self.output_file},
             )
         ]
+
+
+class ArchiveAction(Action):
+    """Bundle object files into a static library with ``ar``.
+
+    Uses ``ar Dcrs``: **D**eterministic (no timestamps/uids, so the archive
+    is byte-reproducible — its content hash is stable when the objects are,
+    which keeps dependents from re-linking spuriously), **c**reate,
+    **r**eplace, and build the **s**ymbol index. Link against the result by
+    passing it as one of `LinkApplicationAction`'s ``object_files`` (the
+    linker pulls the members it needs).
+
+    Note on removed sources: ``ar`` *updates* an existing archive rather than
+    rebuilding it. Under the atomic layer (the recommended stack) the archive
+    is written into fresh staging each build, so a deleted source cannot
+    leave a stale member. Without atomic, run ``clean`` after removing a
+    source that fed the library.
+    """
+
+    def __init__(
+        self,
+        *,
+        object_files: DataExpr,
+        output_file: FileData,
+        ar: ToolData | None = None,
+    ) -> None:
+        self.object_files = object_files
+        self.output_file = output_file
+        self.ar = ar if ar is not None else ToolData("ar")
+
+    def lower(self) -> list[Action]:
+        return [
+            ExternalProcessAction(
+                name=f"ar {self.output_file.path}",
+                command_line="{ar} Dcrs {output} {objects}",
+                inputs={"ar": self.ar, "objects": self.object_files},
+                outputs={"output": self.output_file},
+            )
+        ]

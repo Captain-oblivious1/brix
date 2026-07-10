@@ -45,6 +45,23 @@ def test_link_lowers_to_process_action():
     assert action.outputs["output"].path == "build/bin/app"
 
 
+def test_archive_lowers_to_ar():
+    graph = Graph()
+    graph.add(
+        cpp.ArchiveAction(
+            object_files=data.glob("build/obj/{name}.o"),
+            output_file=data.file("build/libfoo.a"),
+        )
+    )
+    (action,) = graph.actions
+    assert isinstance(action, ExternalProcessAction)
+    assert action.name == "ar build/libfoo.a"
+    # Deterministic (D) so the archive is byte-reproducible; c=create,
+    # r=replace, s=symbol index.
+    assert action.command_line == "{ar} Dcrs {output} {objects}"
+    assert action.outputs["output"].path == "build/libfoo.a"
+
+
 def test_binding_mismatch_rejected():
     with pytest.raises(ValueError, match="must match"):
         cpp.CompileSourceAction(
@@ -167,3 +184,79 @@ def test_header_change_rebuilds_only_dependent_object(tmp_path):
     assert third.success
     ran = sorted(r.action_name for r in third.process_results if r.source == "process")
     assert ran == ["compile main"]  # not "compile other"
+
+
+needs_ar = pytest.mark.skipif(
+    shutil.which("c++") is None or shutil.which("ar") is None, reason="no c++/ar"
+)
+
+
+@needs_ar
+def test_static_library_archive_link_run(tmp_path):
+    """Compile library sources into a static lib (ar), then link an app
+    against it and run — the compile -> archive -> link -> run chain leveldb
+    and friends use. A library-impl change re-archives and re-links; the app
+    object replays (it depends only on the header/API, unchanged here)."""
+    import subprocess
+
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "app").mkdir()
+    (tmp_path / "lib/greet.cpp").write_text(
+        '#include <string>\nstd::string greet() { return "hello"; }\n'
+    )
+    (tmp_path / "lib/who.cpp").write_text(
+        '#include <string>\nstd::string who() { return "brix"; }\n'
+    )
+    (tmp_path / "app/main.cpp").write_text(
+        "#include <iostream>\n#include <string>\n"
+        "std::string greet(); std::string who();\n"
+        'int main() { std::cout << greet() << " " << who() << "\\n"; }\n'
+    )
+
+    def create_graph():
+        graph = Graph()
+        d = graph.data
+        graph.add(
+            cpp.CompileSourceAction(
+                source_files=d.glob("lib/{name}.cpp"),
+                object_files=d.glob("build/obj/lib/{name}.o"),
+            ),
+            cpp.ArchiveAction(
+                object_files=d.glob("build/obj/lib/{name}.o"),
+                output_file=d.file("build/libgreet.a"),
+            ),
+            cpp.CompileSourceAction(
+                source_files=d.glob("app/{name}.cpp"),
+                object_files=d.glob("build/obj/app/{name}.o"),
+            ),
+            cpp.LinkApplicationAction(
+                object_files=d.glob("build/obj/app/{name}.o") + d.file("build/libgreet.a"),
+                output_file=d.file("build/bin/app"),
+            ),
+        )
+        return graph
+
+    def builder():
+        return AtomicBuilder(IncrementalBuilder(create_graph, root=tmp_path))
+
+    assert builder().build().success
+    out = subprocess.run(
+        [str(tmp_path / "build/bin/app")], capture_output=True, text=True
+    ).stdout.strip()
+    assert out == "hello brix"
+
+    # Change a library implementation: re-archive + re-link; app object replays.
+    (tmp_path / "lib/greet.cpp").write_text(
+        '#include <string>\nstd::string greet() { return "hi"; }\n'
+    )
+    second = builder().build()
+    assert second.success
+    ran = sorted(r.action_name for r in second.process_results if r.source == "process")
+    assert "compile greet" in ran
+    assert "ar build/libgreet.a" in ran
+    assert "link build/bin/app" in ran
+    assert "compile main" not in ran  # app object unchanged
+    out = subprocess.run(
+        [str(tmp_path / "build/bin/app")], capture_output=True, text=True
+    ).stdout.strip()
+    assert out == "hi brix"
