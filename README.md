@@ -186,6 +186,33 @@ below is tagged with the model that should do it.
    contract — Opus-sized with a Fable review of the FFI threading
    (callbacks arrive on build worker threads).
 
+### Feature-completeness dogfooding (in progress — prove brix on real projects before starting track 3)
+
+Cloning real projects has been the best gap-finder (each one surfaced a real
+bug or missing feature). Clones live in `~/Projects/brix_test/`; our `brix.py`
+artifacts live in this repo under `examples/`. **Done:** JUnit 5 (Java compile
+graph; found the jvm-abi String-annotation bug; resources), fmt (C++ header-dep
+tracking), jackson-core (selective test running via `java.JUnitTestAction`;
+found generated-sources + shaded-dep needs), and `cpp.ArchiveAction` (static
+libs, ready to use).
+
+**Next, in priority order (all Opus — dogfood + helper additions, no engine
+changes expected):**
+1. **C++ / leveldb** — clone `https://github.com/google/leveldb`, build
+   `libleveldb.a` from its `.cc` sources with `cpp.CompileSourceAction` +
+   the new `cpp.ArchiveAction`, then link/run a tool. Validates archiving +
+   parallel-compile scale + the header graph on ~60 files. (`ArchiveAction`
+   already exists — `examples/junit5|fmt|jackson` show the pattern.)
+2. **Annotation processors** — a small Lombok/MapStruct project; add a
+   `-processorpath` option to `JarAction` and validate the processor jars are
+   tracked as fingerprint inputs.
+3. **Multi-module cross-suite test selection** — add `jackson-databind`
+   (depends on `jackson-core`): a core impl change re-runs databind's tests
+   but not annotations'.
+
+Deferred (need features + dependency resolution — better with the real
+monorepo): Spring Boot fat-jars, Kotlin modules.
+
 ### Opus queue — ready to do now
 
 These are self-contained and come with tests. No Fable needed.
