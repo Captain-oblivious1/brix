@@ -138,6 +138,7 @@ class JarAction(Action):
         classes_dir: str = "build/classes",
         entry_point: str | None = None,
         classpath: list[DataExpr] | None = None,
+        resource_dir: str | None = None,
         javac_worker: "WorkerSpec | None" = None,
     ) -> None:
         self.source_files = source_files
@@ -148,6 +149,12 @@ class JarAction(Action):
         self.classes_dir = classes_dir
         self.entry_point = entry_point
         self.classpath = classpath
+        # A resources root (e.g. "src/main/resources"): its whole tree is
+        # packaged into the jar at the same relative paths as the classes, so
+        # a module's META-INF/services registrations, .properties, etc. ship
+        # in the jar. Its files are jar-step inputs, so an edited resource
+        # re-jars. None = classes only.
+        self.resource_dir = resource_dir
         # When set, the compile step routes through the warm javac worker (see
         # java.javac_worker); otherwise it spawns javac. classpath= currently
         # rides the worker (the wrapper joins entries with the path separator).
@@ -205,6 +212,14 @@ class JarAction(Action):
         else:
             jar_command = "{jar} cf {output} -C {classes_dir} ."
             jar_inputs = {}
+        if self.resource_dir is not None:
+            # A second `-C <root> .` packs the resource tree at its relative
+            # paths (jar accepts repeated -C). The tree's files are inputs so
+            # an edited resource re-jars; the recursive `{name}` glob reaches
+            # nested resources (META-INF/services/...), like the classes glob.
+            jar_command += " -C {resource_dir} ."
+            jar_inputs["resource_dir"] = FileData(self.resource_dir)
+            jar_inputs["resources"] = GlobData(f"{self.resource_dir}/{{name}}")
         package = ExternalProcessAction(
             name=f"jar {self.output_file.path}",
             command_line=jar_command,

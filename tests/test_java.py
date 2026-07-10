@@ -46,6 +46,26 @@ def test_entry_point_uses_cfe():
     assert package.inputs["entry_point"].text == "App"
 
 
+def test_resource_dir_adds_second_jar_root():
+    graph = Graph()
+    graph.add(_jar_action(resource_dir="src/main/resources"))
+    _, package = graph.actions
+    # A second `-C <root> .` after the classes root, and the resource tree is
+    # a jar-step input (an edited resource re-jars).
+    assert package.command_line.count("-C ") == 2
+    assert "-C {resource_dir} ." in package.command_line
+    assert package.inputs["resource_dir"].path == "src/main/resources"
+    assert package.inputs["resources"].pattern.template == "src/main/resources/{name}"
+
+
+def test_no_resource_dir_by_default():
+    graph = Graph()
+    graph.add(_jar_action())
+    _, package = graph.actions
+    assert package.command_line.count("-C ") == 1
+    assert "resources" not in package.inputs
+
+
 def test_sources_union_flows_into_javac():
     graph = Graph()
     graph.add(
@@ -157,3 +177,67 @@ def test_packaged_class_change_updates_jar(tmp_path):
     third = builder().build()
     assert third.success
     assert jar_output() == "two"  # not "one" — the jar must not go stale
+
+
+@needs_jdk
+def test_resources_packaged_and_tracked(tmp_path):
+    """A resource under resource_dir ships in the jar (a ServiceLoader file,
+    a .properties), and editing only the resource re-jars — the class is not
+    recompiled but the jar reflects the new resource, not a stale one."""
+    import subprocess
+    import zipfile
+
+    from brix import AtomicBuilder, IncrementalBuilder
+
+    (tmp_path / "src/main/java").mkdir(parents=True)
+    (tmp_path / "src/main/java/App.java").write_text(
+        "public class App { public static void main(String[] a)"
+        " { System.out.println(App.class.getResourceAsStream"
+        '("/msg.txt") != null ? "has-resource" : "missing"); } }\n'
+    )
+    res = tmp_path / "src/main/resources"
+    (res / "META-INF/services").mkdir(parents=True)
+    (res / "META-INF/services/com.example.Svc").write_text("com.example.Impl\n")
+    (res / "msg.txt").write_text("one\n")
+
+    def create_graph():
+        graph = Graph()
+        d = graph.data
+        graph.add(
+            java.JarAction(
+                source_files=d.glob("src/main/java/{cls}.java"),
+                output_file=d.file("build/libs/app.jar"),
+                resource_dir="src/main/resources",
+                entry_point="App",
+            )
+        )
+        return graph
+
+    def builder():
+        return AtomicBuilder(IncrementalBuilder(create_graph, root=tmp_path))
+
+    def names() -> set[str]:
+        with zipfile.ZipFile(tmp_path / "build/libs/app.jar") as z:
+            return set(z.namelist())
+
+    def read(entry: str) -> str:
+        with zipfile.ZipFile(tmp_path / "build/libs/app.jar") as z:
+            return z.read(entry).decode()
+
+    assert builder().build().success
+    entries = names()
+    assert "App.class" in entries
+    assert "META-INF/services/com.example.Svc" in entries  # nested resource shipped
+    assert "msg.txt" in entries
+    assert read("msg.txt") == "one\n"
+    assert (
+        subprocess.run(
+            ["java", "-jar", str(tmp_path / "build/libs/app.jar")],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        == "has-resource"
+    )
+
+    (res / "msg.txt").write_text("two\n")  # edit only the resource
+    assert builder().build().success
+    assert read("msg.txt") == "two\n"  # re-jarred, not stale

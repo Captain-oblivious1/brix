@@ -108,12 +108,17 @@ def create_graph() -> Graph:
         classpath += [
             data.file(f"build/libs/{dep}.jar") for dep in sorted(transitive(module))
         ]
+        # Package src/main/resources (ServiceLoader registrations, etc.) when
+        # the module has any — without them junit-platform-engine.jar and
+        # friends would not register their TestEngine.
+        res = f"{module}/src/main/resources"
         graph.add(
             java.JarAction(
                 source_files=data.glob(f"{module}/src/main/java/{{name}}.java"),
                 output_file=data.file(f"build/libs/{module}.jar"),
                 classes_dir=f"build/classes/{module}",
                 classpath=classpath,
+                resource_dir=res if (ROOT / res).is_dir() else None,
                 javac_worker=worker,
                 options=["--release", "17", "-encoding", "UTF-8"],
             )
