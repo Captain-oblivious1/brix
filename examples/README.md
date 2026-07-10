@@ -31,8 +31,8 @@ Each has its own `README.md` with clone + setup steps. Checkouts go in
 | `junit5/` | JUnit 5 (Gradle) | multi-module Java compile + `jvm-abi` ABI avoidance + warm javac worker; `benchmark.py` beats Gradle on the edit-compile loop. Found the jvm-abi String-annotation bug. |
 | `fmt/` | fmtlib/fmt (CMake) | `brix.cpp` compile/link + automatic `#include` header-dep tracking on real headers |
 | `jackson/` | jackson-core (Maven) | selective JUnit 5 test running (`java.JUnitTestAction` — two lenses), plus a generated source and a resource-bearing jar |
+| `leveldb/` | google/leveldb (CMake) | C++ static library at scale: 38 TUs compiled in parallel, `cpp.ArchiveAction` → `libleveldb.a`, linked + run against a smoke program; header-dep tracking stays selective on the real tree |
 
 **Next dogfood targets** (see the repo README's "Feature-completeness
-dogfooding" section): leveldb (C++ static library via `cpp.ArchiveAction`),
-an annotation-processor project, and `jackson-databind` (multi-module test
-selection).
+dogfooding" section): an annotation-processor project (add `-processorpath`
+to `JarAction`), and `jackson-databind` (multi-module test selection).

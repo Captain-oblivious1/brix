@@ -193,20 +193,16 @@ bug or missing feature). Clones live in `~/Projects/brix_test/`; our `brix.py`
 artifacts live in this repo under `examples/`. **Done:** JUnit 5 (Java compile
 graph; found the jvm-abi String-annotation bug; resources), fmt (C++ header-dep
 tracking), jackson-core (selective test running via `java.JUnitTestAction`;
-found generated-sources + shaded-dep needs), and `cpp.ArchiveAction` (static
-libs, ready to use).
+found generated-sources + shaded-dep needs), and leveldb (static-library build
+of 38 TUs via `cpp.CompileSourceAction` + `cpp.ArchiveAction`, linked + run
+against a smoke program — see below).
 
 **Next, in priority order (all Opus — dogfood + helper additions, no engine
 changes expected):**
-1. **C++ / leveldb** — clone `https://github.com/google/leveldb`, build
-   `libleveldb.a` from its `.cc` sources with `cpp.CompileSourceAction` +
-   the new `cpp.ArchiveAction`, then link/run a tool. Validates archiving +
-   parallel-compile scale + the header graph on ~60 files. (`ArchiveAction`
-   already exists — `examples/junit5|fmt|jackson` show the pattern.)
-2. **Annotation processors** — a small Lombok/MapStruct project; add a
+1. **Annotation processors** — a small Lombok/MapStruct project; add a
    `-processorpath` option to `JarAction` and validate the processor jars are
    tracked as fingerprint inputs.
-3. **Multi-module cross-suite test selection** — add `jackson-databind`
+2. **Multi-module cross-suite test selection** — add `jackson-databind`
    (depends on `jackson-core`): a core impl change re-runs databind's tests
    but not annotations'.
 
@@ -347,6 +343,24 @@ build inputs that come from memory or a database instead of files, and a C++
   gating unbuilt piece — since implemented) now proven on a famous project.
   Checkout `~/Projects/brix_test/fmt` @ 11.1.4; `fmt.cc` (C++20 module)
   excluded. Next C++ breadth: a larger multi-source project (e.g. leveldb).
+- **C++ dogfood at scale — leveldb static library built by brix**
+  (`examples/leveldb/`): the larger C++ target fmt pointed to. `setup.sh`
+  stages the exact POSIX library sources (list parsed straight from upstream
+  `CMakeLists.txt`, symlinked so real edits propagate) — brix globs have no
+  exclusion, so this is how you carve a library subset out of a tree that
+  interleaves `*_test.cc` and a Windows port. brix then compiles all **38**
+  translation units in parallel (`cpp.CompileSourceAction`), bundles them with
+  `cpp.ArchiveAction` into `libleveldb.a` (`ar Dcrs`, 38 members), and links a
+  smoke program (open a DB, batch-put, get, iterate) against the archive via
+  `cpp.LinkApplicationAction` — run with `brix.py run smoke` (a build-then-act
+  `commands=` subcommand). Header-dep tracking holds at scale: editing
+  `db/skiplist.h` recompiled exactly the 5 TUs that transitively include it
+  (33 skipped), and — being a comment-only edit — left the objects
+  byte-identical so `ar` and the link correctly replayed. First exercise of
+  `cpp.ArchiveAction` on a real project; validates archiving + parallel-compile
+  scale + the header graph. Checkout `~/Projects/brix_test/leveldb` @ 1.23
+  (`7ee830d`); no compression libs (snappy/zstd/crc32c off in the generated
+  `port_config.h`).
 - **Acceptance benchmark: brix vs Gradle on JUnit 5** (`examples/junit5/benchmark.py`):
   the `docs/java-fast-builds.md` scenarios on the seven platform modules,
   brix vs Gradle 8.14 (`:module:jar` ×7). Best-of-3, one machine: no-op
