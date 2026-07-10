@@ -116,6 +116,32 @@ def test_junit_test_action_uses_two_lenses():
     assert "--class-path build/libs/app.jar" in run_tests.command_line
 
 
+def test_junit_test_action_tracks_test_resources():
+    """Test data dirs are on the run classpath and their files are byte-lens
+    inputs — editing test data re-runs the suite (declare what a test reads)."""
+    from brix.workers import WorkerSpec
+
+    graph = Graph()
+    graph.add(
+        java.JUnitTestAction(
+            test_sources=data.glob("src/test/java/{n}.java"),
+            classpath=[data.file("build/libs/app.jar")],
+            console_jar="lib/console.jar",
+            test_resource_dirs=["src/test/resources"],
+            javac_worker=WorkerSpec(name="javac", command_line="{j}", inputs={}),
+        )
+    )
+    _, run_tests = graph.actions
+    assert "--class-path src/test/resources" in run_tests.command_line
+    res_inputs = [
+        atom.pattern.template
+        for key, expr in run_tests.inputs.items()
+        if key.startswith("data")
+        for atom in expr.atoms()
+    ]
+    assert res_inputs == ["src/test/resources/{name}"]
+
+
 needs_jdk = pytest.mark.skipif(
     shutil.which("javac") is None or shutil.which("jar") is None or shutil.which("java") is None,
     reason="no JDK on PATH",

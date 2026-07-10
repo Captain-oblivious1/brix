@@ -288,6 +288,25 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **Selective test running + jackson-core dogfood** (`brix.java.JUnitTestAction`,
+  `examples/jackson/`): a test suite is just an action, so brix already
+  replays one whose inputs are unchanged — the helper wires that up for
+  JUnit 5 with the key move being *two lenses on the same classpath jars*:
+  the test compile depends on them through `jvm-abi` (API), the test run
+  through their **bytes** (implementation). So a suite re-runs only when
+  something on its runtime classpath actually changed; an impl-only change to
+  a dependency re-runs the tests (which an ABI lens would wrongly skip),
+  while an unrelated change re-runs nothing. Passing suites cache like any
+  result; failing suites re-run until inputs change. Proven end-to-end on
+  jackson-core's real 232-source JUnit 5 + AssertJ suite: no-op replays, a
+  main impl change re-runs, a real test change re-runs while the main jar
+  replays, editing test data (`test_resource_dirs`) re-runs. The dogfood also
+  drove two real-build features into `examples/jackson`: a **generated
+  source** (PackageVersion from a template, via a tool action) and its one
+  shaded compile dep (fastdoubleparser) as a plain classpath entry. Pure
+  action composition — no engine change, both engines. Closes the biggest
+  remaining Java gap (tests). Next gaps if wanted: annotation processors,
+  and multi-module cross-suite selection (add jackson-databind).
 - **C++ dogfood — fmt built by brix, header tracking validated**
   (`examples/fmt/`): the C++ counterpart to the JUnit dogfood. Compiles
   fmt's classic library sources (`format.cc`, `os.cc`) plus a small app via

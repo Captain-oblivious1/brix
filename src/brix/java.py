@@ -292,6 +292,7 @@ class JUnitTestAction(Action):
         javac_worker: "WorkerSpec",
         name: str = "junit tests",
         test_classes_dir: str = "build/test-classes",
+        test_resource_dirs: list[str] | None = None,
         java: ToolData | None = None,
         options: list[str] | DataExpr | None = None,
         select: str = "--scan-class-path",
@@ -302,6 +303,11 @@ class JUnitTestAction(Action):
         self.javac_worker = javac_worker
         self.name = name
         self.test_classes_dir = test_classes_dir
+        # Directories of test data the suite reads from the classpath (e.g.
+        # src/test/resources). Added to the run classpath and their files
+        # declared as byte-lens inputs, so editing test data re-runs the
+        # suite — the "declare everything a test reads" soundness rule.
+        self.test_resource_dirs = test_resource_dirs or []
         self.java = java if java is not None else ToolData("java")
         self.options = options
         self.select = select
@@ -328,24 +334,32 @@ class JUnitTestAction(Action):
         )
 
         # 2. Run the tests: --class-path is the compiled tests + the code under
-        #    test (baked literal paths); those same jars are byte-lens inputs,
-        #    so an implementation change re-runs the suite. No file outputs.
+        #    test + any test-resource dirs (baked literal paths); those jars
+        #    and resource files are byte-lens inputs, so an implementation or
+        #    test-data change re-runs the suite. No file outputs.
         cp_flags = " ".join(
             f"--class-path {p}"
-            for p in [self.test_classes_dir, *_classpath_paths(self.classpath)]
+            for p in [
+                self.test_classes_dir,
+                *_classpath_paths(self.classpath),
+                *self.test_resource_dirs,
+            ]
         )
+        run_inputs: dict[str, DataExpr] = {
+            "java": self.java,
+            "console": FileData(self.console_jar),  # byte lens (framework)
+            "under_test": _runtime_union(self.classpath),  # byte lens: impl matters
+            "tests": test_classes,  # byte lens
+        }
+        for i, res_dir in enumerate(self.test_resource_dirs):
+            run_inputs[f"data{i}"] = GlobData(f"{res_dir}/{{name}}")  # byte lens: test data
         run_tests = ExternalProcessAction(
             name=f"run {self.name}",
             command_line=(
                 "{java} -jar {console} execute --disable-banner --details=none"
                 f" --fail-if-no-tests {self.select} {cp_flags}"
             ),
-            inputs={
-                "java": self.java,
-                "console": FileData(self.console_jar),  # byte lens (framework)
-                "under_test": _runtime_union(self.classpath),  # byte lens: impl matters
-                "tests": test_classes,  # byte lens
-            },
+            inputs=run_inputs,
             outputs={},  # exit code only — replays on the input fingerprint
         )
         return [compile_tests, run_tests]
