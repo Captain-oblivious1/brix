@@ -1,0 +1,38 @@
+# Examples
+
+Two kinds: **teaching examples** are self-contained (their sources live here;
+run them directly), and **real-project dogfoods** build famous open-source
+projects you clone into `~/Projects/brix_test/` — the `brix.py` lives here,
+pointed at the checkout. The dogfoods are how brix's real-world coverage gets
+proven (each one has found a real bug or missing feature).
+
+## Teaching examples (self-contained)
+
+| example | what it shows |
+|---|---|
+| `hello_text/` | the basics — uppercase each `src/*.txt`, then combine them |
+| `raw_cpp/` | the raw C++ graph from the design doc: compile each `.cpp`, link an app |
+| `cpp_app/` | a lifelike C++ project: typed `brix.cpp` actions, the full layer stack + CLI |
+| `cpp_to_java/` | composability: C++, generic, and Java actions in one graph |
+| `incremental_demo/` | build, rebuild, change a file, delete a source — watch what re-runs |
+| `layers_demo/` | the middleware layer stack (incremental / cache / atomic) on a live build |
+| `cli_demo/` | the CLI section of a project `brix.py` (`build`/`status`/`clean`/…) |
+| `cache_store_demo/` | a pluggable two-tier team cache across machines |
+
+Run any of them directly, e.g. `python examples/hello_text/brix.py build`.
+
+## Real-project dogfoods (clone required)
+
+Each has its own `README.md` with clone + setup steps. Checkouts go in
+`~/Projects/brix_test/`; run with `python examples/<name>/brix.py build`.
+
+| example | project | proves |
+|---|---|---|
+| `junit5/` | JUnit 5 (Gradle) | multi-module Java compile + `jvm-abi` ABI avoidance + warm javac worker; `benchmark.py` beats Gradle on the edit-compile loop. Found the jvm-abi String-annotation bug. |
+| `fmt/` | fmtlib/fmt (CMake) | `brix.cpp` compile/link + automatic `#include` header-dep tracking on real headers |
+| `jackson/` | jackson-core (Maven) | selective JUnit 5 test running (`java.JUnitTestAction` — two lenses), plus a generated source and a resource-bearing jar |
+
+**Next dogfood targets** (see the repo README's "Feature-completeness
+dogfooding" section): leveldb (C++ static library via `cpp.ArchiveAction`),
+an annotation-processor project, and `jackson-databind` (multi-module test
+selection).
