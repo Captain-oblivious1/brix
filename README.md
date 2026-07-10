@@ -126,7 +126,11 @@ below is tagged with the model that should do it.
    `worker_idle_timeout` knob (default 15 min; 0 or `--no-daemon` turns it
    off). What's left: rerun the acceptance benchmark against Gradle
    (scenarios 4/5 warm — the "faster than Gradle" claim) on the next
-   Java-project session. **[Fable]** — fiddly, easy to get subtly wrong.
+   Java-project session — **[Opus]**: it's measurement against the written
+   spec in `docs/java-fast-builds.md`, with a visibly-wrong-number failure
+   mode; escalate to Fable only if brix unexpectedly loses scenario 4.
+   (The `[Fable]` that used to tag this track covered the build-server
+   implementation, which has landed.)
 2. **Rewrite the engine in Rust** — design notes in `docs/rust-port.md` and
    `docs/boundary-schema.md`. The goal: one shared engine that can power *both* a
    Python and a JavaScript/TypeScript way of writing build files, so nobody has
