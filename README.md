@@ -288,6 +288,31 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **JUnit 5 dogfood — real Gradle project built by brix** (`examples/junit5/`):
+  re-implements the compile graph of a famous Gradle project's seven pure-Java
+  `junit-platform-*` modules (`commons → engine → launcher → suite-* / testkit`,
+  depth-4), each a `JarAction` through one warm javac worker with `classpath=`
+  wired by `identity="jvm-abi"`. brix has no dependency resolver by design, so
+  `fetch-deps.sh` pulls the four external jars from Maven Central once. Proves
+  the multi-module ABI story on code we didn't write: an impl-only edit in
+  `commons` recompiles `commons` alone and the six dependents replay; an API
+  edit cascades. **This dogfood immediately found a real bug** (next entry). The
+  checkout lives in `~/Projects/brix_test/junit5` (kept out of the Projects
+  root), pinned to `r5.14.4`. Scope excludes `jupiter-*` (Kotlin + codegen),
+  `console`/`reporting` (extra jars, shadow/multi-release), `vintage` (JUnit 4).
+  A real acceptance test for the eventual Java+TS monorepo; also the substrate
+  for the Gradle benchmark (TODO track 1).
+- **jvm-abi crash fix on String-valued annotation elements** (both engines):
+  the `'s'` annotation element-value tag indexes a Utf8 constant directly but
+  was routed through the loadable-constant path — Python leaked raw bytes then
+  crashed in `json.dumps`, Rust errored — so every `@API(since="…")` class (i.e.
+  nearly all of JUnit) silently fell back to `jvm-abi@1:raw` byte hashing,
+  killing ABI avoidance. Fixed to hex-encode the Utf8 like the `c`/`e` tags. No
+  version bump (only converts a former error into a real digest; every other
+  digest is unchanged, so no stale hit is possible). Pinned by a new
+  `strannotation` fixture asserted identically in `tests/test_content_identity.py`
+  and `rust/brix-core/tests/identity.rs` (cross-engine parity). Found by the
+  JUnit dogfood — exactly what it was for.
 - Minimal prototype, spec steps 1–10 plus data-set dependency inference —
   with tests, `examples/hello_text/` and `examples/raw_cpp/` both building
   end-to-end.
