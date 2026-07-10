@@ -213,6 +213,20 @@ monorepo): Spring Boot fat-jars, Kotlin modules.
 
 These are self-contained and come with tests. No Fable needed.
 
+**Retire `identity=`; make comparison a `content_key` Rust trait**
+(design agreed — see `docs/content-key.md`). The `identity="jvm-abi"` string
+kwarg on data atoms is a comparison concern in the wrong locus. Replace it with a
+polymorphic `content_key` on the data objects, implemented as a **name-dispatched
+Rust trait** (byte-hash is the default impl); the built-in lenses (`jvm-abi`,
+`ts-dts`) move *out* of brix-core's neutral path into a `lenses` module/crate, and
+`brix.java` owns the `java.abi(...)` surface — the core stops naming Java. Python
+side becomes declaration only. Crosses the Python/Rust boundary on the fingerprint
+path under a **fingerprints-byte-identical** invariant (pure relocation, no
+behavior change), so: build on Opus, Fable review pass. Custom pure-Python lenses
+are dropped for now (the `CustomIdentities` callback is additive to re-add later —
+that's why dispatch must stay a name registry, not an `enum`). Touches
+`docs/boundary-schema.md`. **Do the `-`/exclude item (Fable queue) first.**
+
 **Correctness fixes** (holes found in the "what might we be missing?" review):
 
 - **Let you say "run B after A" without a shared file.** Today brix works out
@@ -283,6 +297,13 @@ These are self-contained and come with tests. No Fable needed.
 
 ### Fable queue — for the careful model only
 
+- **Glob exclusion via the `-` operator** (design agreed — see
+  `docs/content-key.md`). `data.glob("{name}.cc") - "*_test.cc"` — fnmatch
+  right-hand side, `__sub__` returns an immutable copy with an internal exclude
+  list, `find()` filters, planner overlap ignores excludes (conservative). Small,
+  mechanical, mirrored both engines; additive wire field (`glob.exclude`). Lets
+  `examples/leveldb` drop its `setup.sh` staging and glob in place. Fully specified
+  in the note; do this **before** the `content_key` refactor.
 - **The scheduler + build layers of the Rust rewrite** (track 2), reviewed
   carefully, then switching brix to run on Rust by default. The single trickiest
   part of the project.
