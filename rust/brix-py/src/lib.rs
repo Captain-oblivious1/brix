@@ -174,7 +174,7 @@ struct PyCustomIdentities {
     map: std::collections::HashMap<String, (String, Py<PyAny>)>,
 }
 
-impl brix_core::identity::CustomIdentities for PyCustomIdentities {
+impl brix_core::content_key::CustomIdentities for PyCustomIdentities {
     fn tag(&self, name: &str) -> Option<String> {
         self.map.get(name).map(|(tag, _)| tag.clone())
     }
@@ -260,10 +260,10 @@ type IdentityMap = std::collections::HashMap<String, (String, Py<PyAny>)>;
 
 fn custom_identities(
     identities: Option<IdentityMap>,
-) -> Option<std::sync::Arc<dyn brix_core::identity::CustomIdentities>> {
+) -> Option<std::sync::Arc<dyn brix_core::content_key::CustomIdentities>> {
     identities.map(|map| {
         std::sync::Arc::new(PyCustomIdentities { map })
-            as std::sync::Arc<dyn brix_core::identity::CustomIdentities>
+            as std::sync::Arc<dyn brix_core::content_key::CustomIdentities>
     })
 }
 
@@ -277,7 +277,7 @@ fn build_layers(
     config: &Value,
     root: &str,
     stores: &[Option<Py<PyAny>>],
-    custom: Option<std::sync::Arc<dyn brix_core::identity::CustomIdentities>>,
+    custom: Option<std::sync::Arc<dyn brix_core::content_key::CustomIdentities>>,
 ) -> Result<Vec<Box<dyn BuildLayer>>, String> {
     let empty = Vec::new();
     let configs = match config.get("layers") {

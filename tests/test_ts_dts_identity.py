@@ -12,7 +12,17 @@ from brix import (
     identity,
     tsdts,
 )
+from brix.data import FileData
 from brix.incremental import action_fingerprint
+
+
+class DtsFile(FileData):
+    """A `.d.ts` compared through the ts-dts lens. ts-dts is a built-in ready
+    for a future TS layer that would own this typed atom (like `brix.java`
+    owns `AbiFile`); until then the test declares it directly."""
+
+    content_key = "ts-dts"
+
 
 BASE = """\
 // the public API of the util module
@@ -87,7 +97,7 @@ def _dependent_fingerprint(root: Path, source: str) -> str:
         command_line="{tsc} -p .",
         inputs={
             "tsc": data.tool("tsc"),
-            "api": data.file("api.d.ts", identity="ts-dts"),
+            "api": DtsFile("api.d.ts"),
         },
         outputs={},
     )
@@ -121,7 +131,7 @@ def test_undecodable_file_falls_back_to_raw(tmp_path):
     action = ExternalProcessAction(
         name="x",
         command_line="{f}",
-        inputs={"f": graph.data.file("api.d.ts", identity="ts-dts")},
+        inputs={"f": DtsFile("api.d.ts")},
         outputs={},
     )
 

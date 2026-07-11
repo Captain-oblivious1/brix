@@ -213,20 +213,6 @@ monorepo): Spring Boot fat-jars, Kotlin modules.
 
 These are self-contained and come with tests. No Fable needed.
 
-**Retire `identity=`; make comparison a `content_key` Rust trait**
-(design agreed — see `docs/content-key.md`). The `identity="jvm-abi"` string
-kwarg on data atoms is a comparison concern in the wrong locus. Replace it with a
-polymorphic `content_key` on the data objects, implemented as a **name-dispatched
-Rust trait** (byte-hash is the default impl); the built-in lenses (`jvm-abi`,
-`ts-dts`) move *out* of brix-core's neutral path into a `lenses` module/crate, and
-`brix.java` owns the `java.abi(...)` surface — the core stops naming Java. Python
-side becomes declaration only. Crosses the Python/Rust boundary on the fingerprint
-path under a **fingerprints-byte-identical** invariant (pure relocation, no
-behavior change), so: build on Opus, Fable review pass. Custom pure-Python lenses
-are dropped for now (the `CustomIdentities` callback is additive to re-add later —
-that's why dispatch must stay a name registry, not an `enum`). Touches
-`docs/boundary-schema.md`. **Do the `-`/exclude item (Fable queue) first.**
-
 **Correctness fixes** (holes found in the "what might we be missing?" review):
 
 - **Let you say "run B after A" without a shared file.** Today brix works out
@@ -325,6 +311,22 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **Retired `identity=`; comparison is now a `content_key` Rust trait** (per
+  `docs/content-key.md`, both engines). The `identity="jvm-abi"` string kwarg is
+  gone. A content lens is now *intrinsic to the atom's type*: `brix.java` ships
+  typed `AbiFile`/`AbiGlob` subclasses (`content_key = "jvm-abi"`), and the author
+  writes `java.abi(expr)` — never the name. In the Rust core the lens is a
+  name-dispatched `ContentKey` trait with a registry; the built-in lenses
+  (`jvm-abi`, `ts-dts`) moved *out* of brix-core's neutral fingerprint path into
+  `brix-core::lenses`, so the detector dispatches through the trait and names no
+  language. The `CustomIdentities` Python-callback escape hatch is kept in reserve
+  (unused), which is why dispatch is a name registry, not an `enum`. Wire field
+  `identity` → `content_key` (additive, schema stays v1). **The invariant held
+  mechanically:** regenerating the golden fingerprints changed only the `spec`
+  strings (`identity` → `content_key`) and left **every fingerprint digest
+  byte-for-byte identical** — pure relocation, no cache split. Tests rewritten to
+  the typed-atom surface (same assertions; unknown-lens-is-loud is now a bad
+  subclass); full suite green under both engines.
 - **Glob exclusion via the `-` operator** (per `docs/content-key.md`, both
   engines): `data.glob("{name}.cc") - "*_test.cc"` (or a list). fnmatch
   right-hand side (`*` crosses `/`, `?`, `[...]`) matched against the

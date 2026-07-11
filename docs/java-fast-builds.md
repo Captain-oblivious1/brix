@@ -175,10 +175,15 @@ its byte hash.
 ### API surface
 
 ```python
-"classpath": data.file("build/lib/util.jar", identity="jvm-abi"),
+"classpath": java.abi(data.file("build/lib/util.jar")),
 ```
 
-`identity=` names a registered **ContentIdentity** plugin:
+The author never types the lens name — `java.abi(expr)` views an expression
+through the JVM ABI lens, rewriting each file/glob atom to its typed
+counterpart (`brix.java.AbiFile`/`AbiGlob`), which carries
+`content_key = "jvm-abi"`. The core dispatches that name through its
+`ContentKey` registry (`docs/content-key.md`); the reference computation is a
+registered lens:
 
 ```python
 class ContentIdentity:
@@ -189,9 +194,9 @@ class ContentIdentity:
 
 Engine changes:
 
-- `atom_fp` for an atom with an identity becomes
+- `atom_fp` for an atom with a `content_key` becomes
   `["file", path, "jvm-abi@1", digest]` — the **versioned tag is part of
-  the fingerprint payload**, so a plugin change invalidates cleanly.
+  the fingerprint payload**, so a lens change invalidates cleanly.
 - Extraction failure (not a jar, malformed class) falls back to the
   content hash under a distinct tag: `["file", path, "jvm-abi@1:raw",
   content_hash]`. Deterministic for the same bytes; a cross-machine
@@ -253,8 +258,8 @@ change annotation) hashes different.
 ## brix.java on top
 
 - `JarAction` grows `classpath=` (list of jar data expressions; rendered
-  onto javac's `-cp`, defaulting each entry to `identity="jvm-abi"`),
-  and lowers its compile step through the javac WorkerSpec.
+  onto javac's `-cp`, viewing each entry through `java.abi(...)` — the
+  JVM ABI lens), and lowers its compile step through the javac WorkerSpec.
 - The javac worker is a small wrapper on `javax.tools.JavaCompiler`
   (in-process compilation, no re-exec), reading the JSON protocol.
   Bootstrap: ship the wrapper *source* with brix and compile it once via
@@ -276,9 +281,9 @@ with the v2 daemon is the "faster than Gradle" claim; without it, parity.
 
 ## Phasing (each lands green on the full pytest suite)
 
-1. **Content-identity fingerprints**: `identity=` plumbing, versioned
-   tags, per-identity metadata cache, `jvm-abi@1` parser + golden
-   fixtures. No worker needed; immediately useful.
+1. **Content-identity fingerprints**: `content_key` plumbing (authored as
+   `java.abi(...)`), versioned tags, per-lens metadata cache, `jvm-abi@1`
+   parser + golden fixtures. No worker needed; immediately useful.
 2. **Per-build workers**: WorkerSpec, protocol, pool, crash semantics,
    fingerprint section; javac wrapper + `JarAction` routing; the
    benchmark harness with scenarios 1–5.

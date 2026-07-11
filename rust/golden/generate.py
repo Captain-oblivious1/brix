@@ -556,9 +556,17 @@ def gen_fs():
 
 def gen_fingerprints():
     from brix import ExternalProcessAction, Graph, WorkerSpec
+    from brix.data import FileData
     from brix.incremental import action_fingerprint
+    from brix.java import AbiFile, AbiGlob
     from brix.layers import NodeContext
     from brix.metadata import TimeAndHashChangeDetector
+
+    # ts-dts has no shipping skin subclass yet (it is a built-in ready for a
+    # future TS layer), so the golden constructs a lens atom directly — the
+    # content_key is intrinsic to the type, exactly like AbiFile.
+    class DtsFile(FileData):
+        content_key = "ts-dts"
 
     d = Graph().data
     ctx = NodeContext.for_root(TREE_ROOT)
@@ -610,27 +618,27 @@ def gen_fingerprints():
         ExternalProcessAction(
             name="jvm-abi class file",
             command_line="javac -cp {cp} App.java",
-            inputs={"cp": d.file("lib/Lib.class", identity="jvm-abi")},
+            inputs={"cp": AbiFile("lib/Lib.class")},
             outputs={"out": d.file("build/App.class")},
         ),
         ExternalProcessAction(
             name="jvm-abi jar",
             command_line="javac -cp {cp} App.java",
-            inputs={"cp": d.file("lib/util.jar", identity="jvm-abi")},
+            inputs={"cp": AbiFile("lib/util.jar")},
             outputs={"out": d.file("build/App.class")},
         ),
         ExternalProcessAction(
             name="jvm-abi glob with raw fallback",
             # Matches util.jar (ABI digest) and notajar.jar (`:raw` byte hash)
-            # in one expression: both identity tails in a single fingerprint.
+            # in one expression: both content-key tails in a single fingerprint.
             command_line="javac -cp {cp} App.java",
-            inputs={"cp": d.glob("lib/{n}.jar", identity="jvm-abi")},
+            inputs={"cp": AbiGlob("lib/{n}.jar")},
             outputs={"out": d.file("build/App.class")},
         ),
         ExternalProcessAction(
             name="ts-dts",
             command_line="tsc -p .",
-            inputs={"api": d.file("lib/api.d.ts", identity="ts-dts")},
+            inputs={"api": DtsFile("lib/api.d.ts")},
             outputs={"out": d.file("build/consumer.js")},
         ),
     ]

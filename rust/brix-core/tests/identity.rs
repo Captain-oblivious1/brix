@@ -57,13 +57,13 @@ fn jar(dir: &Path, fixture: &str, name: &str) -> PathBuf {
     path
 }
 
-/// The fingerprint of an action whose input carries `identity=`, as the
+/// The fingerprint of an action whose input carries a content lens, as the
 /// incremental/cache layers would compute it (mirrors `_dependent_fingerprint`
 /// in both Python files; the spec JSON is the shape `brix.lowering` emits).
-fn identity_fingerprint(root: &Path, path: &str, identity: &str) -> Result<String, String> {
+fn content_key_fingerprint(root: &Path, path: &str, content_key: &str) -> Result<String, String> {
     let spec = format!(
         r#"{{"kind": "process", "name": "x", "command_line": "use {{f}}",
-            "inputs": {{"f": [{{"kind": "file", "path": "{path}", "identity": "{identity}"}}]}},
+            "inputs": {{"f": [{{"kind": "file", "path": "{path}", "content_key": "{content_key}"}}]}},
             "outputs": {{}}}}"#
     );
     let action: Action = serde_json::from_str(&spec).unwrap();
@@ -137,11 +137,11 @@ fn non_jar_with_identity_falls_back_to_raw() {
     let dir = scratch("raw-fallback");
     let target = dir.join("x.jar");
     std::fs::write(&target, "not a jar at all").unwrap();
-    let first = identity_fingerprint(&dir, "x.jar", "jvm-abi").unwrap();
+    let first = content_key_fingerprint(&dir, "x.jar", "jvm-abi").unwrap();
     assert_eq!(first.len(), 64); // did not error
     // The :raw fallback is a byte hash, so different bytes -> different key.
     std::fs::write(&target, "still not a jar, but different bytes").unwrap();
-    assert_ne!(first, identity_fingerprint(&dir, "x.jar", "jvm-abi").unwrap());
+    assert_ne!(first, content_key_fingerprint(&dir, "x.jar", "jvm-abi").unwrap());
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn unknown_identity_is_loud() {
     // Python engine), but a wire spec naming one must still error, not guess.
     let dir = scratch("unknown-identity");
     std::fs::write(dir.join("x.jar"), "data").unwrap();
-    let err = identity_fingerprint(&dir, "x.jar", "no-such-identity").unwrap_err();
+    let err = content_key_fingerprint(&dir, "x.jar", "no-such-identity").unwrap_err();
     assert!(err.contains("no-such-identity"), "{err}");
 }
 
@@ -185,12 +185,12 @@ fn identity_digest_cached_by_signature() {
     let det = TimeAndHashChangeDetector::with_metadata(meta.clone());
     let sig = det.stat_signature(&j).unwrap();
     meta.store_identity(&j.to_string_lossy(), &sig, "jvm-abi@1", "SENTINEL");
-    assert_eq!(det.identity_digest(&j, "jvm-abi").unwrap().unwrap(), "SENTINEL");
+    assert_eq!(det.content_key_digest(&j, "jvm-abi").unwrap().unwrap(), "SENTINEL");
     // A real (uncached) computation stores its result for the next call.
     let real = TimeAndHashChangeDetector::with_metadata(std::sync::Arc::new(
         BuildMetadata::with_directory(&dir, "meta2"),
     ))
-    .identity_digest(&j, "jvm-abi")
+    .content_key_digest(&j, "jvm-abi")
     .unwrap()
     .unwrap();
     assert_eq!(real, jvmabi::digest_jar(&j).unwrap());
@@ -268,8 +268,8 @@ fn dependent_fingerprint_ignores_impl_and_doc_change() {
     std::fs::write(a.join("api.d.ts"), BASE).unwrap();
     std::fs::write(b.join("api.d.ts"), IMPL_ONLY).unwrap();
     assert_eq!(
-        identity_fingerprint(&a, "api.d.ts", "ts-dts").unwrap(),
-        identity_fingerprint(&b, "api.d.ts", "ts-dts").unwrap()
+        content_key_fingerprint(&a, "api.d.ts", "ts-dts").unwrap(),
+        content_key_fingerprint(&b, "api.d.ts", "ts-dts").unwrap()
     );
 }
 
@@ -279,8 +279,8 @@ fn dependent_fingerprint_reacts_to_api_change() {
     std::fs::write(a.join("api.d.ts"), BASE).unwrap();
     std::fs::write(c.join("api.d.ts"), API_CHANGE).unwrap();
     assert_ne!(
-        identity_fingerprint(&a, "api.d.ts", "ts-dts").unwrap(),
-        identity_fingerprint(&c, "api.d.ts", "ts-dts").unwrap()
+        content_key_fingerprint(&a, "api.d.ts", "ts-dts").unwrap(),
+        content_key_fingerprint(&c, "api.d.ts", "ts-dts").unwrap()
     );
 }
 
@@ -291,8 +291,8 @@ fn undecodable_file_falls_back_to_raw() {
     let dir = scratch("dts-raw");
     let target = dir.join("api.d.ts");
     std::fs::write(&target, b"\xff\xfe\x00\x01 not utf-8").unwrap();
-    let first = identity_fingerprint(&dir, "api.d.ts", "ts-dts").unwrap();
+    let first = content_key_fingerprint(&dir, "api.d.ts", "ts-dts").unwrap();
     assert_eq!(first.len(), 64);
     std::fs::write(&target, b"\xff\xfe\x00\x02 different bytes").unwrap();
-    assert_ne!(first, identity_fingerprint(&dir, "api.d.ts", "ts-dts").unwrap());
+    assert_ne!(first, content_key_fingerprint(&dir, "api.d.ts", "ts-dts").unwrap());
 }

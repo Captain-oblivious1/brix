@@ -157,7 +157,7 @@ pub fn compute_status(
     metadata_dir: &str,
     staging_dir: &str,
     targets: Option<&[String]>,
-    custom_identities: Option<std::sync::Arc<dyn crate::identity::CustomIdentities>>,
+    custom_identities: Option<std::sync::Arc<dyn crate::content_key::CustomIdentities>>,
 ) -> Result<StatusReport, String> {
     let root_str = root.to_string_lossy().to_string();
     let plan = plan_graph(actions, &root_str, targets)?;

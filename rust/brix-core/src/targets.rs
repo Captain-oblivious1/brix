@@ -61,7 +61,7 @@ fn extract_bindings(out_atom: &DataAtom, need_atom: &DataAtom) -> Option<Vec<(St
 pub fn select_actions(actions: &[Action], targets: &[String]) -> Result<Vec<Action>, String> {
     let mut queue: VecDeque<DataAtom> = targets
         .iter()
-        .map(|t| DataAtom::File { path: t.clone(), identity: None })
+        .map(|t| DataAtom::File { path: t.clone(), content_key: None })
         .collect();
     let mut seen: HashSet<String> = queue.iter().map(|a| a.dedup_key()).collect();
     let mut selected: BTreeMap<(usize, Vec<(String, String)>), Action> = BTreeMap::new();

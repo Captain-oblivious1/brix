@@ -1,8 +1,8 @@
 # Comparison semantics and membership: `content_key` and glob exclusion
 
-Status: **glob exclusion implemented (both engines, 2026-07-10); `content_key`
-design agreed, not yet implemented**. This note is the
-contract the implementation executes against. Companion to
+Status: **implemented, both engines (2026-07-10)** — glob exclusion and the
+`content_key` relocation. Fingerprints are byte-identical across the
+relocation (golden-verified); this note is the contract that was built. Companion to
 `docs/boundary-schema.md` (the wire) and `docs/rust-port.md` (the engine split).
 
 It settles two changes that came out of the leveldb dogfood, plus the principle
@@ -137,13 +137,22 @@ inputs={"classpath": data.glob("classes/{rel}.class")}             # -> byte def
 ```
 
 `java.abi(...)` must apply across a **glob or a union** (a classpath is many
-jars), so under the hood it is "a strategy applied across the atoms of an
-expression." Whether that is literally an `AbiFile` subclass or a strategy-bearing
-field on the atoms is an implementation detail to settle when threading it through
-collections; the user-facing model is `java.abi(...)`/`AbiFile` either way. The
-two-consumer case is unchanged in spirit: `java.abi(jars)` on the compile
-classpath, plain `jars` on the run classpath — same files, two declarations, no
-magic string, no hand-duplicated copies.
+jars), so under the hood it is "a lens applied across the atoms of an
+expression": `java.abi(expr)` walks `expr.atoms()` and rewrites each plain
+`FileData`/`GlobData` to its lens counterpart (`brix.java.AbiFile`/`AbiGlob`),
+passing tools, values, and already-lensed atoms through untouched.
+
+**Settled encoding (was deferred):** the lens is a **typed atom subclass**, not
+a strategy field. `AbiFile(FileData)`/`AbiGlob(GlobData)` in `brix.java` set a
+class attribute `content_key = "jvm-abi"`; the base `DataAtom.content_key` is
+`None` (byte hashing). The comparison lens is thus *intrinsic to the atom's
+type*, in the same category as the `File`/`Tool`/`Value` distinction — exactly
+the "comparison semantics, not state" framing above. `substitute`/`__sub__`
+reconstruct via `type(self)`, so a lens survives narrowing and expansion. On the
+wire the atom carries `"content_key": str?` (the old `identity` field, renamed);
+`None`/absent is the byte default. The two-consumer case is unchanged in spirit:
+`java.abi(jars)` on the compile classpath, plain `jars` on the run classpath —
+same files, two declarations, no magic string, no hand-duplicated copies.
 
 ### Custom, user-defined lenses: (b) now, (a) later
 
@@ -160,27 +169,43 @@ start closed and open a hole only when a concrete case needs to fit through it �
 and it'll fit better for being built against a real need. The name-registry
 dispatch above is what preserves the option at zero ongoing cost.
 
-## Invariant and how we verify
+## Invariant and how we verified
 
 This whole change is **relocation, not new behavior**: for an equivalent graph the
-fingerprint bytes must be **identical** to today. The lens name is folded into the
-fingerprint material at the same position it occupies now; only its *source* moves
-(atom kwarg → data-object strategy → Rust trait dispatch). Verification: the
-existing content-identity tests (`tests/test_content_identity.py`, the Rust
-`identity` tests) are rewritten to the new surface with the **same assertions**
-(an ABI-only change to a dependency replays the compile; a byte change re-runs the
-test), plus new validation tests (unknown lens name is a loud error). If outcomes
-are unchanged and pinned digests still match, the relocation is correct.
+fingerprint bytes are **identical** to before. The lens name is folded into the
+fingerprint material at the same position it occupied; only its *source* moved
+(atom kwarg → typed atom subclass → Rust `ContentKey` trait dispatch).
+Verification, as built: the golden fingerprints (`rust/brix-core/tests/golden/
+fingerprints.json`) were regenerated from the new surface — **every `fingerprint`
+digest is byte-for-byte unchanged; only the `spec` strings changed** (`identity` →
+`content_key`), which is the invariant made mechanical. The content-identity tests
+(`tests/test_content_identity.py`, `tests/test_ts_dts_identity.py`, the Rust
+`identity` test) were rewritten to the typed-atom surface with the **same
+assertions** (an ABI-only change to a dependency replays the compile; a byte change
+re-runs), plus the unknown-lens-is-loud case (now a subclass naming an
+unregistered lens). Full suite green under both engines.
 
 ## Boundary-schema deltas (all additive, still version 1)
 
 - `glob` atom gains `"exclude": [str]?`.
-- The lens moves off the atom. `identity` is retired as an atom field; the
-  strategy name rides wherever the new data-object encoding puts it (settle the
-  exact key when the collection-threading question above is resolved, then pin it
-  here and in `docs/boundary-schema.md`).
+- The atom's `identity` field is renamed to `content_key` (same position in the
+  wire shape, byte-identical fingerprint material). The author never sets it: a
+  skin's typed atom (`brix.java.AbiFile`) carries it; `None`/absent is byte
+  hashing. Pinned in `docs/boundary-schema.md`.
 - No `"version"` bump: exclude is additive; the lens relocation preserves the same
   digests, so caches do not split.
+
+## Rust structure (as built)
+
+- `brix-core::content_key` — the `ContentKey` trait (`tag`, `digest`), a
+  name-keyed registry of built-in lenses, and the `CustomIdentities` skin-callback
+  escape hatch (reserved, unused by default).
+- `brix-core::lenses` — the built-in `impl ContentKey`s (`JvmAbi`, `TsDts`) and
+  the `jvmabi`/`tsdts` digest code, **outside** the neutral fingerprint path. The
+  detector/`content` dispatch through the trait and name no language. Byte hashing
+  stays a distinct 3-element material shape (`["file", path, hash]`) vs a lens's
+  4-element `["file", path, tag, digest]` — the shape difference is load-bearing
+  for the byte-identity invariant, so byte hashing is *not* folded into the trait.
 
 ## Sequencing and model split
 

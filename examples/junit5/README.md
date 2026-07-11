@@ -1,7 +1,7 @@
 # Building JUnit 5 with brix
 
 A real-world acceptance test: re-implement a famous Gradle project's compile
-graph in brix, so the multi-module ABI story (`identity="jvm-abi"`) and the
+graph in brix, so the multi-module ABI story (`java.abi(...)`) and the
 warm javac worker run against code we didn't write. This is the dogfood that
 found a real jvm-abi bug (String-valued annotation elements — every
 `@API(since="…")` class — silently fell back to byte hashing, defeating ABI

@@ -19,7 +19,9 @@ from brix import (
     identity,
     jvmabi,
 )
+from brix.data import FileData
 from brix.incremental import action_fingerprint
+from brix.java import AbiFile
 
 FIX = Path(__file__).parent / "fixtures" / "jvmabi"
 
@@ -122,7 +124,7 @@ def _dependent_fingerprint(root: Path, fixture: str) -> str:
         command_line="{javac} -cp {cp} App.java",
         inputs={
             "javac": data.tool("java"),
-            "cp": data.file("util.jar", identity="jvm-abi"),
+            "cp": AbiFile("util.jar"),  # the jvm-abi lens, via brix.java's typed atom
         },
         outputs={},
     )
@@ -146,11 +148,10 @@ def test_dependent_fingerprint_reacts_to_api_change(tmp_path):
 def test_non_jar_with_identity_falls_back_to_raw(tmp_path):
     target = tmp_path / "x.jar"
     target.write_text("not a jar at all")
-    graph = Graph()
     action = ExternalProcessAction(
         name="x",
         command_line="{f}",
-        inputs={"f": graph.data.file("x.jar", identity="jvm-abi")},
+        inputs={"f": AbiFile("x.jar")},
         outputs={},
     )
 
@@ -168,11 +169,16 @@ def test_non_jar_with_identity_falls_back_to_raw(tmp_path):
 
 def test_unknown_identity_is_loud(tmp_path):
     (tmp_path / "x.jar").write_text("data")
-    graph = Graph()
+
+    # A lens subclass naming an unregistered content key must raise loudly at
+    # fingerprint time, not silently degrade to byte hashing.
+    class BadFile(FileData):
+        content_key = "no-such-identity"
+
     action = ExternalProcessAction(
         name="x",
         command_line="{f}",
-        inputs={"f": graph.data.file("x.jar", identity="no-such-identity")},
+        inputs={"f": BadFile("x.jar")},
         outputs={},
     )
     with pytest.raises(ValueError):

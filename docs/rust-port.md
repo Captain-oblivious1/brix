@@ -356,8 +356,9 @@ CLI/status stay in Python but depend on core answers:
    `_EventAdapter` replaying wire events onto Python reporters;
    `maybe_build` dispatch every builder's `build()` calls first).
    `BRIX_ENGINE=rust` runs the whole Python suite through the Rust
-   engine; graphs the port can't take yet (`identity=` plugins, custom
-   Python cache stores) silently fall back to the Python engine, while
+   engine; graphs the port can't take yet (custom skin-registered
+   `content_key` lenses, custom Python cache stores) silently fall back
+   to the Python engine, while
    a missing extension raises. Boundary pins in
    `tests/test_rust_engine.py`.
    *Slice 7 — persistent workers — is DONE*: `workers.rs` mirrors

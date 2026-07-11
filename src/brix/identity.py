@@ -3,14 +3,13 @@
 A `ContentIdentity` turns a file's bytes into a digest of some semantic
 identity — e.g. ``jvm-abi`` hashes a jar's API surface, not its bytes — so a
 dependent's fingerprint changes only when the meaning it depends on changes.
-An identity is named on a data expression:
-
-    data.file("build/lib/util.jar", identity="jvm-abi")
-
-and resolved here at fingerprint time. Identity is opt-in per data expression;
-the default is byte hashing. It affects **fingerprint material only**: what is
-stored, staged, restored, and compared for output-intactness still uses bytes
-(see `docs/java-fast-builds.md`).
+This is the Python reference engine's lens computation; the lens is selected
+by an atom's ``content_key`` (set by a typed subclass like
+``brix.java.AbiFile`` — the author writes ``java.abi(expr)``, never the
+name). It is opt-in per atom; the default is byte hashing. It affects
+**fingerprint material only**: what is stored, staged, restored, and compared
+for output-intactness still uses bytes (see `docs/java-fast-builds.md` and
+`docs/content-key.md`).
 
 The versioned tag ``<name>@<version>`` is part of the fingerprint payload, so
 bumping a plugin's ``version`` cleanly invalidates everything it fingerprinted.

@@ -32,8 +32,8 @@ Expand        = { "kind": "expand", "element": str,
                   "collection": DataExpr, "child": Action }   // child may be Expand
 Delete        = { "kind": "delete", "paths": [str] }
 DataExpr      = [ Atom... ]                            // a union is just the list
-Atom          = { "kind": "file",  "path": str,     "identity": str? }
-              | { "kind": "glob",  "template": str, "identity": str?,
+Atom          = { "kind": "file",  "path": str,     "content_key": str? }
+              | { "kind": "glob",  "template": str, "content_key": str?,
                   "exclude": [str]? }                  // fnmatch narrowing
               | { "kind": "regex", "pattern": str }
               | { "kind": "tool",  "name": str }
@@ -43,19 +43,24 @@ Atom          = { "kind": "file",  "path": str,     "identity": str? }
 Notes: `path`/`template` may contain `{binding}` placeholders; `regex`
 uses Python-compatible named groups (the core must match Python's `re`
 semantics for the subset used: named groups, character classes,
-quantifiers — no lookbehind is promised). `identity` names a registered
-content-identity plugin (`docs/java-fast-builds.md`); absent means byte
-hashing. The built-ins (`jvm-abi`, `ts-dts`) are implemented in the core
-so every skin gets them; a name the core does not know is a loud error
-there, and a skin whose graph uses a custom skin-registered plugin must
-keep that graph on its own engine (the Python skin's
-`supports_rust_engine` does exactly this). The digests are cross-engine
-cache keys, so the Python implementations (`src/brix/jvmabi.py`,
-`src/brix/tsdts.py`) remain the reference: an algorithm change is a
-version bump in the plugin's tag (`jvm-abi@1`), and a bump in one
-implementation must land in both — the tag joins the cache key, so an
-unsynchronized bump splits the cache rather than corrupting it, but it
-must not happen. `depfile` is the logical path of a Makefile-format dependency
+quantifiers — no lookbehind is promised). `content_key` names a content
+lens — how the atom is *compared* (`docs/content-key.md`); absent means
+byte hashing. The author never types the name: a skin's typed atom
+carries it (`brix.java`'s `AbiFile`/`AbiGlob` → `"jvm-abi"`, written
+`java.abi(expr)`). The core dispatches the name through its
+[`content_key`] registry — the built-in lenses (`jvm-abi`, `ts-dts`) live
+in `brix-core::lenses`, outside the neutral fingerprint path; a name the
+core does not know is a loud error there, and a skin whose graph uses a
+custom skin-registered lens must keep that graph on its own engine (the
+Python skin's `supports_rust_engine` does exactly this). The digests are
+cross-engine cache keys, so the Python implementations
+(`src/brix/jvmabi.py`, `src/brix/tsdts.py`) remain the reference: an
+algorithm change is a version bump in the lens's tag (`jvm-abi@1`), and a
+bump in one implementation must land in both — the tag joins the cache
+key, so an unsynchronized bump splits the cache rather than corrupting
+it, but it must not happen. (`content_key` was the `identity` field
+before the content-key relocation; the digests are byte-identical across
+the rename — only the wire key and authoring surface changed.) `depfile` is the logical path of a Makefile-format dependency
 file the tool writes (`cc -MMD -MF`), scanned by the incremental layer
 after a successful run; it is not identity (never part of `action_key`).
 It was always part of the Python `ExternalProcessAction` but was missing

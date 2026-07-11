@@ -26,7 +26,17 @@ class DataExpr:
 
 
 class DataAtom(DataExpr):
-    """A leaf data expression."""
+    """A leaf data expression.
+
+    ``content_key`` is the atom's *comparison semantics*: the name of the
+    content lens fingerprinting compares it through (e.g. ``"jvm-abi"``).
+    ``None`` — the default for a plain file/glob — is byte hashing. It is
+    intrinsic to *what the datum is* (like the File/Tool/Value distinction),
+    so a lens is a typed subclass (``brix.java``'s `AbiFile`/`AbiGlob`), not a
+    string the author types. See docs/content-key.md.
+    """
+
+    content_key: str | None = None
 
     def atoms(self) -> Iterator[DataAtom]:
         yield self
@@ -39,33 +49,32 @@ class DataAtom(DataExpr):
 class FileData(DataAtom):
     """One logical path. It need not exist yet.
 
-    ``identity`` names a registered content-identity plugin (e.g.
-    ``"jvm-abi"``): the file contributes that plugin's digest to fingerprints
-    instead of its byte hash. Default ``None`` is byte hashing.
+    Byte-hashed by default. A skin's typed subclass (``brix.java.AbiFile``)
+    overrides ``content_key`` to fingerprint by meaning instead.
     """
 
-    def __init__(self, path: str, identity: str | None = None) -> None:
+    def __init__(self, path: str) -> None:
         self.pattern = PathPattern(path)
-        self.identity = identity
 
     @property
     def path(self) -> str:
         return self.pattern.template
 
     def substitute(self, bindings: dict[str, str]) -> FileData:
-        return FileData(self.pattern.substitute(bindings), self.identity)
+        # type(self) preserves a lens subclass (AbiFile stays an AbiFile).
+        return type(self)(self.pattern.substitute(bindings))
 
     def __repr__(self) -> str:
-        if self.identity is not None:
-            return f"data.file({self.path!r}, identity={self.identity!r})"
+        if self.content_key is not None:
+            return f"{type(self).__name__}({self.path!r})"
         return f"data.file({self.path!r})"
 
 
 class GlobData(DataAtom):
     """A path set with optional named bindings, e.g. ``src/{name}.cpp``.
 
-    ``identity`` applies the named content-identity plugin to every matched
-    file (see `FileData`); default ``None`` is byte hashing.
+    Byte-hashed by default; a skin's typed subclass (``brix.java.AbiGlob``)
+    overrides ``content_key`` to apply a content lens to every matched file.
 
     Subtraction narrows membership: ``data.glob("{name}.cc") - "*_test.cc"``
     returns a copy whose `find` drops files matching the fnmatch pattern(s)
@@ -78,11 +87,9 @@ class GlobData(DataAtom):
     def __init__(
         self,
         pattern: str,
-        identity: str | None = None,
         exclude: tuple[str, ...] = (),
     ) -> None:
         self.pattern = PathPattern(pattern, tuple(exclude))
-        self.identity = identity
 
     @property
     def exclude(self) -> tuple[str, ...]:
@@ -95,14 +102,15 @@ class GlobData(DataAtom):
             added = tuple(other)
         else:
             return NotImplemented
-        return GlobData(self.pattern.template, self.identity, self.exclude + added)
+        # type(self) preserves a lens subclass through narrowing.
+        return type(self)(self.pattern.template, self.exclude + added)
 
     def substitute(self, bindings: dict[str, str]) -> GlobData:
-        return GlobData(self.pattern.substitute(bindings), self.identity, self.exclude)
+        return type(self)(self.pattern.substitute(bindings), self.exclude)
 
     def __repr__(self) -> str:
-        if self.identity is not None:
-            text = f"data.glob({self.pattern.template!r}, identity={self.identity!r})"
+        if self.content_key is not None:
+            text = f"{type(self).__name__}({self.pattern.template!r})"
         else:
             text = f"data.glob({self.pattern.template!r})"
         if self.exclude:
@@ -188,11 +196,11 @@ class DataUnion(DataExpr):
 class DataFactory:
     """Constructor namespace exposed as ``graph.data``."""
 
-    def file(self, path: str, identity: str | None = None) -> FileData:
-        return FileData(path, identity)
+    def file(self, path: str) -> FileData:
+        return FileData(path)
 
-    def glob(self, pattern: str, identity: str | None = None) -> GlobData:
-        return GlobData(pattern, identity)
+    def glob(self, pattern: str) -> GlobData:
+        return GlobData(pattern)
 
     def regex(self, pattern: str) -> RegexData:
         return RegexData(pattern)

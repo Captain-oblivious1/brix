@@ -58,11 +58,15 @@ def test_glob_minus_is_immutable_and_chains():
     assert twice.pattern.template == "src/{n}.cc"
 
 
-def test_glob_minus_preserves_identity_and_survives_substitute():
-    g = data.glob("out/{v}/{s}.mpg", identity="jvm-abi") - "*.raw.mpg"
+def test_glob_minus_preserves_lens_and_survives_substitute():
+    from brix.java import AbiGlob
+
+    g = AbiGlob("out/{v}/{s}.mpg") - "*.raw.mpg"
     sub = g.substitute({"v": "intro"})
     assert sub.pattern.template == "out/intro/{s}.mpg"
-    assert sub.identity == "jvm-abi"
+    # type(self) reconstruction keeps the lens across both `-` and substitute.
+    assert isinstance(sub, AbiGlob)
+    assert sub.content_key == "jvm-abi"
     # Excludes carry through untouched — substitution never rewrites them.
     assert sub.exclude == ("*.raw.mpg",)
 

@@ -37,21 +37,21 @@ fn hash_value(h: Option<String>) -> Value {
     }
 }
 
-/// The fingerprint tail for a file carrying a content identity: `[tag,
-/// digest]`, or `[tag:raw, byte_hash]` when the plugin cannot interpret the
-/// file (mirrors `_identity_material`). Deterministic for the same bytes, so
-/// a cross-machine disagreement can only miss, never make a stale hit. An
-/// unknown identity name — not a built-in and not in the skin's
+/// The fingerprint tail for a file carrying a content key: `[tag, digest]`,
+/// or `[tag:raw, byte_hash]` when the lens cannot interpret the file (mirrors
+/// `_content_key_material`). Deterministic for the same bytes, so a
+/// cross-machine disagreement can only miss, never make a stale hit. An
+/// unknown content-key name — not a built-in and not in the skin's
 /// `content_identity` extension — errors loudly (before the fallback).
-fn identity_material(
+fn content_key_material(
     name: &str,
     physical: &std::path::Path,
     det: &TimeAndHashChangeDetector,
 ) -> Result<[Value; 2], String> {
-    let Some(tag) = det.identity_tag(name) else {
-        return Err(format!("unknown content identity '{name}'"));
+    let Some(tag) = det.content_key_tag(name) else {
+        return Err(format!("unknown content key '{name}'"));
     };
-    Ok(match det.identity_digest(physical, name) {
+    Ok(match det.content_key_digest(physical, name) {
         Ok(digest) => [Value::str(&tag), hash_value(digest)],
         Err(_) => [Value::str(format!("{tag}:raw")), hash_value(det.hash_file(physical))],
     })
@@ -63,10 +63,10 @@ fn atom_fp(
     det: &TimeAndHashChangeDetector,
 ) -> Result<Value, String> {
     match atom {
-        DataAtom::File { path, identity } => {
+        DataAtom::File { path, content_key } => {
             let physical = ctx.read_path(path);
-            if let Some(name) = identity {
-                let [tag, digest] = identity_material(name, &physical, det)?;
+            if let Some(name) = content_key {
+                let [tag, digest] = content_key_material(name, &physical, det)?;
                 return Ok(Value::List(vec![Value::str("file"), Value::str(path), tag, digest]));
             }
             Ok(Value::List(vec![
@@ -75,13 +75,13 @@ fn atom_fp(
                 hash_value(det.hash_file(&physical)),
             ]))
         }
-        DataAtom::Glob { template, identity, exclude } => {
+        DataAtom::Glob { template, content_key, exclude } => {
             let pattern = PathPattern::with_exclude(template, exclude)?;
             let mut entries = Vec::new();
             for (logical, physical, _) in ctx.find(&pattern) {
-                entries.push(Value::List(match identity {
+                entries.push(Value::List(match content_key {
                     Some(name) => {
-                        let [tag, digest] = identity_material(name, &physical, det)?;
+                        let [tag, digest] = content_key_material(name, &physical, det)?;
                         vec![Value::str(&logical), tag, digest]
                     }
                     None => vec![Value::str(&logical), hash_value(det.hash_file(&physical))],

@@ -15,17 +15,17 @@ pub mod actions;
 pub mod atomic;
 pub mod cache;
 pub mod content;
+pub mod content_key;
 pub mod context;
 pub mod data;
 pub mod detector;
 pub mod executor;
 pub mod fingerprint;
 pub mod fsutil;
-pub mod identity;
 pub mod incremental;
-pub mod jvmabi;
 pub mod keys;
 pub mod layers;
+pub mod lenses;
 pub mod metadata;
 pub mod patterns;
 pub mod plan;
@@ -37,8 +37,12 @@ pub mod shlex;
 pub mod spec;
 pub mod status;
 pub mod targets;
-pub mod tsdts;
 pub mod workers;
+
+// The built-in lenses live under `lenses`; re-export the two modules so the
+// cross-engine test/`content_identity` call sites keep their short paths
+// (`brix_core::jvmabi`, `crate::tsdts`).
+pub use lenses::{jvmabi, tsdts};
 
 pub use actions::{Action, WorkerSpec};
 pub use atomic::{commit_staging, discard_staging, AtomicLayer};

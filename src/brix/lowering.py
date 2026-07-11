@@ -25,13 +25,13 @@ SPEC_VERSION = 1
 def atom_to_spec(atom: DataAtom) -> dict:
     if isinstance(atom, FileData):
         d = {"kind": "file", "path": atom.path}
-        if atom.identity is not None:
-            d["identity"] = atom.identity
+        if atom.content_key is not None:
+            d["content_key"] = atom.content_key
         return d
     if isinstance(atom, GlobData):
         d = {"kind": "glob", "template": atom.pattern.template}
-        if atom.identity is not None:
-            d["identity"] = atom.identity
+        if atom.content_key is not None:
+            d["content_key"] = atom.content_key
         if atom.exclude:
             d["exclude"] = list(atom.exclude)
         return d
@@ -104,7 +104,7 @@ _RUST_IDENTITIES = frozenset({"jvm-abi", "ts-dts"})
 
 
 def custom_identity_names(graph: Graph) -> set[str]:
-    """The identity names this graph uses that the core does not build in.
+    """The content-key names this graph uses that the core does not build in.
     The engine boundary resolves each against the skin's registry (loud on a
     typo) and hands the core their digest callables — the `content_identity`
     extension trait of docs/boundary-schema.md."""
@@ -113,7 +113,7 @@ def custom_identity_names(graph: Graph) -> set[str]:
     def collect(atoms):
         names.update(
             name
-            for name in (getattr(a, "identity", None) for a in atoms)
+            for name in (getattr(a, "content_key", None) for a in atoms)
             if name is not None and name not in _RUST_IDENTITIES
         )
 

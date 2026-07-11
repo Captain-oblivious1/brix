@@ -15,6 +15,16 @@ import pytest
 
 from brix import CacheBuilder, IncrementalBuilder, NodeState
 from brix import engine
+from brix.data import FileData
+from brix.java import AbiFile
+
+
+def _lens_file(path: str, content_key: str) -> FileData:
+    """A file atom carrying a named content lens — the general shape a skin's
+    typed atom (like `AbiFile`) takes. Used to drive the custom / unknown
+    content-key paths from tests without a shipping subclass."""
+    return type("_LensFile", (FileData,), {"content_key": content_key})(path)
+
 
 pytestmark = pytest.mark.skipif(
     engine._extension() is None,
@@ -205,7 +215,7 @@ def graph_with_identity():
             inputs={
                 "python": graph.data.tool(sys.executable),
                 "tool": graph.data.file("tools/copy.py"),
-                "f": graph.data.file("util.jar", identity="jvm-abi"),
+                "f": AbiFile("util.jar"),
             },
             outputs={"out": graph.data.file("build/out.jar")},
         )
@@ -275,7 +285,7 @@ def test_custom_identity_crosses_the_boundary(tmp_path, monkeypatch):
                     inputs={
                         "python": graph.data.tool(sys.executable),
                         "tool": graph.data.file("tools/copy.py"),
-                        "f": graph.data.file("dep.bin", identity="my-abi"),
+                        "f": _lens_file("dep.bin", "my-abi"),
                     },
                     outputs={"out": graph.data.file("build/out.bin")},
                 )
@@ -310,7 +320,7 @@ def test_unregistered_identity_is_loud(tmp_path, monkeypatch):
             ExternalProcessAction(
                 name="x",
                 command_line="{f}",
-                inputs={"f": graph.data.file("x.bin", identity="no-such-identity")},
+                inputs={"f": _lens_file("x.bin", "no-such-identity")},
                 outputs={"out": graph.data.file("build/out")},
             )
         )
@@ -421,7 +431,7 @@ def test_status_with_custom_identity_crosses(tmp_path, monkeypatch):
                 ExternalProcessAction(
                     name="x",
                     command_line="{f}",
-                    inputs={"f": graph.data.file("x.bin", identity="status-abi")},
+                    inputs={"f": _lens_file("x.bin", "status-abi")},
                     outputs={"out": graph.data.file("build/out")},
                 )
             )

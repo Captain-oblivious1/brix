@@ -77,19 +77,20 @@ def membership_key(action: ExpandAll) -> str:
     return _digest(payload)
 
 
-def _identity_material(identity_name: str, physical, detector) -> list:
-    """The fingerprint tail for a file carrying a content identity:
+def _content_key_material(content_key_name: str, physical, detector) -> list:
+    """The fingerprint tail for a file carrying a content key:
     ``[tag, digest]`` (e.g. ``["jvm-abi@1", "<hex>"]``), or ``[tag:raw,
-    byte_hash]`` when the plugin cannot interpret the file. Deterministic for
+    byte_hash]`` when the lens cannot interpret the file. Deterministic for
     the same bytes, so a cross-machine disagreement can only miss, never make a
-    stale hit. An unknown identity name raises loudly (before the fallback)."""
+    stale hit. An unknown content-key name raises loudly (before the
+    fallback)."""
     from .identity import get
     from .identity import tag as identity_tag
 
-    identity = get(identity_name)
-    tag = identity_tag(identity)
+    lens = get(content_key_name)
+    tag = identity_tag(lens)
     try:
-        digest = detector.identity_digest(physical, identity)
+        digest = detector.identity_digest(physical, lens)
     except Exception:
         return [f"{tag}:raw", detector.hash_file(physical)]
     return [tag, digest]
@@ -107,16 +108,20 @@ def action_fingerprint(
     def atom_fp(atom: DataAtom) -> list:
         if isinstance(atom, FileData):
             physical = ctx.read_path(atom.path)
-            if atom.identity is not None:
-                return ["file", atom.path, *_identity_material(atom.identity, physical, detector)]
+            if atom.content_key is not None:
+                return [
+                    "file",
+                    atom.path,
+                    *_content_key_material(atom.content_key, physical, detector),
+                ]
             return ["file", atom.path, detector.hash_file(physical)]
         if isinstance(atom, GlobData):
-            if atom.identity is not None:
+            if atom.content_key is not None:
                 material = [
                     "glob",
                     atom.pattern.template,
                     [
-                        [logical, *_identity_material(atom.identity, physical, detector)]
+                        [logical, *_content_key_material(atom.content_key, physical, detector)]
                         for logical, physical, _ in ctx.find(atom.pattern)
                     ],
                 ]

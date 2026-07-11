@@ -16,13 +16,17 @@ pub type DataExpr = Vec<DataAtom>;
 pub enum DataAtom {
     File {
         path: String,
+        /// The content lens name (`jvm-abi`, `ts-dts`, …); absent = byte hash.
+        /// Set by the skin's typed atoms (e.g. `brix.java`'s `AbiFile`), never
+        /// typed by the author. Fingerprinting dispatches it through
+        /// [`crate::content_key`]; it is not part of structural identity.
         #[serde(default)]
-        identity: Option<String>,
+        content_key: Option<String>,
     },
     Glob {
         template: String,
         #[serde(default)]
-        identity: Option<String>,
+        content_key: Option<String>,
         /// fnmatch patterns filtering membership (`data.glob(...) - "pat"`).
         /// Additive wire field: absent and `[]` are identical.
         #[serde(default)]
@@ -41,7 +45,7 @@ pub enum DataAtom {
 
 impl DataAtom {
     /// Structural identity as a fingerprint payload value (`_atom_identity`).
-    /// `identity=` and `Value` text are fingerprint material, not identity.
+    /// `content_key` and `Value` text are fingerprint material, not identity.
     pub fn identity(&self) -> Value {
         let tag = |kind: &str, arg: &str| Value::List(vec![Value::str(kind), Value::str(arg)]);
         match self {
@@ -96,12 +100,12 @@ impl DataAtom {
     /// A stable key for de-duplicating needs during target selection.
     pub fn dedup_key(&self) -> String {
         match self {
-            DataAtom::File { path, identity } => format!("file:{path}:{identity:?}"),
-            DataAtom::Glob { template, identity, exclude } if exclude.is_empty() => {
-                format!("glob:{template}:{identity:?}")
+            DataAtom::File { path, content_key } => format!("file:{path}:{content_key:?}"),
+            DataAtom::Glob { template, content_key, exclude } if exclude.is_empty() => {
+                format!("glob:{template}:{content_key:?}")
             }
-            DataAtom::Glob { template, identity, exclude } => {
-                format!("glob:{template}:{identity:?}:{exclude:?}")
+            DataAtom::Glob { template, content_key, exclude } => {
+                format!("glob:{template}:{content_key:?}:{exclude:?}")
             }
             DataAtom::Regex { pattern } => format!("regex:{pattern}"),
             DataAtom::Tool { name } => format!("tool:{name}"),
@@ -115,13 +119,13 @@ impl DataAtom {
     /// `RegexData.substitute`). Tool is unchanged.
     pub fn substitute(&self, bindings: &[(String, String)]) -> DataAtom {
         match self {
-            DataAtom::File { path, identity } => DataAtom::File {
+            DataAtom::File { path, content_key } => DataAtom::File {
                 path: subst(path, bindings),
-                identity: identity.clone(),
+                content_key: content_key.clone(),
             },
-            DataAtom::Glob { template, identity, exclude } => DataAtom::Glob {
+            DataAtom::Glob { template, content_key, exclude } => DataAtom::Glob {
                 template: subst(template, bindings),
-                identity: identity.clone(),
+                content_key: content_key.clone(),
                 exclude: exclude.clone(),
             },
             DataAtom::Value { text } if !text.is_empty() => DataAtom::Value {
@@ -205,12 +209,13 @@ mod tests {
     #[test]
     fn atom_identity_matches_python_shapes() {
         assert_eq!(
-            canonical_json(&DataAtom::File { path: "a.txt".into(), identity: None }.identity()),
+            canonical_json(&DataAtom::File { path: "a.txt".into(), content_key: None }.identity()),
             r#"["file","a.txt"]"#
         );
         assert_eq!(
             canonical_json(
-                &DataAtom::File { path: "a.jar".into(), identity: Some("jvm-abi".into()) }.identity()
+                &DataAtom::File { path: "a.jar".into(), content_key: Some("jvm-abi".into()) }
+                    .identity()
             ),
             r#"["file","a.jar"]"#
         );
@@ -222,7 +227,7 @@ mod tests {
         // byte-identical to the pre-exclude shape.
         let glob = |exclude: &[&str]| DataAtom::Glob {
             template: "src/{n}.cc".into(),
-            identity: None,
+            content_key: None,
             exclude: exclude.iter().map(|s| s.to_string()).collect(),
         };
         assert_eq!(canonical_json(&glob(&[]).identity()), r#"["glob","src/{n}.cc"]"#);
@@ -236,7 +241,7 @@ mod tests {
     fn glob_exclude_carries_through_substitute_and_pattern() {
         let atom = DataAtom::Glob {
             template: "src/{n}.cc".into(),
-            identity: None,
+            content_key: None,
             exclude: vec!["*_test.cc".into()],
         };
         let sub = atom.substitute(&[("n".into(), "foo".into())]);

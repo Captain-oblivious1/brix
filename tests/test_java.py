@@ -98,18 +98,18 @@ def test_junit_test_action_uses_two_lenses():
     )
     compile_tests, run_tests = graph.actions
 
-    # Compile: classpath jars carry identity="jvm-abi" (compile cares about API).
+    # Compile: classpath jars carry the jvm-abi lens (compile cares about API).
     cp_atoms = list(compile_tests.inputs["classpath"].atoms())
-    cp = {a.path: a.identity for a in cp_atoms}
+    cp = {a.path: a.content_key for a in cp_atoms}
     assert cp["build/libs/app.jar"] == "jvm-abi"
     assert cp["lib/console.jar"] == "jvm-abi"  # the console jar supplies the Jupiter API
 
-    # Run: the code under test is a byte-lens input (no identity — impl matters),
+    # Run: the code under test is a byte-lens input (no lens — impl matters),
     # the run has NO file outputs (replays on fingerprint), and drives the
     # console launcher with --class-path entries.
     under_test = list(run_tests.inputs["under_test"].atoms())
     assert [a.path for a in under_test] == ["build/libs/app.jar"]
-    assert all(a.identity is None for a in under_test)  # byte lens
+    assert all(a.content_key is None for a in under_test)  # byte lens
     assert run_tests.outputs == {}
     assert "-jar {console}" in run_tests.command_line
     assert "--class-path build/test-classes" in run_tests.command_line

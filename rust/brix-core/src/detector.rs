@@ -20,9 +20,9 @@ pub struct TimeAndHashChangeDetector {
     /// The persistent hash cache (also read by `action_fingerprint` for
     /// discovered deps). `None` = stateless: hash directly every time.
     pub metadata: Option<Arc<BuildMetadata>>,
-    /// Skin-registered identity plugins (the `content_identity` extension
-    /// trait); consulted only for names the built-in registry doesn't know.
-    pub custom_identities: Option<Arc<dyn crate::identity::CustomIdentities>>,
+    /// Skin-registered lenses (the `content_identity` extension trait);
+    /// consulted only for names the built-in registry doesn't know.
+    pub custom_identities: Option<Arc<dyn crate::content_key::CustomIdentities>>,
 }
 
 impl TimeAndHashChangeDetector {
@@ -36,28 +36,28 @@ impl TimeAndHashChangeDetector {
 
     pub fn with_custom_identities(
         mut self,
-        custom: Option<Arc<dyn crate::identity::CustomIdentities>>,
+        custom: Option<Arc<dyn crate::content_key::CustomIdentities>>,
     ) -> Self {
         self.custom_identities = custom;
         self
     }
 
-    /// The versioned fingerprint tag for an identity name — built-ins first,
+    /// The versioned fingerprint tag for a content-key name — built-ins first,
     /// then the skin's resolver; None means the name is unknown everywhere
     /// (a loud error at the caller).
-    pub fn identity_tag(&self, name: &str) -> Option<String> {
-        crate::identity::tag(name)
+    pub fn content_key_tag(&self, name: &str) -> Option<String> {
+        crate::content_key::tag(name)
             .map(str::to_string)
             .or_else(|| self.custom_identities.as_ref().and_then(|c| c.tag(name)))
     }
 
-    fn compute_identity(&self, name: &str, path: &Path) -> Result<String, String> {
-        if crate::identity::tag(name).is_some() {
-            crate::identity::digest(name, path)
+    fn compute_content_key(&self, name: &str, path: &Path) -> Result<String, String> {
+        if crate::content_key::tag(name).is_some() {
+            crate::content_key::digest(name, path)
         } else {
             self.custom_identities
                 .as_ref()
-                .expect("caller gates on identity_tag")
+                .expect("caller gates on content_key_tag")
                 .digest(name, path)
         }
     }
@@ -98,31 +98,31 @@ impl TimeAndHashChangeDetector {
         hash_bytes(path)
     }
 
-    /// The content-identity digest of a file, cached like `hash_file` and
+    /// The content-key digest of a file, cached like `hash_file` and
     /// validated by the same stat signature (mirrors `identity_digest`).
     /// `Ok(None)` if missing or not a regular file; `Err` propagates the
-    /// plugin's error on a file it cannot interpret — the caller decides the
-    /// fallback (`:raw`). `name` must resolve via [`Self::identity_tag`]
+    /// lens's error on a file it cannot interpret — the caller decides the
+    /// fallback (`:raw`). `name` must resolve via [`Self::content_key_tag`]
     /// (built-in or skin-registered); custom digests cache under their
     /// versioned tag exactly like built-ins.
-    pub fn identity_digest(&self, path: &Path, name: &str) -> Result<Option<String>, String> {
+    pub fn content_key_digest(&self, path: &Path, name: &str) -> Result<Option<String>, String> {
         if !path.is_file() {
             return Ok(None);
         }
         let Some(sig) = self.stat_signature(path) else {
             return Ok(None);
         };
-        let tag = self.identity_tag(name).expect("caller gates on identity_tag");
+        let tag = self.content_key_tag(name).expect("caller gates on content_key_tag");
         if let Some(meta) = &self.metadata {
             let key = path.to_string_lossy();
             if let Some(cached) = meta.cached_identity(&key, &sig, &tag) {
                 return Ok(Some(cached));
             }
-            let digest = self.compute_identity(name, path)?; // caller falls back to :raw
+            let digest = self.compute_content_key(name, path)?; // caller falls back to :raw
             meta.store_identity(&key, &sig, &tag, &digest);
             return Ok(Some(digest));
         }
-        self.compute_identity(name, path).map(Some)
+        self.compute_content_key(name, path).map(Some)
     }
 }
 

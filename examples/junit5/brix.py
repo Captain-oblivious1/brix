@@ -2,7 +2,7 @@
 """Build JUnit 5's pure-Java platform modules with brix.
 
 A real-world acceptance test: re-implement a famous Gradle project's compile
-graph in brix, so the multi-module ABI story (`identity="jvm-abi"`) and the
+graph in brix, so the multi-module ABI story (`java.abi(...)`) and the
 warm javac worker run against code we didn't write. Scope is the seven
 pure-Java `junit-platform-*` modules — the `jupiter-*` side pulls in Kotlin
 and code generation, `console`/`reporting` pull in extra jars and

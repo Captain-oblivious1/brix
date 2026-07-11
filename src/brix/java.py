@@ -34,13 +34,46 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .actions import Action, ExternalProcessAction
-from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .data import DataAtom, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
 
 if TYPE_CHECKING:
     from .graph import Graph
     from .workers import WorkerSpec
 
 _WORKER_SOURCE = Path(__file__).parent / "_java" / "JavacWorker.java"
+
+
+class AbiFile(FileData):
+    """A jar/class compared through the JVM ABI lens, not its bytes: a
+    dependent recompiles on an API change, not an implementation-only one.
+    ``brix.java`` owns this lens — the core dispatches the ``jvm-abi`` name
+    through its content-key registry (docs/content-key.md)."""
+
+    content_key = "jvm-abi"
+
+
+class AbiGlob(GlobData):
+    """The glob counterpart of `AbiFile`: the JVM ABI lens applied to every
+    matched jar/class."""
+
+    content_key = "jvm-abi"
+
+
+def abi(expr: DataExpr) -> DataExpr:
+    """View a data expression through the JVM ABI lens: every plain file/glob
+    atom becomes its `AbiFile`/`AbiGlob` counterpart, so fingerprints compare
+    those files by API surface. Non-file atoms (tools, values) and atoms that
+    already carry a lens pass through unchanged. A classpath is many jars, so
+    this applies across an expression's atoms, not just one file."""
+    lensed: list[DataAtom] = []
+    for atom in expr.atoms():
+        if type(atom) is FileData:
+            lensed.append(AbiFile(atom.path))
+        elif type(atom) is GlobData:
+            lensed.append(AbiGlob(atom.pattern.template, atom.exclude))
+        else:
+            lensed.append(atom)
+    return lensed[0] if len(lensed) == 1 else DataUnion(*lensed)
 
 
 def _options_expr(options: list[str] | DataExpr | None) -> DataExpr:
@@ -50,19 +83,9 @@ def _options_expr(options: list[str] | DataExpr | None) -> DataExpr:
 
 
 def _classpath_union(classpath: list[DataExpr]) -> DataExpr:
-    """Flatten classpath entries into one expression, defaulting each file to
-    ``identity="jvm-abi"`` — the whole point is that a dependency recompiles a
-    dependent only on an API change."""
-    atoms: list = []
-    for expr in classpath:
-        for atom in expr.atoms():
-            if isinstance(atom, FileData) and atom.identity is None:
-                atoms.append(FileData(atom.path, identity="jvm-abi"))
-            elif isinstance(atom, GlobData) and atom.identity is None:
-                atoms.append(GlobData(atom.pattern.template, identity="jvm-abi"))
-            else:
-                atoms.append(atom)
-    return DataUnion(*atoms)
+    """Flatten classpath entries into one ABI-lensed expression — the whole
+    point is that a dependency recompiles a dependent only on an API change."""
+    return abi(DataUnion(*classpath))
 
 
 def javac_worker(
@@ -235,17 +258,18 @@ class JarAction(Action):
 
 
 def _runtime_union(classpath: list[DataExpr]) -> DataExpr:
-    """Byte-lens view of the classpath jars (`identity=None`): execution
+    """Byte-lens view of the classpath jars (no content_key): execution
     depends on the *implementation*, so a test re-runs whenever any byte on
     its runtime classpath changes — the counterpart to `_classpath_union`,
-    which uses the ABI lens for compilation."""
+    which uses the ABI lens for compilation. Strips any lens back to the plain
+    byte-hashed atom."""
     atoms: list = []
     for expr in classpath:
         for atom in expr.atoms():
             if isinstance(atom, FileData):
-                atoms.append(FileData(atom.path))  # drop any identity
+                atoms.append(FileData(atom.path))  # drop any lens
             elif isinstance(atom, GlobData):
-                atoms.append(GlobData(atom.pattern.template))
+                atoms.append(GlobData(atom.pattern.template, atom.exclude))
             else:
                 atoms.append(atom)
     return DataUnion(*atoms)
