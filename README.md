@@ -357,18 +357,21 @@ build inputs that come from memory or a database instead of files, and a C++
 
 Client build runtime is the metric that matters (brix's own build/test time is
 irrelevant by comparison). `examples/scaling_benchmark.py` gave the first
-numbers; two levers fall out, both keeping the Rust core:
+numbers (release engine). One lever falls out, and it is milder than first feared:
 
-1. **A resident daemon / warm graph** to collapse the cold no-op floor
-   (~12–18s extrapolated at ~50-service scale — see the Completed entry). Every
-   `brix build` today re-realizes globs, re-expands, and re-checks freshness cold,
-   with no filesystem watch. This is the big scaling win; it overlaps the
-   file-watcher / partial-loading ideas above, now with a number attached.
-2. **Trim the Rust executor's per-node overhead.** A clean build of many *cheap*
-   nodes is ~5× slower than the Python engine (~31 vs ~7 ms/node), confirmed real
-   at `jobs=1` (not a parallelism artifact). Invisible on real compiles but
-   ~minutes on a large cheap-node CI clean build. Next step: profile a clean build
-   to attribute it (per-node boundary crossings vs metadata I/O), then optimize.
+- **A resident daemon / warm graph**, eventually, to collapse the cold no-op
+  floor. At ~50-service scale (~10–15k nodes) a cold no-op extrapolates to only
+  **~3–4s** (linear at ~265 µs/node on the release Rust engine), plus a ~0.26s
+  cold-CLI tax. That is a mild annoyance, not a painful one — a **nice-to-have**,
+  not the big scaling win it first looked like. Every `brix build` today
+  re-realizes globs, re-expands, and re-checks freshness cold with no filesystem
+  watch; a daemon would erase that, but it is not urgent. Overlaps the
+  file-watcher / partial-loading ideas above.
+
+(An earlier "Rust executor is ~5× slower on clean builds" note was withdrawn — it
+was a *debug*-build artifact; on the release engine Rust matches or beats the
+Python engine on clean builds and is ~10× faster on no-ops. See the Completed
+entry. Lesson baked into the benchmark: measure the release `.so`.)
 
 ## Completed
 
@@ -376,19 +379,23 @@ numbers; two levers fall out, both keeping the Rust core:
   (`examples/scaling_benchmark.py`).** A synthetic N-node graph (one `cp` per
   source, glob-fanned) whose no-op build does zero process work, so its wall time
   is pure brix overhead — realize globs, expand, stat/hash every input. Findings
-  (one 4-core machine, in-process `build()`):
+  (one 4-core machine, in-process `build()`, **release Rust engine**):
   - **No-op scaling is linear** in node count on both engines — no O(N²) blowup in
-    glob realization / expansion / freshness check. Rust ~1.2ms/node, Python
-    ~2.5ms/node (Rust ~2× faster). But the *constant* is high: a no-op at ~10–15k
-    nodes (≈50 services) extrapolates to ~12–18s, plus a ~0.26s cold-CLI tax per
-    invocation. Lever: a resident daemon (warm graph + filesystem watch).
-  - **The Rust executor has a real per-node overhead on process-running builds**,
-    confirmed at `jobs=1` so not a parallelism artifact: a clean build of trivial
-    nodes runs ~5× slower than the Python engine (~31 vs ~7 ms/node). A fat linear
-    constant — invisible on real compiles (a `javac` at ~1s/node swamps it) but
-    ~minutes on a large cheap-node CI clean build. Rust still wins the
-    no-op/incremental loop, which is what the edit-compile loop mostly is. Both
-    levers tracked under *Performance next steps* above.
+    glob realization / expansion / freshness check. Rust **~265 µs/node**, Python
+    ~2.5 ms/node — **Rust ~10× faster**. Extrapolated to ~10–15k nodes (≈50
+    services): a cold no-op of **~3–4s**, plus a ~0.26s cold-CLI tax. Mild at
+    scale; a resident daemon would erase it but isn't urgent.
+  - **Clean builds:** the release Rust engine matches or beats the Python engine
+    (e.g. 2.6s vs 3.7s at 500 nodes; 4.8s vs 8.5s at 1000). Rust wins the
+    no-op/incremental loop decisively.
+  - **Methodology correction, kept as a caution:** a first pass reported the Rust
+    engine ~5× *slower* on clean builds and a ~1.2 ms/node no-op floor. Both were
+    a **debug-`.so` artifact** — unoptimized Rust runs this hashing/JSON-heavy
+    per-node work ~4–6× slower. The engine loader prefers `target/release`, so a
+    debug-only build is measured by accident; the benchmark now warns to build
+    `--release` first. The differential experiment (touch vs cp, `jobs=1`) that
+    ruled out I/O / metadata / reporter is what exposed the flat 30 ms/node as
+    suspicious enough to check the build profile.
 - **Incremental-≡-clean equivalence oracles.** The suite tested each
   invalidation path against a hand-written expected value; it had no test of the
   property those are all really about — that no edit sequence ever leaves an

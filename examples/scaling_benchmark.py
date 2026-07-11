@@ -15,6 +15,14 @@ engine's scaling. Run under both engines:
     python examples/scaling_benchmark.py                 # default (Rust) engine
     BRIX_ENGINE=py python examples/scaling_benchmark.py  # Python reference engine
     SIZES=100,1000,10000 NO_FANIN=1 python examples/scaling_benchmark.py
+
+CRITICAL: build the Rust engine in RELEASE first —
+    (cd rust && cargo build -p brix-py --release)
+A debug .so (plain `cargo build`) is unoptimized and runs this hashing/JSON-heavy
+per-node work ~4-6x slower, which silently skews every number here (and can make
+the Rust engine look slower than the Python one — a pure artifact). The engine
+loader prefers target/release over target/debug, so a stale debug-only build is
+easy to measure by accident.
 """
 
 import os
