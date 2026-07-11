@@ -32,6 +32,7 @@ Each has its own `README.md` with clone + setup steps. Checkouts go in
 | `fmt/` | fmtlib/fmt (CMake) | `brix.cpp` compile/link + automatic `#include` header-dep tracking on real headers |
 | `jackson/` | jackson-core (Maven) | selective JUnit 5 test running (`java.JUnitTestAction` — two lenses), plus a generated source and a resource-bearing jar |
 | `leveldb/` | google/leveldb (CMake) | C++ static library at scale: 38 TUs compiled in parallel, `cpp.ArchiveAction` → `libleveldb.a`, linked + run against a smoke program; header-dep tracking stays selective on the real tree |
+| `spring-petclinic/` | spring-petclinic (Maven) | a real Spring Boot app: compile against a ~90-jar Maven-resolved classpath + `brix.springboot.SpringBootJar` → an executable fat jar that boots with `java -jar`. Consumes Maven's dep resolution; brix owns compile + package + incremental |
 
 **Next dogfood targets** (see the repo README's "Feature-completeness
 dogfooding" section): an annotation-processor project (add `-processorpath`

@@ -28,7 +28,7 @@ from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 from .status import ActionStatus, StatusReport, compute_status
 from .workers import WorkerSpec
-from . import cli, cpp, identity, java, jvmabi
+from . import cli, cpp, identity, java, jvmabi, springboot
 
 __all__ = [
     "ActionStatus",
@@ -76,4 +76,5 @@ __all__ = [
     "identity",
     "java",
     "jvmabi",
+    "springboot",
 ]

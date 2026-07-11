@@ -35,10 +35,11 @@ the default** — `BRIX_ENGINE=py` forces the old engine, but everything below
 runs on the Rust core unless you ask otherwise. The build-layer seams, the full
 IncrementalBuilder (fingerprint skip + deleted-source cleanup), the result
 cache, atomic staging (incl. held-for-review), persistent warm workers, the
-reporter seam, status/clean with a CLI, typed C++/Java actions, nested
-expansion, per-action environments, glob exclusion (`-`), and the `content_key`
-comparison lenses (`jvm-abi`/`ts-dts`) are all implemented and working.
-**230 Python tests pass under both engines** (`pytest`, and again with
+reporter seam, status/clean with a CLI, typed C++/Java actions, Spring Boot
+executable-jar packaging (`brix.springboot`), nested expansion, per-action
+environments, glob exclusion (`-`), and the `content_key` comparison lenses
+(`jvm-abi`/`ts-dts`) are all implemented and working.
+**235 Python tests pass under both engines** (`pytest`, and again with
 `BRIX_ENGINE=py`), plus **134 Rust tests** — many cross-checking the two
 engines byte-for-byte via golden fixtures — and a JDK end-to-end test that
 skips when no JDK is on PATH. The remaining Rust-track work is phase 4c
@@ -212,9 +213,16 @@ bug or missing feature). Clones live in `~/Projects/brix_test/`; our `brix.py`
 artifacts live in this repo under `examples/`. **Done:** JUnit 5 (Java compile
 graph; found the jvm-abi String-annotation bug; resources), fmt (C++ header-dep
 tracking), jackson-core (selective test running via `java.JUnitTestAction`;
-found generated-sources + shaded-dep needs), and leveldb (static-library build
+found generated-sources + shaded-dep needs), leveldb (static-library build
 of 38 TUs via `cpp.CompileSourceAction` + `cpp.ArchiveAction`, linked + run
-against a smoke program — see below).
+against a smoke program — see below), and **spring-petclinic** (a real Spring
+Boot app: 30 sources compiled against a ~90-jar Maven-resolved classpath through
+the warm worker, packaged, and — via the new `brix.springboot.SpringBootJar` —
+repackaged into an executable fat jar that boots with bare `java -jar`; see
+`examples/spring-petclinic/`). petclinic confirmed the design holds end to end
+with **no engine changes**: brix consumes Maven's dependency resolution and owns
+compile + package + incremental rebuild (a comment-only edit recompiles but does
+*not* re-jar, since the class bytes are unchanged).
 
 **Next, in priority order (all Opus — dogfood + helper additions, no engine
 changes expected):**
@@ -226,7 +234,9 @@ changes expected):**
    but not annotations'.
 
 Deferred (need features + dependency resolution — better with the real
-monorepo): Spring Boot fat-jars, Kotlin modules.
+monorepo): **Kotlin modules** — the team plans to adopt Kotlin, and it reuses
+the JVM lane (the `jvm-abi` lens and the warm worker), so it is high-reuse when
+scheduled. (Spring Boot fat-jars: **done** — see spring-petclinic above.)
 
 ### Opus queue — ready to do now
 
@@ -340,6 +350,24 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **Spring Boot executable-jar packaging (`brix.springboot`) + spring-petclinic
+  dogfood.** New `SpringBootJar` action repackages a plain application jar plus
+  its Maven-resolved runtime jars into one executable fat jar (nested
+  `BOOT-INF/lib`, `JarLauncher` manifest) that boots with bare `java -jar`. It
+  does *not* reimplement the layout: a dependency-free JDK helper
+  (`_java/BootRepackager.java`) loads Spring's own `spring-boot-loader-tools`
+  `Repackager` reflectively through a child class loader and drives it — the same
+  code the Maven/Gradle plugins call, so the output is a standard Boot jar. Every
+  jar is passed as a data-substituted argument (never a baked `-classpath`), so
+  the command template stays free of machine paths and its fingerprint is
+  portable. The plain jar and all bundled deps are byte-lens inputs, so a
+  dependency bump rebuilds the executable jar. **Proven end to end** on
+  spring-petclinic (Spring Boot 4.1, JPA/Thymeleaf/WebMVC): brix builds the fat
+  jar and the app boots and serves (`/actuator/health` UP, `/vets` JSON, home
+  page); a source edit cascades recompile → re-jar → re-bootjar; Rust and Python
+  engines replay identically. No engine changes — pure authoring-layer Python
+  that lowers to generic process actions. See `examples/spring-petclinic/` and
+  `tests/test_springboot.py`.
 - **Retired `identity=`; comparison is now a `content_key` Rust trait** (per
   `docs/content-key.md`, both engines). The `identity="jvm-abi"` string kwarg is
   gone. A content lens is now *intrinsic to the atom's type*: `brix.java` ships
