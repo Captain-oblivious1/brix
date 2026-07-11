@@ -703,12 +703,14 @@ build inputs that come from memory or a database instead of files, and a C++
   (regenerate with its `regenerate.sh`). Phases 2–3 (workers, daemon)
   remain; `brix.java` is untouched until phase 2 wires `classpath=`.
 - **TypeScript `.d.ts` content identity** (`tsdts.py`, `identity.py`): the
-  second content-identity plugin, `ts-dts` — `data.file("api.d.ts",
-  identity="ts-dts")` makes a `.d.ts` contribute its *declaration surface* to
-  fingerprints, so a consumer recompiles on an interface change but not an
-  implementation-only change or a doc/format edit. The ABI-pruning multiplier
-  for the Java+TS monorepo half, and proof the content-identity seam is a real
-  extension point (a second plugin, no engine change). Most of the win is
+  second content lens, `ts-dts` — a `.d.ts` contributes its *declaration
+  surface* to fingerprints instead of its bytes, so a consumer recompiles on an
+  interface change but not an implementation-only change or a doc/format edit.
+  (Since the `content_key` relocation it's selected via a typed atom carrying
+  `content_key = "ts-dts"`, not a kwarg; a `ts.py` authoring surface for it is
+  still unbuilt — see the TS-build item in the Opus queue.) The ABI-pruning
+  multiplier for the Java+TS monorepo half, and proof the content-lens seam is a
+  real extension point (a second lens, no engine change). Most of the win is
   structural — `tsc`'s declaration emit is already implementation-free, so an
   impl-only change yields a byte-identical `.d.ts` — with `tsdts.normalize`
   adding robustness: strip `//` and `/* */` comments and collapse formatting
