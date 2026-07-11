@@ -377,6 +377,20 @@ entry. Lesson baked into the benchmark: measure the release `.so`.)
 
 ## Completed
 
+- **C++ dependency resolution (`cpp.pkg_config`) — the `DepSet` generalizes.**
+  Same pattern as the JVM adapters, one axis over: `cpp.pkg_config(["zlib"])`
+  queries the system's pkg-config (behind a testable seam) and returns a
+  `DepSet` whose `--cflags` are `compile_flags` (`-I`/`-D`) and `--libs` are
+  `link_flags` (`-L`/`-l`) — so `DepSet.flags` split into compile/link, both
+  empty for a JVM classpath. `cpp.CompileSourceAction(deps=...)` adds the compile
+  flags to every TU; `cpp.LinkApplicationAction(deps=...)` adds the link flags
+  *after* the objects (link order is load-bearing) plus any tracked artifact
+  files. System libs come as `-l` flags, not file paths, so they aren't
+  fingerprinted (documented; a future Conan/vcpkg adapter yielding concrete
+  `.a`/`.so` paths would populate `artifacts`, which the link step tracks).
+  **Proven:** brix compiled + linked a real program against zlib via
+  `cpp.pkg_config(["zlib"])` and it ran. `tests/test_deps.py` grew C++ cases (17
+  total), including a regression that a flags-only `DepSet` is truthy.
 - **Dependency resolution: drive a resolver, consume its output
   (`brix.deps.DepSet` + `java.pom` / `java.maven`).** brix still doesn't resolve
   or download dependencies — but you no longer hand-maintain a classpath file.

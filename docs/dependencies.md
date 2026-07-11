@@ -50,8 +50,18 @@ are.
 is the *greenfield / single-file* path.
 
 - `java.maven([coords])` — resolve `"group:artifact:version"` via Maven (implemented)
+- `cpp.pkg_config([names])` — query installed system libraries (implemented)
 - `java.coursier([coords])` (planned)
-- `cpp.conan([refs])` / `cpp.vcpkg([ports])` / `cpp.pkg_config([names])` (planned)
+- `cpp.conan([refs])` / `cpp.vcpkg([ports])` (planned)
+
+`cpp.pkg_config` returns a `DepSet` whose `--cflags` are its `compile_flags`
+(`-I`/`-D`) and `--libs` its `link_flags` (`-L`/`-l`).
+`CompileSourceAction(deps=...)` adds the compile flags to every translation
+unit; `LinkApplicationAction(deps=...)` adds the link flags *after* the objects
+(link order) plus any tracked artifact files. System libraries come as `-l`
+flags, not file paths, so they are not fingerprinted — a system-lib upgrade is
+outside the project (a Conan/vcpkg adapter yielding concrete `.a`/`.so` paths
+would populate `artifacts`, which the link step does track).
 
 Naming the engine on the coordinate case is deliberate, not cosmetic: **Maven and
 Gradle apply different transitive-version-conflict rules** (Maven "nearest wins",

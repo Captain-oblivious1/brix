@@ -27,9 +27,10 @@ def test_add_merges_ordered_and_dedups_first_occurrence():
 
 
 def test_add_concatenates_flags():
-    a = DepSet(("a.jar",), flags=("-Ione",))
-    b = DepSet(("b.jar",), flags=("-Itwo",))
-    assert (a + b).flags == ("-Ione", "-Itwo")
+    a = DepSet(("a.jar",), compile_flags=("-Ione",), link_flags=("-lone",))
+    b = DepSet(("b.jar",), compile_flags=("-Itwo",), link_flags=("-ltwo",))
+    assert (a + b).compile_flags == ("-Ione", "-Itwo")
+    assert (a + b).link_flags == ("-lone", "-ltwo")
 
 
 def test_add_accepts_a_file_atom_or_raw_path():
@@ -164,3 +165,61 @@ def test_junit_and_springboot_accept_a_depset():
         repackager=spec,
     )
     assert [a.path for a in boot.runtime_classpath] == ["/m2/foo.jar"]
+
+
+# --- C++: pkg_config adapter + cpp compile/link consumption ---
+
+
+def test_flags_only_depset_is_truthy():
+    # Regression: a pkg-config DepSet has no artifacts, only flags — it must not
+    # be falsy, or the cpp lowering drops its flags.
+    assert bool(DepSet(link_flags=("-lz",)))
+    assert bool(DepSet(compile_flags=("-Ifoo",)))
+    assert not bool(DepSet())
+
+
+def test_pkg_config_splits_cflags_and_libs(monkeypatch):
+    from brix import cpp
+
+    def query(pkg_config, flag, names):
+        out = {
+            "--cflags": ["-I/usr/include/foo", "-DBAR"],
+            "--libs": ["-L/usr/lib", "-lfoo"],
+        }
+        return out[flag]
+
+    monkeypatch.setattr(cpp, "_pkg_config_query", query)
+    ds = cpp.pkg_config(["foo"])
+    assert ds.compile_flags == ("-I/usr/include/foo", "-DBAR")
+    assert ds.link_flags == ("-L/usr/lib", "-lfoo")
+    assert ds.artifacts == ()  # system libs are flags, not tracked files
+
+
+def test_compile_action_adds_dep_compile_flags():
+    from brix import cpp
+
+    ds = DepSet(compile_flags=("-I/usr/include/foo",))
+    action = cpp.CompileSourceAction(
+        source_files=data.glob("src/{n}.cpp"),
+        object_files=data.glob("build/{n}.o"),
+        deps=ds,
+    )
+    (expand,) = action.lower()
+    child = expand.child
+    assert child.inputs["dep_cflags"].text == "-I/usr/include/foo"
+    assert "{dep_cflags}" in child.command_line
+
+
+def test_link_action_puts_dep_libs_and_flags_after_objects():
+    from brix import cpp
+
+    ds = DepSet(artifacts=("lib/libfoo.a",), link_flags=("-lz",))
+    (link,) = cpp.LinkApplicationAction(
+        object_files=data.glob("build/{n}.o"),
+        output_file=data.file("build/app"),
+        deps=ds,
+    ).lower()
+    # link order: objects, then dep artifacts, then dep -l flags.
+    assert "{objects} {dep_libs} {dep_lflags}" in link.command_line
+    assert [a.path for a in link.inputs["dep_libs"].atoms()] == ["lib/libfoo.a"]
+    assert link.inputs["dep_lflags"].text == "-lz"
