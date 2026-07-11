@@ -118,14 +118,14 @@ fn render_atom(name: &str, atom: &DataAtom, ctx: &NodeContext, is_output: bool) 
                 Ok(input_path(ctx, path))
             }
         }
-        DataAtom::Glob { template, .. } => {
+        DataAtom::Glob { template, exclude, .. } => {
             if is_output {
                 return Err(format!(
                     "{name}: output collection '{template}' cannot be rendered into \
                      a command line; pass a directory value instead"
                 ));
             }
-            let pattern = crate::patterns::PathPattern::new(template)
+            let pattern = crate::patterns::PathPattern::with_exclude(template, exclude)
                 .map_err(|e| format!("{name}: {e}"))?;
             Ok(ctx
                 .find(&pattern)

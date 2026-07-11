@@ -93,6 +93,42 @@ def test_recursive_find_walks_nested(tmp_path):
     ]
 
 
+def test_exclude_filters_find(tmp_path):
+    (tmp_path / "src/db").mkdir(parents=True)
+    (tmp_path / "src/a.cc").write_text("a")
+    (tmp_path / "src/a_test.cc").write_text("t")
+    (tmp_path / "src/db/b.cc").write_text("b")
+    (tmp_path / "src/db/b_test.cc").write_text("t")
+    p = PathPattern("src/{name}.cc", exclude=("*_test.cc",))
+    # fnmatch `*` crosses `/`: the nested test file is dropped too.
+    assert p.find(tmp_path) == [
+        ("src/a.cc", {"name": "a"}),
+        ("src/db/b.cc", {"name": "db/b"}),
+    ]
+
+
+def test_exclude_exact_path_and_question_mark(tmp_path):
+    (tmp_path / "u").mkdir()
+    for name in ("env.cc", "env_posix.cc", "env_windows.cc", "x1.cc", "x22.cc"):
+        (tmp_path / "u" / name).write_text("s")
+    found = PathPattern("u/{n}.cc", exclude=("u/env_windows.cc", "u/x?.cc")).find(tmp_path)
+    assert [f for f, _ in found] == ["u/env.cc", "u/env_posix.cc", "u/x22.cc"]
+
+
+def test_exclude_applies_to_concrete_template(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    assert PathPattern("a.txt", exclude=("*.txt",)).find(tmp_path) == []
+    assert PathPattern("a.txt", exclude=("*.log",)).find(tmp_path) == [("a.txt", {})]
+
+
+def test_exclude_does_not_affect_match_or_overlap():
+    # Membership only: `match` (used for binding extraction and edge
+    # inference) and `overlaps` ignore excludes — conservative by design.
+    p = PathPattern("src/{name}.cc", exclude=("*_test.cc",))
+    assert p.match("src/a_test.cc") == {"name": "a_test"}
+    assert overlaps(p, PathPattern("src/foo_test.cc"))
+
+
 def test_overlaps_concrete():
     assert overlaps(PathPattern("a/b.c"), PathPattern("a/b.c"))
     assert not overlaps(PathPattern("a/b.c"), PathPattern("a/x.c"))

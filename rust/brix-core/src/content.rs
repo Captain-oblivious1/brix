@@ -75,8 +75,8 @@ fn atom_fp(
                 hash_value(det.hash_file(&physical)),
             ]))
         }
-        DataAtom::Glob { template, identity } => {
-            let pattern = PathPattern::new(template)?;
+        DataAtom::Glob { template, identity, exclude } => {
+            let pattern = PathPattern::with_exclude(template, exclude)?;
             let mut entries = Vec::new();
             for (logical, physical, _) in ctx.find(&pattern) {
                 entries.push(Value::List(match identity {
@@ -87,11 +87,18 @@ fn atom_fp(
                     None => vec![Value::str(&logical), hash_value(det.hash_file(&physical))],
                 }));
             }
-            Ok(Value::List(vec![
+            let mut material = vec![
                 Value::str("glob"),
                 Value::str(template),
                 Value::List(entries),
-            ]))
+            ];
+            // Only when present: pre-exclude fingerprints unchanged.
+            if !exclude.is_empty() {
+                let mut excl = vec![Value::str("exclude")];
+                excl.extend(exclude.iter().map(|p| Value::str(p)));
+                material.push(Value::List(excl));
+            }
+            Ok(Value::List(material))
         }
         DataAtom::Regex { pattern } => {
             let entries = ctx

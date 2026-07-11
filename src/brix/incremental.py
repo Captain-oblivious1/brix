@@ -35,6 +35,8 @@ def _atom_identity(atom: DataAtom) -> list:
     if isinstance(atom, FileData):
         return ["file", atom.path]
     if isinstance(atom, GlobData):
+        if atom.exclude:  # only when present: pre-exclude identities unchanged
+            return ["glob", atom.pattern.template, ["exclude", *atom.exclude]]
         return ["glob", atom.pattern.template]
     if isinstance(atom, RegexData):
         return ["regex", atom.regex.pattern]
@@ -110,7 +112,7 @@ def action_fingerprint(
             return ["file", atom.path, detector.hash_file(physical)]
         if isinstance(atom, GlobData):
             if atom.identity is not None:
-                return [
+                material = [
                     "glob",
                     atom.pattern.template,
                     [
@@ -118,14 +120,18 @@ def action_fingerprint(
                         for logical, physical, _ in ctx.find(atom.pattern)
                     ],
                 ]
-            return [
-                "glob",
-                atom.pattern.template,
-                [
-                    [logical, detector.hash_file(physical)]
-                    for logical, physical, _ in ctx.find(atom.pattern)
-                ],
-            ]
+            else:
+                material = [
+                    "glob",
+                    atom.pattern.template,
+                    [
+                        [logical, detector.hash_file(physical)]
+                        for logical, physical, _ in ctx.find(atom.pattern)
+                    ],
+                ]
+            if atom.exclude:  # only when present: pre-exclude fingerprints unchanged
+                material.append(["exclude", *atom.exclude])
+            return material
         if isinstance(atom, RegexData):
             return [
                 "regex",

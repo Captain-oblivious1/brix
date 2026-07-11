@@ -88,8 +88,10 @@ fn output_files(action: &Action, ctx: &NodeContext) -> BTreeMap<String, PathBuf>
                         }
                     }
                 }
-                DataAtom::Glob { template, .. } => {
-                    let Ok(pattern) = PathPattern::new(template) else { continue };
+                DataAtom::Glob { template, exclude, .. } => {
+                    let Ok(pattern) = PathPattern::with_exclude(template, exclude) else {
+                        continue;
+                    };
                     for (logical, physical, _) in ctx.find(&pattern) {
                         if physical.is_file() {
                             files.insert(logical, physical);

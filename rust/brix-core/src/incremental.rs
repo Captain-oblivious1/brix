@@ -95,8 +95,8 @@ fn output_hashes(action: &Action, ctx: &NodeContext, det: &TimeAndHashChangeDete
                         }
                     }
                 }
-                DataAtom::Glob { template, .. } => {
-                    if let Ok(p) = PathPattern::new(template) {
+                DataAtom::Glob { template, exclude, .. } => {
+                    if let Ok(p) = PathPattern::with_exclude(template, exclude) {
                         for (logical, physical, _) in ctx.find(&p) {
                             let h = det.hash_file(&physical);
                             hashes.insert(logical, opt_str(h));
@@ -137,8 +137,8 @@ fn remove_outputs(action: &Action, ctx: &NodeContext) {
                         }
                     }
                 }
-                DataAtom::Glob { template, .. } => {
-                    if let Ok(p) = PathPattern::new(template) {
+                DataAtom::Glob { template, exclude, .. } => {
+                    if let Ok(p) = PathPattern::with_exclude(template, exclude) {
                         for (rel, _) in p.find(&ctx.output_root) {
                             let _ = std::fs::remove_file(ctx.output_root.join(rel));
                         }

@@ -307,8 +307,8 @@ pub fn clean(actions: Vec<Action>, root: &Path, metadata_dir: &str) -> Result<us
                             paths.insert(path.clone());
                         }
                     }
-                    DataAtom::Glob { template, .. } => {
-                        if let Ok(p) = PathPattern::new(template) {
+                    DataAtom::Glob { template, exclude, .. } => {
+                        if let Ok(p) = PathPattern::with_exclude(template, exclude) {
                             for (rel, _) in p.find(root) {
                                 paths.insert(rel);
                             }

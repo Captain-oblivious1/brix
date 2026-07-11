@@ -33,7 +33,8 @@ Expand        = { "kind": "expand", "element": str,
 Delete        = { "kind": "delete", "paths": [str] }
 DataExpr      = [ Atom... ]                            // a union is just the list
 Atom          = { "kind": "file",  "path": str,     "identity": str? }
-              | { "kind": "glob",  "template": str, "identity": str? }
+              | { "kind": "glob",  "template": str, "identity": str?,
+                  "exclude": [str]? }                  // fnmatch narrowing
               | { "kind": "regex", "pattern": str }
               | { "kind": "tool",  "name": str }
               | { "kind": "value", "text": str }
@@ -67,7 +68,14 @@ render into the worker's launch argv with the ordinary rules, its input
 path atoms create dependency edges like the action's own, and its
 identity joins the action fingerprint (a rebuilt worker jar invalidates
 what the worker built). Also optional and additive — landed with the
-Rust workers slice, still version 1. The typed helpers (`cpp`, `java`)
+Rust workers slice, still version 1. `exclude` on a glob atom is a list
+of fnmatch patterns (`*` crosses `/`, `?`, `[...]`/`[!...]`) matched
+against the workspace-relative POSIX path; a match drops the file from
+membership (`find`), while `match`/`substitute`/overlap checks ignore it
+(excludes only shrink a set, so edge inference stays conservative). It
+joins fingerprints and identities only when non-empty, so pre-exclude
+graphs hash byte-identically — optional and additive, still version 1
+(`docs/content-key.md` has the design). The typed helpers (`cpp`, `java`)
 lower **before** this boundary and never appear in it.
 
 ## Build config (skin → core)

@@ -18,6 +18,7 @@ matcher caches) belong to the eventual Rust engine.
 from __future__ import annotations
 
 import re
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 # Group 1 is the name; group 2 is the optional constraint (`*` = one segment,
@@ -34,12 +35,21 @@ class PatternError(Exception):
 
 
 class PathPattern:
-    """A path template such as ``src/{name}.cpp`` or a concrete path."""
+    """A path template such as ``src/{name}.cpp`` or a concrete path.
 
-    def __init__(self, template: str) -> None:
+    ``exclude`` (fnmatch patterns — ``*``, ``?``, ``[...]`` — matched against
+    the workspace-relative POSIX path; ``*`` crosses ``/``) narrows
+    *membership* only: `find` drops matching files. Matching (`match`),
+    substitution, and overlap checks ignore excludes — an exclude can only
+    shrink a set, so ignoring it keeps edge inference conservative
+    (docs/content-key.md).
+    """
+
+    def __init__(self, template: str, exclude: tuple[str, ...] = ()) -> None:
         if not template:
             raise PatternError("empty path pattern")
         self.template = template
+        self.exclude = tuple(exclude)
         self.binding_names: tuple[str, ...] = tuple(
             m.group(1) for m in _BINDING_RE.finditer(template)
         )
@@ -99,6 +109,8 @@ class PathPattern:
         Returns sorted ``(workspace-relative path, bindings)`` pairs.
         """
         if self.is_concrete:
+            if self._excluded(self.template):
+                return []
             return [(self.template, {})] if (root / self.template).is_file() else []
         base = root / self.literal_prefix_dir if self.literal_prefix_dir else root
         if not base.is_dir():
@@ -108,10 +120,15 @@ class PathPattern:
             if not p.is_file():
                 continue
             rel = p.relative_to(root).as_posix()
+            if self._excluded(rel):
+                continue
             bindings = self.match(rel)
             if bindings is not None:
                 results.append((rel, bindings))
         return results
+
+    def _excluded(self, rel: str) -> bool:
+        return any(fnmatchcase(rel, pat) for pat in self.exclude)
 
     def __repr__(self) -> str:
         return f"PathPattern({self.template!r})"

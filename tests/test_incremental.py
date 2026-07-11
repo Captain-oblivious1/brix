@@ -94,6 +94,52 @@ def test_second_build_runs_nothing(tmp_path):
     )
 
 
+def test_exclude_list_is_fingerprint_material(tmp_path):
+    """Same exclusions replay; a changed exclude list re-runs, even when it
+    changes no membership (docs/content-key.md: part of the glob's identity)."""
+
+    def graph_with(exclude):
+        def make():
+            from brix import ExternalProcessAction, Graph
+
+            graph = Graph()
+            data = graph.data
+            graph.add(
+                ExternalProcessAction(
+                    name="combine",
+                    command_line="{python} {tool} {parts} {combined}",
+                    inputs={
+                        "python": data.tool(sys.executable),
+                        "tool": data.file("tools/concat.py"),
+                        "parts": data.glob("src/{name}.txt") - exclude,
+                    },
+                    outputs={"combined": data.file("build/all.txt")},
+                )
+            )
+            return graph
+
+        return make
+
+    write_workspace(tmp_path, {"a": "hi ", "_b": "skip", "c": "there"})
+    first = IncrementalBuilder(graph_with("src/_*.txt"), root=tmp_path).build()
+    assert first.success
+    assert (tmp_path / "build/all.txt").read_text() == "hi there"
+    assert runs(tmp_path)["combine"] == 1
+
+    # Identical excludes: fresh, nothing runs.
+    again = IncrementalBuilder(graph_with("src/_*.txt"), root=tmp_path).build()
+    assert again.success
+    assert runs(tmp_path)["combine"] == 1
+
+    # Extra exclude matching nothing: membership identical, but the list
+    # itself is material — the action must re-run.
+    changed = IncrementalBuilder(
+        graph_with(["src/_*.txt", "src/zz*.txt"]), root=tmp_path
+    ).build()
+    assert changed.success
+    assert runs(tmp_path)["combine"] == 2
+
+
 def test_replayed_result_carries_previous_stdout(tmp_path):
     write_workspace(tmp_path, {"a": "x"})
     builder = IncrementalBuilder(make_graph, root=tmp_path)

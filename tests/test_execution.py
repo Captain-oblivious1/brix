@@ -146,6 +146,46 @@ def test_generated_files_expand_at_runtime(tmp_path):
     assert (tmp_path / "build/all.txt").read_text() == "ALPHA\nBETA\n"
 
 
+def test_glob_exclusion_narrows_expansion_and_inputs(tmp_path):
+    # `- "src/_*.txt"` drops members from both the expansion collection and
+    # the combine's input glob; the excluded file is never uppercased and
+    # never concatenated.
+    write_workspace(tmp_path, {"a.txt": "keep ", "_b.txt": "drop", "c.txt": "also"})
+    graph = Graph()
+    data = graph.data
+    sources = data.glob("src/{name}.txt") - "src/_*.txt"
+    graph.add(
+        ExpandAll(
+            element_name="name",
+            collection=sources,
+            child=ExternalProcessAction(
+                name="upper {name}",
+                command_line="{python} {tool} {source} {dest}",
+                inputs={
+                    "python": data.tool(sys.executable),
+                    "tool": data.file("tools/upper.py"),
+                    "source": data.file("src/{name}.txt"),
+                },
+                outputs={"dest": data.file("build/upper/{name}.txt")},
+            ),
+        ),
+        ExternalProcessAction(
+            name="combine",
+            command_line="{python} {tool} {parts} {combined}",
+            inputs={
+                "python": data.tool(sys.executable),
+                "tool": data.file("tools/concat.py"),
+                "parts": data.glob("build/upper/{name}.txt"),
+            },
+            outputs={"combined": data.file("build/all.txt")},
+        ),
+    )
+    result = CleanBuilder(graph, root=tmp_path).build()
+    assert result.success, result.errors
+    assert not (tmp_path / "build/upper/_b.txt").exists()
+    assert (tmp_path / "build/all.txt").read_text() == "KEEP ALSO"
+
+
 def test_stdout_stderr_exit_code_captured(tmp_path):
     graph = Graph()
     data = graph.data

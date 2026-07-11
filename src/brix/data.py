@@ -66,19 +66,48 @@ class GlobData(DataAtom):
 
     ``identity`` applies the named content-identity plugin to every matched
     file (see `FileData`); default ``None`` is byte hashing.
+
+    Subtraction narrows membership: ``data.glob("{name}.cc") - "*_test.cc"``
+    returns a copy whose `find` drops files matching the fnmatch pattern(s)
+    (``*``/``?``/``[...]``, matched against the workspace-relative path, ``*``
+    crossing ``/``). Membership only — substitution carries excludes through
+    untouched, and the planner's edge inference ignores them
+    (docs/content-key.md).
     """
 
-    def __init__(self, pattern: str, identity: str | None = None) -> None:
-        self.pattern = PathPattern(pattern)
+    def __init__(
+        self,
+        pattern: str,
+        identity: str | None = None,
+        exclude: tuple[str, ...] = (),
+    ) -> None:
+        self.pattern = PathPattern(pattern, tuple(exclude))
         self.identity = identity
 
+    @property
+    def exclude(self) -> tuple[str, ...]:
+        return self.pattern.exclude
+
+    def __sub__(self, other: str | list[str] | tuple[str, ...]) -> GlobData:
+        if isinstance(other, str):
+            added: tuple[str, ...] = (other,)
+        elif isinstance(other, (list, tuple)) and all(isinstance(p, str) for p in other):
+            added = tuple(other)
+        else:
+            return NotImplemented
+        return GlobData(self.pattern.template, self.identity, self.exclude + added)
+
     def substitute(self, bindings: dict[str, str]) -> GlobData:
-        return GlobData(self.pattern.substitute(bindings), self.identity)
+        return GlobData(self.pattern.substitute(bindings), self.identity, self.exclude)
 
     def __repr__(self) -> str:
         if self.identity is not None:
-            return f"data.glob({self.pattern.template!r}, identity={self.identity!r})"
-        return f"data.glob({self.pattern.template!r})"
+            text = f"data.glob({self.pattern.template!r}, identity={self.identity!r})"
+        else:
+            text = f"data.glob({self.pattern.template!r})"
+        if self.exclude:
+            text += f" - {list(self.exclude)!r}"
+        return text
 
 
 class RegexData(DataAtom):

@@ -297,13 +297,6 @@ that's why dispatch must stay a name registry, not an `enum`). Touches
 
 ### Fable queue — for the careful model only
 
-- **Glob exclusion via the `-` operator** (design agreed — see
-  `docs/content-key.md`). `data.glob("{name}.cc") - "*_test.cc"` — fnmatch
-  right-hand side, `__sub__` returns an immutable copy with an internal exclude
-  list, `find()` filters, planner overlap ignores excludes (conservative). Small,
-  mechanical, mirrored both engines; additive wire field (`glob.exclude`). Lets
-  `examples/leveldb` drop its `setup.sh` staging and glob in place. Fully specified
-  in the note; do this **before** the `content_key` refactor.
 - **The scheduler + build layers of the Rust rewrite** (track 2), reviewed
   carefully, then switching brix to run on Rust by default. The single trickiest
   part of the project.
@@ -332,6 +325,16 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **Glob exclusion via the `-` operator** (per `docs/content-key.md`, both
+  engines): `data.glob("{name}.cc") - "*_test.cc"` (or a list). fnmatch
+  right-hand side (`*` crosses `/`, `?`, `[...]`) matched against the
+  workspace-relative path; `__sub__` returns an immutable copy; `find()`
+  filters while `match`/`substitute`/planner overlap ignore excludes
+  (conservative — an exclude only shrinks a set). Additive wire field
+  `glob.exclude` (schema stays v1); joins fingerprints/identities **only when
+  non-empty**, so every pre-exclude graph hashes byte-identically (no cache
+  split), and editing the exclude list itself re-runs. Mirrored tests both
+  engines.
 - **Selective test running + jackson-core dogfood** (`brix.java.JUnitTestAction`,
   `examples/jackson/`): a test suite is just an action, so brix already
   replays one whose inputs are unchanged — the helper wires that up for

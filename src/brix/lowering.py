@@ -32,6 +32,8 @@ def atom_to_spec(atom: DataAtom) -> dict:
         d = {"kind": "glob", "template": atom.pattern.template}
         if atom.identity is not None:
             d["identity"] = atom.identity
+        if atom.exclude:
+            d["exclude"] = list(atom.exclude)
         return d
     if isinstance(atom, RegexData):
         return {"kind": "regex", "pattern": atom.regex.pattern}

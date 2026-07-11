@@ -1,6 +1,7 @@
 # Comparison semantics and membership: `content_key` and glob exclusion
 
-Status: **design agreed, not yet implemented** (2026-07-10). This note is the
+Status: **glob exclusion implemented (both engines, 2026-07-10); `content_key`
+design agreed, not yet implemented**. This note is the
 contract the implementation executes against. Companion to
 `docs/boundary-schema.md` (the wire) and `docs/rust-port.md` (the engine split).
 

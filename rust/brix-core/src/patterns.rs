@@ -32,6 +32,12 @@ pub struct PathPattern {
     /// Binding names in order of appearance, duplicates included (matching
     /// Python's `tuple(_BINDING_RE.findall(template))`).
     pub binding_names: Vec<String>,
+    /// fnmatch patterns (`*`, `?`, `[...]`; `*` crosses `/`) that narrow
+    /// *membership*: `find` drops matching workspace-relative paths.
+    /// `matches`, `substitute`, and the overlap checks ignore excludes —
+    /// an exclude only shrinks a set, so ignoring it keeps edge inference
+    /// conservative (docs/content-key.md).
+    pub exclude: Vec<String>,
 }
 
 /// A binding name is `\w+` (ASCII letters, digits, `_`), matching Python's
@@ -101,6 +107,10 @@ fn parse(template: &str) -> (Vec<Token>, Vec<String>) {
 
 impl PathPattern {
     pub fn new(template: &str) -> Result<PathPattern, String> {
+        PathPattern::with_exclude(template, &[])
+    }
+
+    pub fn with_exclude(template: &str, exclude: &[String]) -> Result<PathPattern, String> {
         if template.is_empty() {
             return Err("empty path pattern".to_string());
         }
@@ -109,6 +119,7 @@ impl PathPattern {
             template: template.to_string(),
             tokens,
             binding_names,
+            exclude: exclude.to_vec(),
         })
     }
 
@@ -146,6 +157,9 @@ impl PathPattern {
     /// walks its literal prefix directory and full-matches every regular file.
     pub fn find(&self, root: &Path) -> Vec<(String, Vec<(String, String)>)> {
         if self.is_concrete() {
+            if self.excluded(&self.template) {
+                return Vec::new();
+            }
             return if root.join(&self.template).is_file() {
                 vec![(self.template.clone(), Vec::new())]
             } else {
@@ -171,8 +185,13 @@ impl PathPattern {
             .collect();
         rels.sort();
         rels.into_iter()
+            .filter(|rel| !self.excluded(rel))
             .filter_map(|rel| self.matches(&rel).map(|b| (rel, b)))
             .collect()
+    }
+
+    fn excluded(&self, rel: &str) -> bool {
+        self.exclude.iter().any(|pat| fnmatch(pat, rel))
     }
 
     /// Replace known bindings; unknown `{name}` placeholders are left intact.
@@ -404,6 +423,105 @@ fn rebuild(tokens: &[Token]) -> String {
     out
 }
 
+/// Case-sensitive fnmatch over a workspace-relative POSIX path, mirroring
+/// Python's `fnmatch.fnmatchcase` for the subset excludes document: `*`
+/// crosses `/`, `?` matches one character, `[...]`/`[!...]` character classes
+/// with ranges, and a malformed `[` is a literal.
+pub fn fnmatch(pattern: &str, path: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let s: Vec<char> = path.chars().collect();
+    fnmatch_at(&p, 0, &s, 0)
+}
+
+fn fnmatch_at(p: &[char], mut pi: usize, s: &[char], mut si: usize) -> bool {
+    while pi < p.len() {
+        match p[pi] {
+            '*' => {
+                while pi < p.len() && p[pi] == '*' {
+                    pi += 1;
+                }
+                if pi == p.len() {
+                    return true;
+                }
+                for k in si..=s.len() {
+                    if fnmatch_at(p, pi, s, k) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            '?' => {
+                if si == s.len() {
+                    return false;
+                }
+                si += 1;
+                pi += 1;
+            }
+            '[' => match parse_class(p, pi) {
+                Some((negate, ranges, next)) => {
+                    if si == s.len() {
+                        return false;
+                    }
+                    let c = s[si];
+                    let mut hit = ranges.iter().any(|(lo, hi)| *lo <= c && c <= *hi);
+                    if negate {
+                        hit = !hit;
+                    }
+                    if !hit {
+                        return false;
+                    }
+                    si += 1;
+                    pi = next;
+                }
+                None => {
+                    if si == s.len() || s[si] != '[' {
+                        return false;
+                    }
+                    si += 1;
+                    pi += 1;
+                }
+            },
+            c => {
+                if si == s.len() || s[si] != c {
+                    return false;
+                }
+                si += 1;
+                pi += 1;
+            }
+        }
+    }
+    si == s.len()
+}
+
+/// Parse a `[...]` class starting at `start` (the `[`). Returns the negation
+/// flag, the accepted (lo, hi) ranges, and the index just past the closing
+/// `]` — or None when the class never closes (then `[` is a literal). A `]`
+/// as the first member char is a literal, matching fnmatch.
+fn parse_class(p: &[char], start: usize) -> Option<(bool, Vec<(char, char)>, usize)> {
+    let mut i = start + 1;
+    let negate = i < p.len() && p[i] == '!';
+    if negate {
+        i += 1;
+    }
+    let mut ranges = Vec::new();
+    let mut first = true;
+    while i < p.len() {
+        if p[i] == ']' && !first {
+            return Some((negate, ranges, i + 1));
+        }
+        first = false;
+        let lo = p[i];
+        if i + 2 < p.len() && p[i + 1] == '-' && p[i + 2] != ']' {
+            ranges.push((lo, p[i + 2]));
+            i += 3;
+        } else {
+            ranges.push((lo, lo));
+            i += 1;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,5 +608,89 @@ mod tests {
         );
         assert!(overlaps_shared(&pat("{v}.txt"), &pat("{v}.txt"), &shared(&["v"])));
         assert!(!overlaps_shared(&pat("{v}.txt"), &pat("{v}.txt.bak"), &shared(&["v"])));
+    }
+
+    // Mirrors Python fnmatch.fnmatchcase for the documented exclude subset.
+    #[test]
+    fn fnmatch_semantics() {
+        assert!(fnmatch("*_test.cc", "a_test.cc"));
+        assert!(fnmatch("*_test.cc", "db/b_test.cc")); // `*` crosses `/`
+        assert!(!fnmatch("*_test.cc", "a.cc"));
+        assert!(fnmatch("u/env_windows.cc", "u/env_windows.cc"));
+        assert!(!fnmatch("u/env_windows.cc", "u/env_posix.cc"));
+        assert!(fnmatch("u/x?.cc", "u/x1.cc"));
+        assert!(!fnmatch("u/x?.cc", "u/x22.cc"));
+        assert!(fnmatch("[ab]*.cc", "a1.cc"));
+        assert!(!fnmatch("[ab]*.cc", "c1.cc"));
+        assert!(fnmatch("[!ab]*.cc", "c1.cc"));
+        assert!(fnmatch("x[0-9].cc", "x7.cc"));
+        assert!(!fnmatch("x[0-9].cc", "xa.cc"));
+        assert!(fnmatch("**a**", "bab")); // `*` runs collapse
+        assert!(fnmatch("a*", "a"));
+        assert!(!fnmatch("A.cc", "a.cc")); // case-sensitive
+        assert!(fnmatch("a[", "a[")); // unterminated `[` is a literal
+        assert!(fnmatch("[]]x", "]x")); // `]` first in a class is a literal
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("brix-patterns-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn touch(root: &Path, rel: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "x").unwrap();
+    }
+
+    fn excl(t: &str, exclude: &[&str]) -> PathPattern {
+        let excl: Vec<String> = exclude.iter().map(|s| s.to_string()).collect();
+        PathPattern::with_exclude(t, &excl).unwrap()
+    }
+
+    // Mirrors test_exclude_filters_find in tests/test_patterns.py.
+    #[test]
+    fn exclude_filters_find() {
+        let root = scratch("exclude-find");
+        for rel in ["src/a.cc", "src/a_test.cc", "src/db/b.cc", "src/db/b_test.cc"] {
+            touch(&root, rel);
+        }
+        let found = excl("src/{name}.cc", &["*_test.cc"]).find(&root);
+        let paths: Vec<&str> = found.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paths, ["src/a.cc", "src/db/b.cc"]);
+    }
+
+    // Mirrors test_exclude_exact_path_and_question_mark.
+    #[test]
+    fn exclude_exact_path_and_question_mark() {
+        let root = scratch("exclude-exact");
+        for name in ["env.cc", "env_posix.cc", "env_windows.cc", "x1.cc", "x22.cc"] {
+            touch(&root, &format!("u/{name}"));
+        }
+        let found = excl("u/{n}.cc", &["u/env_windows.cc", "u/x?.cc"]).find(&root);
+        let paths: Vec<&str> = found.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paths, ["u/env.cc", "u/env_posix.cc", "u/x22.cc"]);
+    }
+
+    // Mirrors test_exclude_applies_to_concrete_template.
+    #[test]
+    fn exclude_applies_to_concrete_template() {
+        let root = scratch("exclude-concrete");
+        touch(&root, "a.txt");
+        assert!(excl("a.txt", &["*.txt"]).find(&root).is_empty());
+        assert_eq!(excl("a.txt", &["*.log"]).find(&root).len(), 1);
+    }
+
+    // Mirrors test_exclude_does_not_affect_match_or_overlap: membership only.
+    #[test]
+    fn exclude_does_not_affect_match_or_overlap() {
+        let p = excl("src/{name}.cc", &["*_test.cc"]);
+        assert_eq!(
+            p.matches("src/a_test.cc"),
+            Some(vec![("name".to_string(), "a_test".to_string())])
+        );
+        assert!(overlaps(&p, &pat("src/foo_test.cc")));
     }
 }

@@ -23,6 +23,10 @@ pub enum DataAtom {
         template: String,
         #[serde(default)]
         identity: Option<String>,
+        /// fnmatch patterns filtering membership (`data.glob(...) - "pat"`).
+        /// Additive wire field: absent and `[]` are identical.
+        #[serde(default)]
+        exclude: Vec<String>,
     },
     Regex {
         pattern: String,
@@ -42,6 +46,13 @@ impl DataAtom {
         let tag = |kind: &str, arg: &str| Value::List(vec![Value::str(kind), Value::str(arg)]);
         match self {
             DataAtom::File { path, .. } => tag("file", path),
+            // The exclude list joins identity only when non-empty so that
+            // pre-exclude identities stay byte-identical.
+            DataAtom::Glob { template, exclude, .. } if !exclude.is_empty() => {
+                let mut excl = vec![Value::str("exclude")];
+                excl.extend(exclude.iter().map(|p| Value::str(p)));
+                Value::List(vec![Value::str("glob"), Value::str(template), Value::List(excl)])
+            }
             DataAtom::Glob { template, .. } => tag("glob", template),
             DataAtom::Regex { pattern } => tag("regex", pattern),
             DataAtom::Tool { name } => tag("tool", name),
@@ -63,7 +74,9 @@ impl DataAtom {
     pub fn path_pattern(&self) -> Option<PathPattern> {
         match self {
             DataAtom::File { path, .. } => PathPattern::new(path).ok(),
-            DataAtom::Glob { template, .. } => PathPattern::new(template).ok(),
+            DataAtom::Glob { template, exclude, .. } => {
+                PathPattern::with_exclude(template, exclude).ok()
+            }
             _ => None,
         }
     }
@@ -84,7 +97,12 @@ impl DataAtom {
     pub fn dedup_key(&self) -> String {
         match self {
             DataAtom::File { path, identity } => format!("file:{path}:{identity:?}"),
-            DataAtom::Glob { template, identity } => format!("glob:{template}:{identity:?}"),
+            DataAtom::Glob { template, identity, exclude } if exclude.is_empty() => {
+                format!("glob:{template}:{identity:?}")
+            }
+            DataAtom::Glob { template, identity, exclude } => {
+                format!("glob:{template}:{identity:?}:{exclude:?}")
+            }
             DataAtom::Regex { pattern } => format!("regex:{pattern}"),
             DataAtom::Tool { name } => format!("tool:{name}"),
             DataAtom::Value { text } => format!("value:{text}"),
@@ -101,9 +119,10 @@ impl DataAtom {
                 path: subst(path, bindings),
                 identity: identity.clone(),
             },
-            DataAtom::Glob { template, identity } => DataAtom::Glob {
+            DataAtom::Glob { template, identity, exclude } => DataAtom::Glob {
                 template: subst(template, bindings),
                 identity: identity.clone(),
+                exclude: exclude.clone(),
             },
             DataAtom::Value { text } if !text.is_empty() => DataAtom::Value {
                 text: subst(text, bindings),
@@ -199,5 +218,38 @@ mod tests {
             canonical_json(&DataAtom::Value { text: "x".into() }.identity()),
             r#"["value"]"#
         );
+        // Exclude joins identity only when non-empty; the empty case is
+        // byte-identical to the pre-exclude shape.
+        let glob = |exclude: &[&str]| DataAtom::Glob {
+            template: "src/{n}.cc".into(),
+            identity: None,
+            exclude: exclude.iter().map(|s| s.to_string()).collect(),
+        };
+        assert_eq!(canonical_json(&glob(&[]).identity()), r#"["glob","src/{n}.cc"]"#);
+        assert_eq!(
+            canonical_json(&glob(&["*_test.cc"]).identity()),
+            r#"["glob","src/{n}.cc",["exclude","*_test.cc"]]"#
+        );
+    }
+
+    #[test]
+    fn glob_exclude_carries_through_substitute_and_pattern() {
+        let atom = DataAtom::Glob {
+            template: "src/{n}.cc".into(),
+            identity: None,
+            exclude: vec!["*_test.cc".into()],
+        };
+        let sub = atom.substitute(&[("n".into(), "foo".into())]);
+        let DataAtom::Glob { template, exclude, .. } = &sub else {
+            panic!("substitute changed the atom kind");
+        };
+        assert_eq!(template, "src/foo.cc");
+        assert_eq!(exclude, &["*_test.cc".to_string()]);
+        assert_eq!(atom.path_pattern().unwrap().exclude, vec!["*_test.cc".to_string()]);
+        // Wire field is additive: absent deserializes as empty.
+        let parsed: DataAtom =
+            serde_json::from_str(r#"{"kind":"glob","template":"a/{n}.cc"}"#).unwrap();
+        let DataAtom::Glob { exclude, .. } = &parsed else { panic!() };
+        assert!(exclude.is_empty());
     }
 }
