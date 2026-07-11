@@ -10,16 +10,23 @@ units), and automatic `#include` header-dep tracking on a real source tree.
 
 ```sh
 git clone --depth 1 https://github.com/google/leveldb.git ~/Projects/brix_test/leveldb
-examples/leveldb/setup.sh                    # stage build-src/ into the checkout
+examples/leveldb/setup.sh                    # generate port_config.h + smoke/
 ```
 
-`setup.sh` stages just the POSIX **library** sources — the file list parsed
-straight out of leveldb's `CMakeLists.txt`, symlinked under `build-src/lib/` so
-editing a real `.cc` still re-stales its compile. It's needed because brix globs
-have no exclusion, and leveldb's `.cc` files sit interleaved with `*_test.cc`,
-benchmarks, and a Windows port. It also writes a `port_config.h` (the header
-CMake generates via `configure_file`) for POSIX Linux with the optional
-compression/CRC libraries off, and drops the smoke program into `smoke/`.
+The library sources are globbed **straight from leveldb's tree** — no staging.
+Each source dir interleaves library code with `*_test.cc`, benchmarks, and the
+Windows port, so `brix.py` narrows the globs with the `-` operator:
+
+```python
+data.glob("db/{name}.cc") - ["*_test.cc", "db/leveldbutil.cc"]
+data.glob("util/{name}.cc") - ["*_test.cc", "util/env_windows.cc", ...]
+```
+
+The resulting source set is exactly the `add_library()` list in upstream
+`CMakeLists.txt`. `setup.sh` only writes the two files that must exist inside
+the workspace: `gen/config/port/port_config.h` (the header CMake generates via
+`configure_file`, here for POSIX Linux with the optional compression/CRC
+libraries off) and the smoke program in `smoke/`.
 
 Override the checkout location with `BRIX_LEVELDB_ROOT`.
 
@@ -39,6 +46,9 @@ assert the round-trip). The archive lands at `build/lib/libleveldb.a`; alias
 
 ## What it demonstrates
 
+- **Glob exclusion on a real tree** — per-dir `data.glob(...) - [...]`
+  narrows leveldb's mixed source dirs down to the 38 library TUs in place;
+  editing a real file (source or header) re-stales its compiles directly.
 - **`cpp.ArchiveAction`** bundling 38 objects into a static library with
   `ar Dcrs` (deterministic, byte-reproducible), then **`cpp.LinkApplicationAction`**
   linking a program against the `.a` (`-lpthread` for leveldb's POSIX env).

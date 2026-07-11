@@ -334,7 +334,10 @@ build inputs that come from memory or a database instead of files, and a C++
   `glob.exclude` (schema stays v1); joins fingerprints/identities **only when
   non-empty**, so every pre-exclude graph hashes byte-identically (no cache
   split), and editing the exclude list itself re-runs. Mirrored tests both
-  engines.
+  engines. `examples/leveldb` now globs the real tree in place with per-dir
+  excludes (source set verified identical to upstream's `add_library()` list);
+  its `setup.sh` no longer stages sources, and editing the real
+  `db/skiplist.h` recompiles exactly the same 5 TUs as before.
 - **Selective test running + jackson-core dogfood** (`brix.java.JUnitTestAction`,
   `examples/jackson/`): a test suite is just an action, so brix already
   replays one whose inputs are unchanged — the helper wires that up for
@@ -369,10 +372,10 @@ build inputs that come from memory or a database instead of files, and a C++
   excluded. Next C++ breadth: a larger multi-source project (e.g. leveldb).
 - **C++ dogfood at scale — leveldb static library built by brix**
   (`examples/leveldb/`): the larger C++ target fmt pointed to. `setup.sh`
-  stages the exact POSIX library sources (list parsed straight from upstream
-  `CMakeLists.txt`, symlinked so real edits propagate) — brix globs have no
-  exclusion, so this is how you carve a library subset out of a tree that
-  interleaves `*_test.cc` and a Windows port. brix then compiles all **38**
+  originally staged the exact POSIX library sources (parsed from upstream
+  `CMakeLists.txt`) because brix globs had no exclusion — the friction that
+  motivated the `-` operator; the staging has since been replaced by in-place
+  globs with excludes (see the glob-exclusion entry above). brix compiles all **38**
   translation units in parallel (`cpp.CompileSourceAction`), bundles them with
   `cpp.ArchiveAction` into `libleveldb.a` (`ar Dcrs`, 38 members), and links a
   smoke program (open a DB, batch-put, get, iterate) against the archive via

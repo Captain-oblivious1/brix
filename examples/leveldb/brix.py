@@ -7,7 +7,13 @@ automatic `#include` header-dep tracking, `cpp.ArchiveAction` bundling the
 objects into `libleveldb.a`, and `cpp.LinkApplicationAction` linking a small
 program against that archive.
 
-    examples/leveldb/setup.sh                 # stage build-src/ (once)
+The library sources are globbed straight from leveldb's real tree — no
+staging. Each source dir interleaves library code with tests, benchmarks,
+and the Windows port, so the globs carry excludes
+(`data.glob("db/{name}.cc") - ["*_test.cc", ...]`); the resulting source
+set is exactly the add_library() list in upstream CMakeLists.txt.
+
+    examples/leveldb/setup.sh                 # generate port_config.h (once)
     python examples/leveldb/brix.py build     # compile -> ar -> libleveldb.a
     python examples/leveldb/brix.py run smoke  # link main.o + .a, then run it
     python examples/leveldb/brix.py status
@@ -39,12 +45,12 @@ ROOT = Path(
 
 # leveldb is C++17, built without exceptions/RTTI (its CMake default).
 # -I. resolves "db/...", "table/...", "port/..."; -Iinclude resolves the
-# public "leveldb/..." headers; -Ibuild-src/config finds the generated
+# public "leveldb/..." headers; -Igen/config finds the generated
 # port_config.h that port_stdcxx.h pulls in via __has_include.
 LIB_OPTIONS = [
     "-std=c++17", "-fno-exceptions", "-fno-rtti",
     "-DLEVELDB_PLATFORM_POSIX=1", "-DLEVELDB_COMPILE_LIBRARY",
-    "-I.", "-Iinclude", "-Ibuild-src/config",
+    "-I.", "-Iinclude", "-Igen/config",
 ]
 # The smoke program only needs the public headers.
 SMOKE_OPTIONS = ["-std=c++17", "-Iinclude"]
@@ -54,10 +60,27 @@ def create_graph() -> Graph:
     graph = Graph()
     data = graph.data
     graph.add(
-        # Every staged library source -> its object, in parallel.
+        # Library sources per dir, straight from leveldb's tree, minus the
+        # non-library files. Every kept source -> its object, in parallel.
         cpp.CompileSourceAction(
-            source_files=data.glob("build-src/lib/{name}.cc"),
-            object_files=data.glob("build/obj/{name}.o"),
+            source_files=data.glob("db/{name}.cc") - ["*_test.cc", "db/leveldbutil.cc"],
+            object_files=data.glob("build/obj/db/{name}.o"),
+            compile_options=LIB_OPTIONS,
+        ),
+        cpp.CompileSourceAction(
+            source_files=data.glob("table/{name}.cc") - "*_test.cc",
+            object_files=data.glob("build/obj/table/{name}.o"),
+            compile_options=LIB_OPTIONS,
+        ),
+        cpp.CompileSourceAction(
+            source_files=data.glob("util/{name}.cc")
+            - ["*_test.cc", "util/env_windows.cc", "util/histogram.cc", "util/testutil.cc"],
+            object_files=data.glob("build/obj/util/{name}.o"),
+            compile_options=LIB_OPTIONS,
+        ),
+        cpp.CompileSourceAction(
+            source_files=data.glob("helpers/{name}.cc") - "*_test.cc",
+            object_files=data.glob("build/obj/helpers/{name}.o"),
             compile_options=LIB_OPTIONS,
         ),
         # Bundle the objects into the static library.
