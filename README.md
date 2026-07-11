@@ -359,11 +359,20 @@ build inputs that come from memory or a database instead of files, and a C++
   truth — add a built-in and it is picked up automatically), and the boundary
   (`custom_identity_names`) queries it instead of a parallel list. Pinned by a
   test that a custom plugin registered later never joins the built-in snapshot.
-  (Two known lower-severity items remain by design: the Rust `BUILTINS` seed
-  still enumerates built-ins in-core — a registry-with-defaults seam — and
-  `identity.py` still bundles the durable registry/Protocol with the disposable
-  reference-engine lens classes, worth splitting only if the Python registry
-  outlives phase-4c.)
+- **Made the Rust neutral core name zero languages.** `content_key.rs` used to
+  seed its registry with two literal `insert("jvm-abi", …)` / `insert("ts-dts",
+  …)` lines — the neutral module naming the built-ins. Now the `lenses` module
+  owns the roster (`lenses::ALL`) and each lens owns its own name (a `name()`
+  method on the `ContentKey` trait, the un-versioned prefix of `tag()`);
+  `content_key.rs` builds its registry by iterating `lenses::ALL` and keying on
+  `lens.name()`, so the neutral path names no language and adding a built-in is a
+  one-line edit in `lenses`, nothing in the core. Behavior-preserving: all 134
+  Rust tests and 237 Python tests (both engines) pass. (Dependency-free — no
+  `linkme`/`inventory` link-time-registration machinery for a compiled-in set of
+  two; third-party lenses arrive from the skin as `CustomIdentities` callbacks,
+  not by patching the core.) The one remaining item is a deliberate won't-fix:
+  `identity.py` still bundles the registry/Protocol with the reference-engine
+  lens classes, but that whole module dies in phase-4c, so splitting it is moot.
 - **Spring Boot executable-jar packaging (`brix.springboot`) + spring-petclinic
   dogfood.** New `SpringBootJar` action repackages a plain application jar plus
   its Maven-resolved runtime jars into one executable fat jar (nested

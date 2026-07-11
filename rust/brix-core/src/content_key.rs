@@ -23,23 +23,27 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// A named content lens. `tag` is the versioned fingerprint tag
-/// (`name@version`, e.g. `jvm-abi@1`); `digest` turns the file's bytes into
-/// the lens's comparison digest, erroring on a file it cannot interpret (the
-/// caller falls back to byte hashing under a `:raw` tag).
+/// A named content lens. `name` is the un-versioned key it dispatches under
+/// (e.g. `jvm-abi`); `tag` is the versioned fingerprint tag (`name@version`,
+/// e.g. `jvm-abi@1`); `digest` turns the file's bytes into the lens's
+/// comparison digest, erroring on a file it cannot interpret (the caller falls
+/// back to byte hashing under a `:raw` tag).
 pub trait ContentKey: Send + Sync {
+    fn name(&self) -> &'static str;
     fn tag(&self) -> &'static str;
     fn digest(&self, path: &Path) -> Result<String, String>;
 }
 
-/// The built-in lens registry: name -> lens. Mirrors the built-ins registered
-/// in `src/brix/identity.py`. Adding a built-in is one line here plus its
-/// `impl ContentKey` in [`crate::lenses`].
+/// The built-in lens registry: name -> lens. Built by collecting the roster the
+/// `lenses` module owns ([`crate::lenses::ALL`]) and keying each lens on its
+/// own [`ContentKey::name`], so this neutral module names no language — adding
+/// a built-in is adding it to `lenses::ALL`, nothing here. Mirrors the built-ins
+/// registered in `src/brix/identity.py`.
 static BUILTINS: LazyLock<HashMap<&'static str, &'static dyn ContentKey>> = LazyLock::new(|| {
-    let mut m: HashMap<&'static str, &'static dyn ContentKey> = HashMap::new();
-    m.insert("jvm-abi", &crate::lenses::JVM_ABI);
-    m.insert("ts-dts", &crate::lenses::TS_DTS);
-    m
+    crate::lenses::ALL
+        .iter()
+        .map(|lens| (lens.name(), *lens))
+        .collect()
 });
 
 /// The built-in lens for a name, or None for a name this core does not know

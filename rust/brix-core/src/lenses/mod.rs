@@ -23,11 +23,20 @@ pub struct JvmAbi;
 /// recompiles on an API-surface change only.
 pub struct TsDts;
 
-/// Singletons registered by name in [`crate::content_key`].
+/// Singletons rostered in [`ALL`] and keyed by name in [`crate::content_key`].
 pub static JVM_ABI: JvmAbi = JvmAbi;
 pub static TS_DTS: TsDts = TsDts;
 
+/// The built-in lens roster. `content_key`'s registry is built by iterating
+/// this and keying each lens on its own [`ContentKey::name`], so the neutral
+/// core names no language: adding a built-in is defining it here and listing it
+/// here.
+pub static ALL: &[&'static dyn ContentKey] = &[&JVM_ABI, &TS_DTS];
+
 impl ContentKey for JvmAbi {
+    fn name(&self) -> &'static str {
+        "jvm-abi"
+    }
     fn tag(&self) -> &'static str {
         "jvm-abi@1"
     }
@@ -37,6 +46,9 @@ impl ContentKey for JvmAbi {
 }
 
 impl ContentKey for TsDts {
+    fn name(&self) -> &'static str {
+        "ts-dts"
+    }
     fn tag(&self) -> &'static str {
         "ts-dts@1"
     }
