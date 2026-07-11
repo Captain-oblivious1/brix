@@ -20,11 +20,22 @@ BRIX_ENGINE=py), so each engine is checked self-consistent; the golden fixtures
 separately pin that the two engines agree byte-for-byte.
 """
 
-import random
+import itertools
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# The exhaustive sweep is large, so it runs on the default (Rust) engine — the
+# shipping one and the source of truth for semantics. The golden fixtures pin
+# that the Python engine agrees with it byte-for-byte, and the pointwise + deep
+# cases below still run under both engines, so the Python engine's incremental
+# path is not left unchecked.
+_rust_only = pytest.mark.skipif(
+    os.environ.get("BRIX_ENGINE") == "py",
+    reason="exhaustive sweep runs on the default/Rust engine; goldens pin parity",
+)
 
 from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph, IncrementalBuilder
 
@@ -51,15 +62,39 @@ parts = sorted(sys.argv[2:-1])
 Path(sys.argv[-1]).write_text(sep.join(Path(p).read_text() for p in parts))
 """
 
+# A generator: reads a spec file and writes a *source* (src/zgen.txt) that the
+# compile glob then expands over — a generate-then-consume edge within one
+# build. Editing the spec must regenerate the source, re-upper it, and recombine,
+# and a clean build must reach the same place from the spec alone (the generated
+# file is never materialized directly).
+GEN_TOOL = """\
+import sys
+from pathlib import Path
+Path(sys.argv[2]).write_text("gen:" + Path(sys.argv[1]).read_text())
+"""
+
 NAME_POOL = ["a", "b", "c", "d"]
 SUFFIXES = ["", "!", "#end"]          # tool variants
 SEPARATORS = [",", "|", ""]           # separator values
+GEN_SPECS = ["g0", "g1", "g2"]        # generator spec values
 
 
 def build_graph() -> Graph:
     graph = Graph()
     data = graph.data
     graph.add(
+        # Generated source: an output under src/, so the compile glob below
+        # expands over a member produced *during* the build.
+        ExternalProcessAction(
+            name="generate",
+            command_line="{python} {tool} {spec} {out}",
+            inputs={
+                "python": data.tool(sys.executable),
+                "tool": data.file("tools/gen.py"),
+                "spec": data.file("config/gen.txt"),
+            },
+            outputs={"out": data.file("src/zgen.txt")},
+        ),
         ExpandAll(
             element_name="name",
             collection=data.glob("src/{name}.txt"),
@@ -93,29 +128,38 @@ def build_graph() -> Graph:
 
 
 def initial_state() -> dict:
-    return {"sources": {"a": "a-0", "b": "b-0"}, "variant": 0, "sep": 0}
+    return {"sources": {"a": "a-0", "b": "b-0"}, "variant": 0, "sep": 0, "gen": 0}
 
 
 def materialize(root: Path, state: dict) -> None:
-    """Write the *entire* workspace from state (used for the clean rebuild)."""
+    """Write the *entire* workspace from state (used for the clean rebuild).
+    The generated source (src/zgen.txt) is deliberately *not* written — the
+    generate step must produce it from config/gen.txt, so the clean build
+    exercises the same generate-then-consume path the incremental one did."""
     (root / "src").mkdir(parents=True, exist_ok=True)
     (root / "tools").mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(parents=True, exist_ok=True)
     for name, text in state["sources"].items():
         (root / "src" / f"{name}.txt").write_text(text)
-    (root / "tools/upper.py").write_text(UPPER_TOOL.format(suffix=SUFFIXES[state["variant"]]))
+    upper = UPPER_TOOL.format(suffix=SUFFIXES[state["variant"]])
+    (root / "tools/upper.py").write_text(upper)
     (root / "tools/concat.py").write_text(CONCAT_TOOL)
+    (root / "tools/gen.py").write_text(GEN_TOOL)
     (root / "config/sep.txt").write_text(SEPARATORS[state["sep"]])
+    (root / "config/gen.txt").write_text(GEN_SPECS[state["gen"]])
 
 
 def apply_op(root: Path, state: dict, op: tuple, tick: int) -> None:
-    """Mutate state and the on-disk workspace by a single edit (used for the
-    incremental sequence — edits land the way a person would make them)."""
+    """Mutate state and the on-disk workspace by a single edit (edits land the
+    way a person would make them). Ops are *tolerant* — editing an absent source
+    or deleting a missing one is a no-op — so any op sequence is valid and the
+    exhaustive enumeration needs no per-sequence validity bookkeeping."""
     kind = op[0]
     if kind == "edit":
         name = op[1]
-        state["sources"][name] = f"{name}-{tick}"
-        (root / "src" / f"{name}.txt").write_text(state["sources"][name])
+        if name in state["sources"]:  # tolerant: editing an absent source is a no-op
+            state["sources"][name] = f"{name}-{tick}"
+            (root / "src" / f"{name}.txt").write_text(state["sources"][name])
     elif kind == "add":
         name = op[1]
         state["sources"][name] = f"{name}-{tick}"
@@ -132,6 +176,9 @@ def apply_op(root: Path, state: dict, op: tuple, tick: int) -> None:
     elif kind == "sep":
         state["sep"] = (state["sep"] + 1) % len(SEPARATORS)
         (root / "config/sep.txt").write_text(SEPARATORS[state["sep"]])
+    elif kind == "gen":
+        state["gen"] = (state["gen"] + 1) % len(GEN_SPECS)
+        (root / "config/gen.txt").write_text(GEN_SPECS[state["gen"]])
     else:
         raise AssertionError(f"unknown op {op!r}")
 
@@ -232,46 +279,68 @@ def test_equiv_after_delete_to_empty(tmp_path):
     )
 
 
+def test_equiv_after_generator_spec_change(tmp_path):
+    # Editing the generator's spec must regenerate the source, re-upper it, and
+    # recombine — a generate-then-consume edge, incrementally.
+    assert_incremental_matches_clean(tmp_path, [("gen",)], "gen")
+
+
 def test_equiv_mixed_sequence(tmp_path):
     assert_incremental_matches_clean(
         tmp_path,
-        [("add", "c"), ("tool",), ("edit", "a"), ("delete", "b"), ("sep",), ("add", "d")],
+        [("add", "c"), ("tool",), ("edit", "a"), ("gen",), ("delete", "b"), ("sep",)],
         "mixed",
     )
 
 
-# --- generative: random edit sequences hunt for missed edges ---
+# --- exhaustive: every 1- and 2-edit sequence, checked against a clean build ---
+#
+# Deterministic and complete within the bound: one run covers *every* single
+# edit and *every* ordered pair of edits from a clean start, so confidence does
+# not depend on re-running (the worry with random sampling). Most missed edges
+# reproduce in one or two edits, so this bound is where the risk concentrates;
+# the curated deeper sequences below reach the longer interleavings.
+
+# Tolerant ops (see apply_op), so any product of these is a valid sequence.
+ALPHABET = [
+    ("edit", "a"),    # edit an existing source
+    ("edit", "c"),    # edit a source that may or may not exist yet
+    ("delete", "a"),  # remove a source (triggers stale-output cleanup)
+    ("add", "c"),     # introduce a new glob member
+    ("tool",),        # change the compile tool (must re-run all it built)
+    ("sep",),         # change a shared fan-in input (must re-run combine)
+    ("gen",),         # change the generator spec (regenerate + reconsume)
+]
 
 
-def _random_ops(rng: random.Random, present: set, n: int) -> list:
-    ops = []
-    for _ in range(n):
-        choices = ["tool", "sep"]
-        if present:
-            choices += ["edit", "edit", "delete"]  # weight edits a little
-        absent = [x for x in NAME_POOL if x not in present]
-        if absent:
-            choices.append("add")
-        kind = rng.choice(choices)
-        if kind == "edit":
-            ops.append(("edit", rng.choice(sorted(present))))
-        elif kind == "delete":
-            name = rng.choice(sorted(present))
-            present.discard(name)
-            ops.append(("delete", name))
-        elif kind == "add":
-            name = rng.choice(absent)
-            present.add(name)
-            ops.append(("add", name))
-        else:
-            ops.append((kind,))
-    return ops
+def _seq_id(ops: tuple) -> str:
+    return "→".join("+".join(str(x) for x in op) for op in ops)
 
 
-@pytest.mark.parametrize("seed", range(24))
-def test_equiv_random_edit_sequences(tmp_path, seed):
-    """Any random walk of edits ends where a clean build of the same state
-    ends. A failure reprints the seed and ops for deterministic replay."""
-    rng = random.Random(seed)
-    ops = _random_ops(rng, present={"a", "b"}, n=rng.randint(4, 8))
-    assert_incremental_matches_clean(tmp_path, ops, f"seed={seed}")
+_EXHAUSTIVE = [(op,) for op in ALPHABET] + list(itertools.product(ALPHABET, repeat=2))
+
+
+@_rust_only
+@pytest.mark.parametrize("ops", _EXHAUSTIVE, ids=[_seq_id(s) for s in _EXHAUSTIVE])
+def test_equiv_all_short_edit_sequences(tmp_path, ops):
+    """Every single edit and every ordered pair of edits ends where a clean
+    build of the same final state ends — exhaustive, so no re-running needed."""
+    assert_incremental_matches_clean(tmp_path, list(ops), _seq_id(ops))
+
+
+# Curated longer interleavings (deterministic) for depth beyond length 2:
+# transitions that have historically hidden bugs — delete/re-add, edit after
+# add, tool change after membership change, generator interacting with edits.
+_DEEP_SEQUENCES = [
+    [("delete", "a"), ("add", "a"), ("edit", "a")],
+    [("add", "c"), ("edit", "c"), ("delete", "c"), ("add", "c")],
+    [("tool",), ("add", "c"), ("tool",), ("delete", "b")],
+    [("gen",), ("edit", "a"), ("gen",), ("gen",)],
+    [("delete", "a"), ("delete", "b"), ("add", "c"), ("sep",)],
+    [("add", "c"), ("add", "d"), ("delete", "c"), ("tool",), ("edit", "d"), ("gen",)],
+]
+
+
+@pytest.mark.parametrize("ops", _DEEP_SEQUENCES, ids=[_seq_id(s) for s in _DEEP_SEQUENCES])
+def test_equiv_deep_sequences(tmp_path, ops):
+    assert_incremental_matches_clean(tmp_path, ops, _seq_id(ops))

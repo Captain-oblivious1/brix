@@ -39,8 +39,10 @@ reporter seam, status/clean with a CLI, typed C++/Java actions, Spring Boot
 executable-jar packaging (`brix.springboot`), nested expansion, per-action
 environments, glob exclusion (`-`), and the `content_key` comparison lenses
 (`jvm-abi`/`ts-dts`) are all implemented and working.
-**269 Python tests pass under both engines** (`pytest`, and again with
-`BRIX_ENGINE=py`), plus **134 Rust tests** — many cross-checking the two
+**319 Python tests pass on the default (Rust) engine**; 256 of them also run
+under `BRIX_ENGINE=py` (the other 63 are exhaustive/toolchain-heavy equivalence
+sweeps pinned to the shipping engine, with the golden fixtures pinning that the
+two engines agree byte-for-byte), plus **134 Rust tests** — many cross-checking the two
 engines byte-for-byte via golden fixtures — and a JDK end-to-end test that
 skips when no JDK is on PATH. The remaining Rust-track work is phase 4c
 (deleting the now-redundant Python engine internals), on hold for soak; see
@@ -274,9 +276,10 @@ These are self-contained and come with tests. No Fable needed.
 **Building trust** (also hardens the parity between the two engines):
 
 - **More tests that try to trick brix into skipping a rebuild it shouldn't** — and
-  prove it doesn't. (Started: `tests/test_incremental_equivalence.py` now hunts
-  missed edges with random edit-sequences checked against a clean rebuild; extend
-  the alphabet — ABI-lens edges, generated sources, depfile headers — over time.)
+  prove it doesn't. (Largely done — the `test_incremental_equivalence*.py` oracles
+  now cover byte-lens edits bounded-exhaustively plus ABI-lens skips and discovered
+  C headers, each checked against a clean rebuild. Remaining alphabet to add over
+  time: generator-produced *membership* changes, and multi-hop ABI chains.)
 - **Close the last corner of the delete-cleanup fix.** When you delete files, brix
   cleans up their leftover build outputs; it handles the normal case, but one rare
   situation (a build that crashed at just the wrong moment) it can't fully clean.
@@ -352,20 +355,34 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
-- **Incremental-≡-clean equivalence oracle (`tests/test_incremental_equivalence.py`).**
-  The suite tested each invalidation path against a hand-written expected value;
-  it had no test of the property those are all really about — that no edit
-  sequence ever leaves an incremental build diverging from a from-scratch one (a
-  *missed edge* shipping a stale output, the dangerous failure of any incremental
-  engine). Added a real oracle: drive a graph (glob-fanned compile + a fan-in
-  combine) through a sequence of edits incrementally, rebuild the *final* state
-  clean in a fresh workspace, and assert the two output trees are byte-identical
-  (contents *and* file set, so stale leftovers are caught too). 8 pointwise
-  scenarios + 24 seeded random edit-sequences that hunt missed edges (a failure
-  reprints the seed + ops for deterministic replay). Dependency-free (no
-  hypothesis — the suite stays hermetic); runs under both engines, so each is
-  checked self-consistent. The oracle was verified to fail on a planted
-  divergence and a planted stale file, so it is not a vacuous pass.
+- **Incremental-≡-clean equivalence oracles.** The suite tested each
+  invalidation path against a hand-written expected value; it had no test of the
+  property those are all really about — that no edit sequence ever leaves an
+  incremental build diverging from a from-scratch one (a *missed edge* shipping a
+  stale output, the dangerous failure of any incremental engine). Added real
+  oracles: drive a graph through a sequence of edits incrementally, rebuild the
+  *final* state clean in a fresh workspace, and assert the outputs are
+  byte-identical (contents *and* file set, so stale leftovers are caught).
+  Verified non-vacuous — the byte-lens oracle fails on a planted divergence and a
+  planted stale file.
+  - **Byte-lens** (`test_incremental_equivalence.py`): a glob-fanned compile +
+    fan-in combine + a **generated source** (a step whose output is a compile
+    input). Coverage is **bounded-exhaustive, not random** — every single edit
+    and every ordered pair of edits (source add/edit/delete, tool change, shared
+    fan-in value, generator spec) is checked, so one run gives full confidence
+    within the bound; curated deeper sequences reach the longer interleavings.
+  - **ABI-lens** (`test_incremental_equivalence_abi.py`, JDK-gated): the case
+    where incremental deliberately does *less* than clean. Asserts the shortcut
+    is both **taken** (an impl-only edit to a library skips recompiling its
+    dependent) and **sound** (the skipped dependent's classes still equal a clean
+    build), and that an API edit **cascades**.
+  - **Depfile** (`test_incremental_equivalence_depfile.py`, `cc`-gated):
+    discovered C header deps — editing a header recompiles exactly the unit that
+    includes it (the other replays) and matches a clean build.
+
+  Dependency-free (no hypothesis; the suite stays hermetic). The pointwise cases
+  run under both engines; the large/toolchain-heavy sweeps run on the default
+  (Rust) engine, with goldens pinning that the Python engine agrees.
 - **Removed the duplicated content-lens built-in list (layering cleanup).** The
   set of core-native content keys (`jvm-abi`, `ts-dts`) was hand-maintained in
   three places — the Rust `content_key.rs` registry, `identity.py`'s registered
