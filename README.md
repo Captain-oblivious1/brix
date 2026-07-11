@@ -36,11 +36,13 @@ runs on the Rust core unless you ask otherwise. The build-layer seams, the full
 IncrementalBuilder (fingerprint skip + deleted-source cleanup), the result
 cache, atomic staging (incl. held-for-review), persistent warm workers, the
 reporter seam, status/clean with a CLI, typed C++/Java actions, Spring Boot
-executable-jar packaging (`brix.springboot`), nested expansion, per-action
-environments, glob exclusion (`-`), and the `content_key` comparison lenses
-(`jvm-abi`/`ts-dts`) are all implemented and working.
-**319 Python tests pass on the default (Rust) engine**; 256 of them also run
-under `BRIX_ENGINE=py` (the other 63 are exhaustive/toolchain-heavy equivalence
+executable-jar packaging (`brix.springboot`), dependency resolution that drives
+Maven and consumes the classpath (`java.pom`/`java.maven` → composable `DepSet`),
+nested expansion, per-action environments, glob exclusion (`-`), and the
+`content_key` comparison lenses (`jvm-abi`/`ts-dts`) are all implemented and
+working.
+**330 Python tests pass on the default (Rust) engine**; 267 of them also run
+under `BRIX_ENGINE=py` (the other ~63 are exhaustive/toolchain-heavy equivalence
 sweeps pinned to the shipping engine, with the golden fixtures pinning that the
 two engines agree byte-for-byte), plus **134 Rust tests** — many cross-checking the two
 engines byte-for-byte via golden fixtures — and a JDK end-to-end test that
@@ -375,6 +377,23 @@ entry. Lesson baked into the benchmark: measure the release `.so`.)
 
 ## Completed
 
+- **Dependency resolution: drive a resolver, consume its output
+  (`brix.deps.DepSet` + `java.pom` / `java.maven`).** brix still doesn't resolve
+  or download dependencies — but you no longer hand-maintain a classpath file.
+  `java.pom("pom.xml")` *adopts* an existing Maven manifest (the migration path —
+  keep your declarations where they are); `java.maven(["group:artifact:version"])`
+  *resolves inline coordinates* (the greenfield / single-file path). Both drive
+  Maven (behind a testable seam; `mvn=`/`cwd=` support a `./mvnw` wrapper),
+  memoize the classpath under `.brix-deps` (re-resolves only when the pom /
+  coordinates change), and return a **`DepSet`** — a lens-neutral, ordered set of
+  resolved artifacts that composes with `+` (ordered merge) and `-` (fnmatch
+  exclude) and feeds `JarAction` / `JUnitTestAction` / `SpringBootJar`. Naming the
+  engine on the coordinate case is deliberate (Maven vs Gradle resolve versions
+  differently). Design + the C++/Gradle generalization (`cpp.conan`,
+  `java.gradle`, …) in `docs/dependencies.md`. **Proven:** the spring-petclinic
+  example now resolves via `java.pom("pom.xml")` instead of a committed classpath
+  file — same ~90/106 jars (byte-identical fingerprints, so the build replays),
+  and a second build is a 0.3s cache hit. `tests/test_deps.py` (13 tests).
 - **Scaling benchmark + first per-build-overhead numbers
   (`examples/scaling_benchmark.py`).** A synthetic N-node graph (one `cp` per
   source, glob-fanned) whose no-op build does zero process work, so its wall time

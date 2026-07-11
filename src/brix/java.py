@@ -30,17 +30,157 @@ packaged class thus re-runs the jar step, avoiding a stale jar.
 
 from __future__ import annotations
 
+import hashlib
+import os
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .actions import Action, ExternalProcessAction
 from .data import DataAtom, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .deps import DepSet
 
 if TYPE_CHECKING:
     from .graph import Graph
     from .workers import WorkerSpec
 
 _WORKER_SOURCE = Path(__file__).parent / "_java" / "JavacWorker.java"
+
+
+# --- dependency resolution: adopt a pom, or resolve inline coordinates ---
+#
+# brix does not resolve dependencies itself — it drives Maven and consumes the
+# resolved classpath as tracked file inputs (docs/dependencies.md). Resolution
+# is eager (at graph-construction) and memoized to `cache_dir` keyed by the pom
+# bytes / coordinate list, so a no-op build re-reads the cache instead of
+# re-running Maven; editing the pom or the coordinates re-resolves.
+
+
+def _parse_classpath(text: str) -> list[str]:
+    """The jar paths from a Maven `dependency:build-classpath` file (one
+    os.pathsep-joined line of absolute ~/.m2 paths)."""
+    return [p for p in text.strip().split(os.pathsep) if p.endswith(".jar")]
+
+
+def _maven_build_classpath(
+    mvn: str, pom: str, scope: str, out_file: str, cwd: str | None = None
+) -> None:
+    """Run `dependency:build-classpath` for a pom, writing the classpath to
+    out_file. `cwd` is the directory Maven runs in (the project, so a `./mvnw`
+    wrapper finds its `.mvn/`). Isolated so tests can substitute it without a
+    live Maven."""
+    subprocess.run(
+        [
+            mvn, "-q", "-f", pom, "dependency:build-classpath",
+            f"-DincludeScope={scope}", f"-Dmdep.outputFile={out_file}",
+        ],
+        check=True,
+        cwd=cwd,
+    )
+
+
+_SYNTHETIC_POM = """\
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>brix.synthetic</groupId>
+  <artifactId>deps</artifactId>
+  <version>1</version>
+  <dependencies>
+{deps}  </dependencies>
+</project>
+"""
+
+
+def _coords_to_pom(coords: list[str]) -> str:
+    body = ""
+    for c in coords:
+        parts = c.split(":")
+        if len(parts) != 3:
+            raise ValueError(
+                f"coordinate {c!r} must be 'group:artifact:version'"
+            )
+        g, a, v = parts
+        body += (
+            f"    <dependency><groupId>{g}</groupId>"
+            f"<artifactId>{a}</artifactId><version>{v}</version></dependency>\n"
+        )
+    return _SYNTHETIC_POM.format(deps=body)
+
+
+def _key(kind: str, payload: str, scope: str) -> str:
+    h = hashlib.sha256(f"{kind}\0{scope}\0{payload}".encode()).hexdigest()[:16]
+    return f"{kind}-{scope}-{h}"
+
+
+def _cached(cache_dir: str | None, key: str) -> list[str] | None:
+    if not cache_dir:
+        return None
+    cache = Path(cache_dir) / f"{key}.classpath"
+    return [ln for ln in cache.read_text().splitlines() if ln] if cache.exists() else None
+
+
+def _resolve_pom_file(
+    key: str, pom_file: str, cache_dir: str | None, mvn: str, scope: str, cwd: str | None
+) -> list[str]:
+    """Resolve an on-disk pom file's classpath, memoized under cache_dir. The
+    pom is resolved *in place* (so a parent pom / module layout still works);
+    only the raw output and the cache live under cache_dir."""
+    hit = _cached(cache_dir, key)
+    if hit is not None:
+        return hit
+    work = Path(cache_dir) if cache_dir else Path(pom_file).resolve().parent
+    work.mkdir(parents=True, exist_ok=True)
+    out_file = (work / f"{key}.rawcp").resolve()
+    _maven_build_classpath(mvn, str(Path(pom_file).resolve()), scope, str(out_file), cwd)
+    jars = _parse_classpath(out_file.read_text())
+    if cache_dir:
+        (Path(cache_dir) / f"{key}.classpath").write_text("\n".join(jars))
+    return jars
+
+
+def pom(
+    path: str | Path,
+    *,
+    mvn: str = "mvn",
+    scope: str = "compile",
+    cache_dir: str | None = ".brix-deps",
+    cwd: str | None = None,
+) -> DepSet:
+    """Adopt an existing Maven ``pom.xml``: resolve its declared dependencies to
+    a classpath and return it as a `DepSet`. The dependency declarations stay in
+    the pom — this is the *migration* path (point brix at what Maven already
+    resolves). Editing the pom re-resolves (the cache key is the pom's bytes).
+    ``cwd`` is where Maven runs (pass the project dir when ``mvn`` is a
+    ``./mvnw`` wrapper); ``mvn`` may be a wrapper path like ``"./mvnw"``."""
+    path = Path(path)
+    key = _key("pom", path.read_text(), scope)
+    jars = _resolve_pom_file(key, str(path), cache_dir, mvn, scope, cwd)
+    return DepSet(tuple(jars))
+
+
+def maven(
+    coords: list[str],
+    *,
+    mvn: str = "mvn",
+    scope: str = "compile",
+    cache_dir: str | None = ".brix-deps",
+    cwd: str | None = None,
+) -> DepSet:
+    """Resolve inline Maven coordinates (``"group:artifact:version"``) to a
+    classpath via Maven, returned as a `DepSet`. The declarations live in
+    ``brix.py`` — the *greenfield / single-file* path. Editing the list
+    re-resolves. Naming the engine (``maven``) is deliberate: Maven and Gradle
+    apply different version-conflict rules, so this gives Maven's resolution."""
+    key = _key("maven", "\n".join(coords), scope)
+    hit = _cached(cache_dir, key)
+    if hit is not None:
+        return DepSet(tuple(hit))
+    work = Path(cache_dir) if cache_dir else Path(".")
+    work.mkdir(parents=True, exist_ok=True)
+    pom_file = work / f"{key}.pom.xml"
+    pom_file.write_text(_coords_to_pom(coords))
+    jars = _resolve_pom_file(key, str(pom_file), cache_dir, mvn, scope, cwd)
+    return DepSet(tuple(jars))
 
 
 class AbiFile(FileData):
@@ -80,6 +220,20 @@ def _options_expr(options: list[str] | DataExpr | None) -> DataExpr:
     if isinstance(options, DataExpr):
         return options
     return ValueData(" ".join(options or []))
+
+
+def _as_classpath_list(
+    classpath: "DepSet | list[DataExpr] | None",
+) -> list[DataExpr] | None:
+    """Normalize a classpath argument to a list of data expressions. A `DepSet`
+    (from java.pom/java.maven) contributes its resolved jars as byte-lens file
+    atoms; the consumer re-lenses (compile ABI, runtime byte), so the DepSet
+    stays lens-neutral."""
+    if classpath is None:
+        return None
+    if isinstance(classpath, DepSet):
+        return list(classpath.files())
+    return classpath
 
 
 def _classpath_union(classpath: list[DataExpr]) -> DataExpr:
@@ -160,7 +314,7 @@ class JarAction(Action):
         options: list[str] | DataExpr | None = None,
         classes_dir: str = "build/classes",
         entry_point: str | None = None,
-        classpath: list[DataExpr] | None = None,
+        classpath: "DepSet | list[DataExpr] | None" = None,
         resource_dir: str | None = None,
         javac_worker: "WorkerSpec | None" = None,
     ) -> None:
@@ -171,7 +325,7 @@ class JarAction(Action):
         self.options = options
         self.classes_dir = classes_dir
         self.entry_point = entry_point
-        self.classpath = classpath
+        self.classpath = _as_classpath_list(classpath)
         # A resources root (e.g. "src/main/resources"): its whole tree is
         # packaged into the jar at the same relative paths as the classes, so
         # a module's META-INF/services registrations, .properties, etc. ship
@@ -311,7 +465,7 @@ class JUnitTestAction(Action):
         self,
         *,
         test_sources: DataExpr,
-        classpath: list[DataExpr],
+        classpath: "DepSet | list[DataExpr]",
         console_jar: str,
         javac_worker: "WorkerSpec",
         name: str = "junit tests",
@@ -322,7 +476,7 @@ class JUnitTestAction(Action):
         select: str = "--scan-class-path",
     ) -> None:
         self.test_sources = test_sources
-        self.classpath = classpath
+        self.classpath = _as_classpath_list(classpath) or []
         self.console_jar = console_jar
         self.javac_worker = javac_worker
         self.name = name

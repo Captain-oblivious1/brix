@@ -11,6 +11,7 @@ from .builders import AtomicBuilder, BuildResult, CacheBuilder, CleanBuilder, In
 from .cache import CacheLayer, CacheStore, CacheStoreProtocol, TwoTierCacheStore
 from .cache_http import HttpCacheStore
 from .data import DataExpr, DataFactory, DataUnion
+from .deps import DepSet
 from .graph import Graph
 from .incremental import IncrementalLayer
 from .layers import BuildLayer, NodeContext, NodeProposal
@@ -43,6 +44,7 @@ __all__ = [
     "CacheStoreProtocol",
     "HttpCacheStore",
     "CleanBuilder",
+    "DepSet",
     "ConsoleReporter",
     "DataExpr",
     "DataFactory",

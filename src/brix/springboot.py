@@ -133,14 +133,16 @@ class SpringBootJar(Action):
         source_jar: FileData,
         output_file: FileData,
         main_class: str,
-        runtime_classpath: list[DataExpr],
+        runtime_classpath: "DepSet | list[DataExpr]",
         repackager: RepackagerSpec,
         java: ToolData | None = None,
     ) -> None:
+        from .java import _as_classpath_list
+
         self.source_jar = source_jar
         self.output_file = output_file
         self.main_class = main_class
-        self.runtime_classpath = runtime_classpath
+        self.runtime_classpath = _as_classpath_list(runtime_classpath) or []
         self.repackager = repackager
         self.java = java if java is not None else ToolData("java")
 

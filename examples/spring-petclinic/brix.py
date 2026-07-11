@@ -7,17 +7,18 @@ brix's warm javac worker, packages classes + resources into a jar, and then
 repackages that jar into a Spring Boot *executable* fat jar (via
 `brix.springboot`) that boots with bare `java -jar`.
 
-brix has no dependency resolver by design: it consumes Maven's resolution
-(run `resolve-cp.sh` once) and owns compilation, packaging, and incremental
-rebuild. See this directory's README.md.
+brix has no dependency resolver by design: it *drives* one and consumes the
+result. `java.pom(...)` adopts petclinic's existing pom.xml — Maven resolves the
+declared dependencies, brix reads the classpath and owns compilation, packaging,
+and incremental rebuild. No separate resolve step or committed classpath files;
+resolution is memoized (build/.brix-deps) and re-runs only when the pom changes.
 
-Setup (once; first run needs network to populate ~/.m2):
+Setup (once; first build needs network to populate ~/.m2):
     git clone --depth 1 https://github.com/spring-projects/spring-petclinic.git \
         ~/Projects/brix_test/spring-petclinic
-    examples/spring-petclinic/resolve-cp.sh   # -> brix-cp-*.txt in the checkout
 
 Run (from anywhere):
-    python examples/spring-petclinic/brix.py build        # jar + executable jar
+    python examples/spring-petclinic/brix.py build        # resolve + jar + boot jar
     python examples/spring-petclinic/brix.py build boot    # just the boot jar
     python examples/spring-petclinic/brix.py status
     java -jar ~/Projects/brix_test/spring-petclinic/build/petclinic-boot.jar
@@ -47,14 +48,13 @@ ROOT = Path(
 ).resolve()
 
 MAIN_CLASS = "org.springframework.samples.petclinic.PetClinicApplication"
+SPRING_BOOT_VERSION = "4.1.0"  # matches the pom's spring-boot-starter-parent
 
-
-def _read_classpath(name: str) -> list[str]:
-    """The absolute jar paths Maven resolved (one ':'-joined line). These point
-    into ~/.m2 and are machine-specific, so resolve-cp.sh regenerates them; they
-    are not committed."""
-    text = (ROOT / name).read_text().strip()
-    return [p for p in text.split(os.pathsep) if p.endswith(".jar")]
+# Resolve through petclinic's own Maven wrapper, in the checkout dir, memoized
+# under build/.brix-deps (re-runs only when the pom / coordinates change).
+_RESOLVE = dict(
+    mvn=str(ROOT / "mvnw"), cwd=str(ROOT), cache_dir=str(ROOT / "build/.brix-deps")
+)
 
 
 def create_graph() -> Graph:
@@ -62,13 +62,13 @@ def create_graph() -> Graph:
     data = graph.data
     worker = java.javac_worker(graph)
 
-    classpath = [data.file(jar) for jar in _read_classpath("brix-cp-compile.txt")]
+    # Adopt petclinic's existing pom.xml — no coordinates re-declared here.
     graph.add(
         java.JarAction(
             source_files=data.glob("src/main/java/{name}.java"),
             output_file=data.file("build/petclinic.jar"),
             classes_dir="build/classes",
-            classpath=classpath,
+            classpath=java.pom(ROOT / "pom.xml", scope="compile", **_RESOLVE),
             resource_dir="src/main/resources",
             javac_worker=worker,
             options=["--release", "17", "-encoding", "UTF-8"],
@@ -80,16 +80,20 @@ def create_graph() -> Graph:
     # app. brix drives Spring's own loader-tools repackager (see
     # brix.springboot) and tracks every bundled jar, so a dependency bump
     # rebuilds the executable jar.
-    repackager = springboot.boot_repackager(
-        graph, loader_tools_classpath=_read_classpath("brix-cp-loader-tools.txt")
+    loader_tools = java.maven(
+        [f"org.springframework.boot:spring-boot-loader-tools:{SPRING_BOOT_VERSION}"],
+        scope="runtime",
+        **_RESOLVE,
     )
-    runtime_jars = [data.file(jar) for jar in _read_classpath("brix-cp-runtime.txt")]
+    repackager = springboot.boot_repackager(
+        graph, loader_tools_classpath=list(loader_tools.artifacts)
+    )
     graph.add(
         springboot.SpringBootJar(
             source_jar=data.file("build/petclinic.jar"),
             output_file=data.file("build/petclinic-boot.jar"),
             main_class=MAIN_CLASS,
-            runtime_classpath=runtime_jars,
+            runtime_classpath=java.pom(ROOT / "pom.xml", scope="runtime", **_RESOLVE),
             repackager=repackager,
         )
     )

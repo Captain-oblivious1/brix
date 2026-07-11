@@ -8,10 +8,12 @@ the dogfood that drove `brix.springboot` (Spring Boot fat-jar packaging).
 
 ## What it demonstrates
 
-- **brix consumes a resolver's output, not reimplements it.** brix has no
-  dependency resolver by design. `resolve-cp.sh` runs Maven's
-  `dependency:build-classpath` once (compile + runtime scopes, ~90 / ~106 jars);
-  brix owns compilation, packaging, and incremental rebuild from there.
+- **brix drives a resolver, not reimplements one.** `java.pom("pom.xml")` adopts
+  petclinic's existing Maven manifest — brix runs Maven (via the checkout's
+  `./mvnw`), reads the resolved classpath (~90 compile / ~106 runtime jars), and
+  owns compilation, packaging, and incremental rebuild from there. No coordinates
+  are re-declared and no classpath files are committed; resolution is memoized
+  under `build/.brix-deps` and re-runs only when the pom changes.
 - **A real compile graph**: 30 sources against the full Spring classpath through
   the warm javac worker, with `src/main/resources` (templates, SQL, static
   assets, `application.properties`) packaged into the jar.
@@ -33,11 +35,9 @@ the dogfood that drove `brix.springboot` (Spring Boot fat-jar packaging).
     git clone --depth 1 https://github.com/spring-projects/spring-petclinic.git \
         ~/Projects/brix_test/spring-petclinic
 
-    examples/spring-petclinic/resolve-cp.sh   # Maven -> brix-cp-*.txt (once)
-
-The classpath files hold machine-specific `~/.m2` paths, so they are regenerated
-per machine and never committed. Override the checkout location with
-`BRIX_PETCLINIC_ROOT`.
+That's it — the first `build` resolves dependencies itself (via the checkout's
+`./mvnw`; needs network the first time to populate `~/.m2`) and memoizes the
+result. Override the checkout location with `BRIX_PETCLINIC_ROOT`.
 
 ## Run
 
