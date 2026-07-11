@@ -1,14 +1,17 @@
 # Brix
 
-git test
-
 A build-system toolkit: define build graphs in ordinary Python while the
 engine handles planning, dependency inference, and parallel execution.
 
 **The long game:** prototype everything in Python first to stabilize the
-functionality and the API. Then move the engine internals to Rust (PyO3), so
-the same core can later back a JavaScript/TypeScript API. Python stays the
-user-facing build language.
+functionality and the API, then move the engine internals to Rust (PyO3) so the
+same core can back a JavaScript/TypeScript API too. **That move has largely
+happened:** the Rust core (`rust/brix-core`) is written and is the *default*
+engine — planning, dependency inference, the parallel scheduler, incremental
+rebuilds, the result cache, atomic staging, persistent workers, and the content
+lenses all run in Rust, cross-checked byte-for-byte against the Python reference.
+Python stays the user-facing build language; the next language on the shared
+core is JS/TS (unblocked, not yet started).
 
 > This README is the hand-off document *and* the spec. A fresh session should
 > be able to read this file plus [docs/build-layers.html](docs/build-layers.html)
@@ -18,8 +21,8 @@ user-facing build language.
 ## Start here
 
 1. This file — vision, spec, current state, and the TODO list.
-2. [docs/build-layers.html](docs/build-layers.html) — the agreed design for
-   the next phase (incremental / cache / atomic layers). Open in a browser;
+2. [docs/build-layers.html](docs/build-layers.html) — the design for the
+   incremental / cache / atomic layers (now implemented). Open in a browser;
    it has class and data-flow diagrams.
 3. [docs/class-diagrams.md](docs/class-diagrams.md) — class diagrams for
    every class in `src/brix/` (48 classes, five grouped diagrams: data
@@ -27,12 +30,23 @@ user-facing build language.
 
 ## Current state
 
-Minimal prototype (spec steps 1–10 plus dependency inference), the
-build-layer seams, the full IncrementalBuilder (fingerprint skip +
-deleted-source cleanup), the reporter seam, status reporting with a CLI,
-AtomicBuilder, typed C++/Java actions, nested expansion, and per-action
-environments are implemented and working. 103 tests pass (plus a JDK
-end-to-end test that skips when no JDK is on PATH).
+The Python prototype is feature-complete and stable, and **the Rust engine is
+the default** — `BRIX_ENGINE=py` forces the old engine, but everything below
+runs on the Rust core unless you ask otherwise. The build-layer seams, the full
+IncrementalBuilder (fingerprint skip + deleted-source cleanup), the result
+cache, atomic staging (incl. held-for-review), persistent warm workers, the
+reporter seam, status/clean with a CLI, typed C++/Java actions, nested
+expansion, per-action environments, glob exclusion (`-`), and the `content_key`
+comparison lenses (`jvm-abi`/`ts-dts`) are all implemented and working.
+**230 Python tests pass under both engines** (`pytest`, and again with
+`BRIX_ENGINE=py`), plus **134 Rust tests** — many cross-checking the two
+engines byte-for-byte via golden fixtures — and a JDK end-to-end test that
+skips when no JDK is on PATH. The remaining Rust-track work is phase 4c
+(deleting the now-redundant Python engine internals), on hold for soak; see
+track 2 below.
+
+The feature inventory below describes the *behavior* (identical on both
+engines); the Python classes named are the reference/authoring surface.
 
 - Logical data expressions: `file`, `glob`, `regex`, `tool`, `value`, unions
 - `Graph.add(...)` with generic `ExternalProcessAction` (`name` is optional;
@@ -104,8 +118,13 @@ end-to-end test that skips when no JDK is on PATH).
 
 ## TODO
 
-**Priority:** lock down how brix behaves (in Python) before rewriting the engine
-in Rust. Every behavior settled now is rework the rewrite won't have to redo.
+**Priority:** the Rust engine is written and is the default, so the original
+"lock down behavior in Python before the rewrite" phase is essentially over.
+Remaining work is: finish the Rust track (phase 4c — delete the redundant Python
+engine internals, on hold for soak), keep proving brix on real projects
+(dogfooding), and the self-contained feature/correctness items below. New
+behavior still lands in Python first and is mirrored into the Rust core under the
+byte-identical-fingerprint rule.
 
 **Who does what.** Two AI models share the work. **Opus** is the everyday model:
 it handles self-contained jobs that come with tests and don't need deep judgment.
@@ -242,15 +261,16 @@ These are self-contained and come with tests. No Fable needed.
 - **Ready-made starter templates** for a Java service and a TypeScript service, so
   people begin from something that already works.
 
-**Building trust** (also makes the Rust rewrite safer to check):
+**Building trust** (also hardens the parity between the two engines):
 
 - **More tests that try to trick brix into skipping a rebuild it shouldn't** — and
   prove it doesn't.
 - **Close the last corner of the delete-cleanup fix.** When you delete files, brix
   cleans up their leftover build outputs; it handles the normal case, but one rare
   situation (a build that crashed at just the wrong moment) it can't fully clean.
-  Fixing it needs a small change to how brix remembers past builds — cheaper to do
-  before the Rust rewrite locks things down.
+  Fixing it needs a small change to how brix remembers past builds — worth doing
+  while both engines still exist, so the metadata change lands in the reference
+  (Python) and the Rust core together.
 - **Double-check symbolic links** — that a symlinked source file, or one whose
   target changes, is noticed.
 
@@ -283,10 +303,19 @@ These are self-contained and come with tests. No Fable needed.
 
 ### Fable queue — for the careful model only
 
-- **The scheduler + build layers of the Rust rewrite** (track 2), reviewed
-  carefully, then switching brix to run on Rust by default. The single trickiest
-  part of the project.
-- **The always-warm Java build server** (track 1).
+The two original Fable items — the Rust scheduler/build layers (track 2) and the
+always-warm Java build server (track 1) — have **both landed** (Rust is the
+default engine; the worker daemon is done and benchmarked). What remains for the
+careful model:
+
+- **Phase 4c — delete the Python engine internals** (track 2 tail), on hold for
+  soak. A line-by-line review that the Rust engine fully covers the execution
+  half before the Python fallback is removed; one subtle ordering gap here breaks
+  builds. Deletion boundary spelled out in track 2 above.
+- **Review pass on the `content_key` relocation** (commit `634c115`) — the
+  fingerprint-byte-identical claim is the thing to scrutinize; the golden diff
+  shows only `spec` strings changed, but a careful read of the trait dispatch and
+  the material-shape invariant is the reserved-Fable check for that change.
 
 ### Blocked or not yet decided
 
