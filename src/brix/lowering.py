@@ -6,11 +6,12 @@ against. The golden-fixture generator (``rust/golden/generate.py``) imports
 these functions so the fixtures and the live engine boundary can never
 drift apart.
 
-``custom_identity_names`` collects the identity names a graph uses that are
-not built into the core (``jvm-abi``, ``ts-dts``): the engine boundary
-resolves them against the skin's registry and passes their ``digest``
-callables across as the ``content_identity`` extension trait — every graph
-crosses; an unregistered name raises before the build starts.
+``custom_identity_names`` collects the identity names a graph uses that the
+core does *not* build in (the core-native ones — ``jvm-abi``, ``ts-dts`` — are
+handled natively; the set is owned by ``identity.builtins()``). The engine
+boundary resolves each remaining name against the skin's registry and passes
+its ``digest`` callable across as the ``content_identity`` extension trait; an
+unregistered name raises before the build starts.
 """
 
 from __future__ import annotations
@@ -98,23 +99,22 @@ def _atoms_of(action: Action):
         yield from _atoms_of(action.child)
 
 
-# The content identities ported into the Rust core (`rust/brix-core/src/
-# identity.rs`). Adding a built-in means porting it there and listing it here.
-_RUST_IDENTITIES = frozenset({"jvm-abi", "ts-dts"})
-
-
 def custom_identity_names(graph: Graph) -> set[str]:
     """The content-key names this graph uses that the core does not build in.
     The engine boundary resolves each against the skin's registry (loud on a
     typo) and hands the core their digest callables — the `content_identity`
-    extension trait of docs/boundary-schema.md."""
+    extension trait of docs/boundary-schema.md. The set of core-native names is
+    owned by `identity.builtins()`, not duplicated here."""
+    from .identity import builtins
+
+    core_native = builtins()
     names: set[str] = set()
 
     def collect(atoms):
         names.update(
             name
             for name in (getattr(a, "content_key", None) for a in atoms)
-            if name is not None and name not in _RUST_IDENTITIES
+            if name is not None and name not in core_native
         )
 
     for action in graph.actions:

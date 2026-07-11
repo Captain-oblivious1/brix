@@ -39,7 +39,7 @@ reporter seam, status/clean with a CLI, typed C++/Java actions, Spring Boot
 executable-jar packaging (`brix.springboot`), nested expansion, per-action
 environments, glob exclusion (`-`), and the `content_key` comparison lenses
 (`jvm-abi`/`ts-dts`) are all implemented and working.
-**235 Python tests pass under both engines** (`pytest`, and again with
+**237 Python tests pass under both engines** (`pytest`, and again with
 `BRIX_ENGINE=py`), plus **134 Rust tests** — many cross-checking the two
 engines byte-for-byte via golden fixtures — and a JDK end-to-end test that
 skips when no JDK is on PATH. The remaining Rust-track work is phase 4c
@@ -350,6 +350,20 @@ build inputs that come from memory or a database instead of files, and a C++
 
 ## Completed
 
+- **Removed the duplicated content-lens built-in list (layering cleanup).** The
+  set of core-native content keys (`jvm-abi`, `ts-dts`) was hand-maintained in
+  three places — the Rust `content_key.rs` registry, `identity.py`'s registered
+  classes, and a `_RUST_IDENTITIES` frozenset in the generic `lowering.py`,
+  synced only by a comment. The Python duplicate is gone: `identity.builtins()`
+  now *derives* the set from the import-time `register(...)` calls (one source of
+  truth — add a built-in and it is picked up automatically), and the boundary
+  (`custom_identity_names`) queries it instead of a parallel list. Pinned by a
+  test that a custom plugin registered later never joins the built-in snapshot.
+  (Two known lower-severity items remain by design: the Rust `BUILTINS` seed
+  still enumerates built-ins in-core — a registry-with-defaults seam — and
+  `identity.py` still bundles the durable registry/Protocol with the disposable
+  reference-engine lens classes, worth splitting only if the Python registry
+  outlives phase-4c.)
 - **Spring Boot executable-jar packaging (`brix.springboot`) + spring-petclinic
   dogfood.** New `SpringBootJar` action repackages a plain application jar plus
   its Maven-resolved runtime jars into one executable fat jar (nested

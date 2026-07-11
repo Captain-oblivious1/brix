@@ -102,3 +102,20 @@ class TsDtsIdentity:
 
 
 register(TsDtsIdentity())
+
+
+# The identities built into the Rust core (rust/brix-core/src/content_key.rs) —
+# i.e. exactly what is registered above, at import, before any skin registers a
+# custom plugin. Derived from `_REGISTRY` so there is one source of truth (the
+# module-level `register(...)` calls): adding a built-in here — and porting it
+# to the Rust core — makes it core-native automatically, with no parallel list
+# to keep in sync. The boundary uses this to tell core-native content keys from
+# custom ones (`custom_identity_names` in lowering.py).
+_BUILTINS: frozenset[str] = frozenset(_REGISTRY)
+
+
+def builtins() -> frozenset[str]:
+    """The content-identity names the core builds in, as opposed to custom
+    skin plugins registered later. A graph's content keys outside this set
+    cross the engine boundary as `content_identity` digest callbacks."""
+    return _BUILTINS

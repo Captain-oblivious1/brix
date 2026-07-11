@@ -198,6 +198,62 @@ def test_registry_and_tag():
         identity.get("does-not-exist")
 
 
+def test_builtins_are_the_core_native_set_and_not_polluted_by_custom():
+    """`identity.builtins()` is the single source of truth for which content
+    keys the core builds in — derived from the import-time registrations, so a
+    custom plugin registered later must never join the built-in snapshot."""
+    assert identity.builtins() == frozenset({"jvm-abi", "ts-dts"})
+
+    class _Custom:
+        name = "custom-lens-xyz"
+        version = "1"
+
+        def digest(self, path):
+            return "x"
+
+    identity.register(_Custom())
+    try:
+        # The derived snapshot stays put — a skin plugin is not "core-native".
+        assert "custom-lens-xyz" not in identity.builtins()
+        assert identity.builtins() == frozenset({"jvm-abi", "ts-dts"})
+    finally:
+        identity._REGISTRY.pop("custom-lens-xyz", None)
+
+
+def test_custom_identity_names_uses_builtins_not_a_hardcoded_list():
+    """The engine boundary hands across only the content keys the core does not
+    build in. A built-in-only graph crosses nothing; a custom lens crosses.
+    Both are decided by `identity.builtins()`, not a duplicated list."""
+    from brix import java
+    from brix.data import FileData as _FileData
+    from brix.lowering import custom_identity_names
+
+    g_builtin = Graph()
+    g_builtin.add(
+        java.JarAction(
+            source_files=g_builtin.data.glob("src/{n}.java"),
+            output_file=g_builtin.data.file("a.jar"),
+            classpath=[AbiFile("lib/dep.jar")],  # jvm-abi: core-native
+            javac_worker=java.javac_worker(g_builtin),
+        )
+    )
+    assert custom_identity_names(g_builtin) == set()
+
+    class _CustomFile(_FileData):
+        content_key = "my-lens"
+
+    g_custom = Graph()
+    g_custom.add(
+        java.JarAction(
+            source_files=g_custom.data.glob("src/{n}.java"),
+            output_file=g_custom.data.file("b.jar"),
+            classpath=[_CustomFile("lib/x.jar")],
+            javac_worker=java.javac_worker(g_custom),
+        )
+    )
+    assert custom_identity_names(g_custom) == {"my-lens"}
+
+
 def test_metadata_caches_identity_alongside_byte_hash(tmp_path):
     meta = BuildMetadata(tmp_path, "meta")
     sig = [123, 45]
