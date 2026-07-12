@@ -226,7 +226,10 @@ repackaged into an executable fat jar that boots with bare `java -jar`; see
 `examples/spring-petclinic/`). petclinic confirmed the design holds end to end
 with **no engine changes**: brix consumes Maven's dependency resolution and owns
 compile + package + incremental rebuild (a comment-only edit recompiles but does
-*not* re-jar, since the class bytes are unchanged).
+*not* re-jar, since the class bytes are unchanged). Newest: **the_silver_searcher**
+(`ag`) — a real C tool whose PCRE/zlib/lzma system-library deps resolve via
+`cpp.pkg_config`; brix compiles its 12 TUs (win32 one dropped with glob `-`) and
+links a working `ag 2.2.0` (`examples/the_silver_searcher/`).
 
 **Next, in priority order (all Opus — dogfood + helper additions, no engine
 changes expected):**

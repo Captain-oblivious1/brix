@@ -33,6 +33,7 @@ Each has its own `README.md` with clone + setup steps. Checkouts go in
 | `jackson/` | jackson-core (Maven) | selective JUnit 5 test running (`java.JUnitTestAction` — two lenses), plus a generated source and a resource-bearing jar |
 | `leveldb/` | google/leveldb (CMake) | C++ static library at scale: 38 TUs compiled in parallel, `cpp.ArchiveAction` → `libleveldb.a`, linked + run against a smoke program; header-dep tracking stays selective on the real tree |
 | `spring-petclinic/` | spring-petclinic (Maven) | a real Spring Boot app: `java.pom("pom.xml")` drives Maven for the ~90-jar classpath, compiled + packaged + `brix.springboot.SpringBootJar` → an executable fat jar that boots with `java -jar`. brix drives the resolver and owns compile + package + incremental |
+| `the_silver_searcher/` | ggreer/the_silver_searcher (autotools) | a real C tool (`ag`): `cpp.pkg_config(["libpcre","zlib","liblzma"])` resolves its system-library deps; brix compiles the 12 TUs (win32 one dropped via glob `-`) and links the working binary |
 
 **Next dogfood targets** (see the repo README's "Feature-completeness
 dogfooding" section): an annotation-processor project (add `-processorpath`
