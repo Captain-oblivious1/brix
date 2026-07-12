@@ -14,6 +14,7 @@ proven (each one has found a real bug or missing feature).
 | `raw_cpp/` | the raw C++ graph from the design doc: compile each `.cpp`, link an app |
 | `cpp_app/` | a lifelike C++ project: typed `brix.cpp` actions, the full layer stack + CLI |
 | `cpp_to_java/` | composability: C++, generic, and Java actions in one graph |
+| `typescript/` | two-module TypeScript with `brix.ts`: `ts.CompileAction` per module + the **ts-dts** lens — an impl-only edit to the greeter replays the app; an exported-signature change rebuilds it (needs a local `tsc`: `npm install typescript@5`) |
 | `incremental_demo/` | build, rebuild, change a file, delete a source — watch what re-runs |
 | `layers_demo/` | the middleware layer stack (incremental / cache / atomic) on a live build |
 | `cli_demo/` | the CLI section of a project `brix.py` (`build`/`status`/`clean`/…) |

@@ -7,4 +7,6 @@ dist/
 examples/*/build/
 examples/incremental_demo/runs.log
 examples/incremental_demo/src/
+examples/typescript/*/dist/
+examples/typescript/node_modules/
 rust/target/

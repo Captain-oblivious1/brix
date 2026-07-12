@@ -38,11 +38,12 @@ cache, atomic staging (incl. held-for-review), persistent warm workers, the
 reporter seam, status/clean with a CLI, typed C++/Java actions, Spring Boot
 executable-jar packaging (`brix.springboot`), dependency resolution that drives
 Maven *or Gradle* and consumes the classpath (`java.pom`/`java.maven`/`java.gradle`
-→ composable `DepSet`), nested expansion, per-action environments, glob exclusion
-(`-`), and the `content_key` comparison lenses (`jvm-abi`/`ts-dts`) are all
-implemented and working.
-**342 Python tests pass on the default (Rust) engine**; 279 of them also run
-under `BRIX_ENGINE=py` (the other ~65 are exhaustive/toolchain-heavy equivalence
+→ composable `DepSet`), TypeScript compilation with cross-module declaration
+tracking (`brix.ts` → `ts.CompileAction`, the ts-dts lens), nested expansion,
+per-action environments, glob exclusion (`-`), and the `content_key` comparison
+lenses (`jvm-abi`/`ts-dts`) are all implemented and working.
+**350 Python tests pass on the default (Rust) engine**; 287 of them also run
+under `BRIX_ENGINE=py` (the other ~67 are exhaustive/toolchain-heavy equivalence
 sweeps pinned to the shipping engine, with the golden fixtures pinning that the
 two engines agree byte-for-byte), plus **134 Rust tests** — many cross-checking the two
 engines byte-for-byte via golden fixtures — and a JDK end-to-end test that
@@ -305,15 +306,16 @@ These are self-contained and come with tests. No Fable needed.
 - **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
   does this for Java and TypeScript (skip rebuilding users when only internals
   changed). Add it for Go and Protobuf when those languages show up in a project.
-- **Support for building TypeScript/JavaScript** — a helper like the ones for C++
-  and Java. Today you *can* build TS by running the compiler as a plain command,
-  but there's no convenient helper. As part of this, track import dependencies:
-  the TS version of the C/C++ header problem — a bundle depends on everything it
-  imports, so editing a deeply-imported file should rebuild it. The machinery for
-  this already exists (built for C/C++); TS just needs a different reader for its
-  dependency format. Note: this is about *building* TS code — separate from the
-  [Blocked] track-3 item of *writing build files* in TS. The interface-change
-  detector for TS already exists.
+- **TypeScript: automatic import-dependency tracking** — the remaining half of
+  the TS build story (the helper itself, `brix.ts`, **landed** — see Completed).
+  Today a `ts.CompileAction` tracks *cross-module* deps you declare (the built
+  `.d.ts` of another module, ts-dts-lensed). Not yet automatic: reading a
+  module's own `import` graph so editing a deeply-imported *source* rebuilds it —
+  the TS version of the C/C++ header problem. The machinery exists (the `-MMD`
+  depfile path built for C/C++); TS needs a reader for its dependency format
+  (`tsc --listFiles` / a resolver pass) feeding the same depfile channel. Note:
+  this is about *building* TS code — separate from the [Blocked] track-3 item of
+  *writing build files* in TS.
 
 **Bigger, but still Opus** (sketch the design first):
 
@@ -410,6 +412,28 @@ entry. Lesson baked into the benchmark: measure the release `.so`.)
 
 ## Completed
 
+- **TypeScript build (`brix.ts`) — the ts-dts lens gets its consumer.** The other
+  half of the Java+TS stack, and the first real user of the `ts-dts` content lens
+  (previously implemented in both engines but with nothing driving it).
+  `ts.CompileAction(sources=, out_dir=, options=, dependencies=)` runs one `tsc`
+  spawn per module with **brix owning incrementality** (not `tsc --build`): it
+  declares the sources as inputs and the emitted `.js`/`.d.ts` as recursive
+  `{name}` globs, so a module re-runs only when a source or a tracked dependency
+  changes. Cross-module deps are the payoff: a dependent declares an upstream
+  module's built `.d.ts` via `dependencies=`, tracked through **ts-dts**
+  (`ts.DtsFile`/`ts.dts`, the surface `brix.ts` owns like `brix.java` owns
+  `AbiFile`). Because `tsc`'s declaration emit is API-only, an implementation-only
+  change upstream re-emits a byte-identical `.d.ts` and the dependent **replays** —
+  the TypeScript twin of the jvm-abi shortcut. **Proven:** a live two-module `tsc`
+  build (`examples/typescript/`, and a tsc-gated equivalence test) shows an
+  impl-only edit skip the dependent with byte-identical output vs. a clean build,
+  and an exported-signature change cascade. One design limit surfaced and
+  documented: `tsc` self-resolves `import` paths off the real filesystem, so
+  cross-module builds want outputs *in place* (the plain incremental stack), not
+  behind an atomic overlay brix can't redirect a foreign resolver through. Still
+  open (TODO): automatic *import-graph* tracking (the C-header analog) and an
+  npm/`node_modules` resolver. `tests/test_ts.py` (8) + `tests/test_ts_equivalence.py`
+  (2, tsc-gated via `BRIX_TSC`).
 - **Gradle dependency resolution (`java.gradle`) — adopt a Gradle build.** The
   Gradle counterpart of `java.pom`, on the critical path for the real ~50-service
   Gradle monorepo: `java.gradle(project_dir, project=":svc", configuration=...)`
@@ -918,8 +942,9 @@ entry. Lesson baked into the benchmark: measure the release `.so`.)
   surface* to fingerprints instead of its bytes, so a consumer recompiles on an
   interface change but not an implementation-only change or a doc/format edit.
   (Since the `content_key` relocation it's selected via a typed atom carrying
-  `content_key = "ts-dts"`, not a kwarg; a `ts.py` authoring surface for it is
-  still unbuilt — see the TS-build item in the Opus queue.) The ABI-pruning
+  `content_key = "ts-dts"`, not a kwarg; the `brix.ts` authoring surface for it —
+  `ts.CompileAction` + `ts.DtsFile`/`ts.dts` — is now built, see Completed.) The
+  ABI-pruning
   multiplier for the Java+TS monorepo half, and proof the content-lens seam is a
   real extension point (a second lens, no engine change). Most of the win is
   structural — `tsc`'s declaration emit is already implementation-free, so an
