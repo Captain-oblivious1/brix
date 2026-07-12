@@ -348,9 +348,13 @@ careful model:
 - **Two big future projects.** *Sandboxing*: run each build step so it can only
   see the files it declared — turning "you forgot to list a dependency" into an
   immediate error instead of a silent wrong build. This is the safety net that
-  would automatically catch several of the correctness gaps above. *Spreading
-  compilation across many machines* (remote execution). Both are large — either
-  Opus as a big effort or Fable to review.
+  would automatically catch several of the correctness gaps above. **Unify with
+  the staged-overlay design note** (Performance next steps → "Parked design:
+  staged-overlay visibility for foreign resolvers"): imposing a per-step
+  filesystem view is the *same primitive* as exposing staged outputs to a foreign
+  resolver — build them as one mechanism. *Spreading compilation across many
+  machines* (remote execution). Both are large — either Opus as a big effort or
+  Fable to review.
 - **Pending:** Duane will hand over a real C++ project to set up a build file for.
   Header dependency tracking is already built and ready for it.
 
@@ -409,6 +413,94 @@ numbers (release engine). One lever falls out, and it is milder than first feare
 was a *debug*-build artifact; on the release engine Rust matches or beats the
 Python engine on clean builds and is ~10× faster on no-ops. See the Completed
 entry. Lesson baked into the benchmark: measure the release `.so`.)
+
+### Parked design: staged-overlay visibility for foreign resolvers
+
+**The gap.** The `AtomicLayer` writes a build's outputs to a staging tree
+(`build/staging/add/<logical path>`, deletions under `del/`) and resolves brix's
+*own* data atoms through an overlay that reads "the workspace as it will look
+after commit." A step that reads an input brix handed it (a `FileData`, a
+`{classpath}` substitution) therefore sees the staged version. But a subprocess
+that does its **own** filesystem path resolution does not: `tsc` walking
+`import "../../x/dist/y"`, a C compiler resolving `#include` of a header another
+step generated, Go resolving an import, protobuf resolving an include — all call
+`open()`/`stat()` on the *real* workspace, where this build's staged outputs are
+not. So cross-module builds through a foreign resolver only work on the **plain
+incremental stack** (outputs written in place), not under atomic staging. Java is
+immune only because brix substitutes the overlay-resolved classpath into
+`{classpath}` explicitly; a tool brix can't feed the path to hits the wall.
+"Exposing the overlay to subprocesses" = making the child's own reads see the
+merged (workspace + staging) view, so `stat("x/dist/y.d.ts")` transparently
+returns the staged file.
+
+**The hazard it closes (why this is correctness, not polish).** A *first* atomic
+build of cross-module TS fails **loud** ("cannot find module") — safe. The
+dangerous case is an *incremental rebuild* where a prior committed `y.d.ts`
+already sits at the real path: the foreign resolver reads the **stale committed**
+declaration (staging invisible to it), type-checks against a stale API, can
+**succeed**, and the build commits a silently stale output — the exact
+missed-edge failure the incremental-≡-clean oracles exist to catch. So the
+atomic + cross-module + foreign-resolver combination must be either *fixed* or
+*loudly refused*; it must never be silently allowed.
+
+**Mechanism options (cheapest → airtight).**
+- *Symlink farm / materialized merged root.* Before a step, build a directory
+  mirroring the post-commit workspace (symlink real files, symlink or copy staged
+  ones) and run the subprocess rooted there. Portable, no privileges. Weaknesses:
+  a tool that calls `realpath` sees through the symlink and escapes the illusion
+  to the un-staged path; per-step construction cost.
+- *OS union filesystem.* Linux `overlayfs` (`lowerdir`=workspace, `upperdir`=
+  staging/add, whiteouts for staging/del) mounted inside a per-process
+  mount+user namespace (no root). Airtight, transparent even to `realpath`.
+  Linux-only — macOS (no overlayfs; FUSE/bindfs or copy) and Windows (Projected
+  FS, or a different scheme) need separate backends, a `#[cfg]` multi-backend
+  effort like the filesystem-watcher.
+- *Write-in-place + rollback journal.* Abandon copy-then-commit: write real paths,
+  journal enough to undo on failure. Nothing to expose. **Rejected** — it weakens
+  the atomicity guarantee (a crash mid-build leaves partial real outputs until
+  recovery), which is the entire reason the atomic layer exists.
+
+**Semantics the merged view must nail (the contract, before any code).**
+precedence (staging/add wins over workspace); deletions (staging/del must *hide*
+a workspace file — whiteout, not just "absent from add"); `realpath`/normalization
+(a tool must not be able to resolve back to the un-staged path); symlinked
+workspace packages (pnpm/yarn/npm workspaces symlink `node_modules/@scope/pkg` →
+the real package dir — the view must compose with those); case-sensitivity
+(macOS/Windows); and read-only enforcement of inputs. Route the
+incremental-≡-clean oracles **through** the merged view so a precedence or
+whiteout bug fails a test.
+
+**Converges with Sandboxing — build them once.** The parked *Sandboxing* project
+(run each step so it can see only the files it declared) is the **same primitive
+from the other side**: both are "construct and impose a filesystem view on a
+subprocess." A view containing exactly {this step's declared inputs, staged
+outputs included} *simultaneously* enforces declared-dependency hygiene (the
+sandbox) and exposes staged outputs (the overlay). Do not ship two mechanisms —
+the overlay-visibility fix and sandboxing are one piece of infrastructure, and
+that is the strongest reason to do it once, foundationally, rather than bolt a
+TS-only workaround onto the atomic layer.
+
+**Why parked / when it bites.** Correctness-critical foundation under *every*
+atomic build (Fable-territory: a wrong merged view is a silent wrong build);
+platform-specific plumbing for the airtight version; and no real driver yet to
+pin the semantics — real TS services, not the `examples/typescript` toy, reveal
+the `node_modules`/symlink/`realpath` requirements the view must satisfy. The
+plain incremental stack builds cross-module TS *correctly* today; only atomic
+crash-safety is lost, so the practical cost of waiting is low.
+
+**Cheap interim guard (optional, do-now).** Independent of the full fix: a
+targeted loud refusal/warning when a foreign-resolver action with cross-module
+`dependencies=` (today `ts.CompileAction`) runs *under a staging layer*, turning
+the silent-stale-on-rebuild path into an explicit "use the plain stack here"
+error. Small, local, no merged-view machinery — closes the hazard while the
+overlay stays parked.
+
+**How to build it (when it bites).** Design note first (this). Then the
+merged-view **semantics contract above + one backend together** (start with the
+symlink farm for portability, or commit to overlayfs if Linux-only is acceptable
+near-term), with the **sandbox as co-consumer shaping the interface** so the two
+land as one mechanism — not a seam plus a TS-only path. Route the equivalence
+oracles through the view; keep the plain stack as the always-available fallback.
 
 ## Completed
 
