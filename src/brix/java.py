@@ -183,6 +183,154 @@ def maven(
     return DepSet(tuple(jars))
 
 
+# --- dependency resolution: adopt a Gradle build ---
+#
+# The Gradle counterpart of java.pom: adopt an existing Gradle project and
+# consume the classpath *Gradle* resolves. Naming the engine (`gradle`, vs
+# `maven`) is load-bearing — Gradle picks the highest requested version on a
+# conflict where Maven picks the nearest in the tree, so the same coordinates
+# can resolve to different jars. Two mechanics differ from Maven:
+#   * Gradle has no `dependency:build-classpath` goal, so we inject a temporary
+#     init script (never editing the project's own build files) that writes a
+#     configuration's resolved files;
+#   * a pom is (mostly) self-contained, but Gradle spreads dependency
+#     declarations across the build script, settings, gradle.properties and a
+#     version catalog — so the cache key hashes all of them, not just one file.
+
+# Companion files (beyond the build scripts) whose bytes fold into the cache key.
+# Keying on the catalog too means bumping a version in `libs.versions.toml`
+# re-resolves. Limitation: only the target project's own directory is scanned, so
+# a version catalog at the *repo root* of a multi-project build is not seen here —
+# bump a build file, or clear the cache, to force re-resolution in that case.
+_GRADLE_COMPANION_FILES = (
+    "gradle.properties",
+    "gradle/libs.versions.toml",
+)
+
+
+def _gradle_manifest_material(project_dir: Path) -> str:
+    """The dependency-declaring files' bytes, as the cache key material. The
+    build scripts are matched by glob, not fixed names: Gradle lets a project use
+    a custom build-file name (junit5 uses ``junit-platform-commons.gradle.kts``,
+    not ``build.gradle.kts``), so ``*.gradle`` / ``*.gradle.kts`` catches those
+    too. Sorted for a deterministic key."""
+    files = sorted(
+        [*project_dir.glob("*.gradle"), *project_dir.glob("*.gradle.kts")]
+    )
+    files += [project_dir / rel for rel in _GRADLE_COMPANION_FILES]
+    parts = [
+        f"{f.relative_to(project_dir)}\0{f.read_text()}"
+        for f in files
+        if f.is_file()
+    ]
+    if not parts:
+        raise ValueError(f"no Gradle build files under {project_dir}")
+    return "\0".join(parts)
+
+
+# Registered on every project so a subproject can be targeted; only the invoked
+# project's task runs, so exactly one write happens. `conf.files` forces
+# resolution. Project-dependency entries (a class dir, not a jar) are dropped by
+# `_parse_classpath`. The configuration name and output path are baked into the
+# script rather than passed as `-P` properties: some builds intercept and
+# *validate* project properties (junit5's `build-parameters` plugin rejects an
+# unknown `-P`), so external properties are a collision surface we avoid.
+_GRADLE_INIT_SCRIPT = """\
+// Injected by brix (java.gradle) to print a configuration's resolved classpath
+// without editing the project's own build files.
+allprojects { p ->
+    p.tasks.register("brixPrintClasspath") {
+        doLast {
+            def conf = p.configurations.findByName('__BRIX_CONFIGURATION__')
+            if (conf == null) {
+                throw new GradleException(
+                    "java.gradle: no configuration '__BRIX_CONFIGURATION__' in ${p.path}")
+            }
+            new File('__BRIX_OUT__').text =
+                conf.files.collect { it.absolutePath }.join(File.pathSeparator)
+        }
+    }
+}
+"""
+
+
+def _render_gradle_init(configuration: str, out_file: str) -> str:
+    def esc(s: str) -> str:  # for a single-quoted Groovy string literal
+        return s.replace("\\", "\\\\").replace("'", "\\'")
+
+    return _GRADLE_INIT_SCRIPT.replace(
+        "__BRIX_CONFIGURATION__", esc(configuration)
+    ).replace("__BRIX_OUT__", esc(out_file))
+
+
+def _gradle_build_classpath(
+    gradle: str,
+    project_dir: str,
+    configuration: str,
+    project: str | None,
+    out_file: str,
+    cwd: str | None = None,
+) -> None:
+    """Resolve a Gradle configuration's classpath to out_file via an injected
+    init script. `project` is a Gradle project path (":app"); None targets the
+    root project. `cwd` is where gradle runs — defaults to project_dir so a
+    `./gradlew` wrapper and settings.gradle are found. Isolated so tests can
+    substitute it without a live Gradle."""
+    init = Path(out_file).with_suffix(".init.gradle")
+    init.write_text(_render_gradle_init(configuration, out_file))
+    proj = ":" + project.lstrip(":") if project else ""
+    subprocess.run(
+        [
+            gradle, "--quiet", "--console=plain",
+            "--init-script", str(init), f"{proj}:brixPrintClasspath",
+        ],
+        check=True,
+        cwd=cwd or project_dir,
+    )
+
+
+def gradle(
+    path: str | Path,
+    *,
+    gradle: str = "gradle",
+    configuration: str = "compileClasspath",
+    project: str | None = None,
+    cache_dir: str | None = ".brix-deps",
+    cwd: str | None = None,
+) -> DepSet:
+    """Adopt an existing Gradle project: resolve a *configuration*'s classpath
+    (Gradle's ``compileClasspath`` / ``runtimeClasspath`` / ``testRuntimeClasspath``,
+    the analog of a Maven scope) and return it as a `DepSet`. This is the
+    *migration* path for a Gradle build — the declarations stay in the build
+    files; brix drives Gradle and consumes what it resolves (with Gradle's own
+    version-conflict rules). Editing a build file re-resolves (see
+    ``_GRADLE_MANIFEST_FILES`` for exactly which files the cache key covers).
+
+    ``path`` is the project directory (or a build script inside it). ``project``
+    is a Gradle project path (``":service-a"``) to target a subproject of a
+    multi-project build; None targets the root project. ``gradle`` may be a
+    wrapper path like ``"./gradlew"``; ``cwd`` is where it runs (defaults to the
+    project dir)."""
+    project_dir = Path(path)
+    if project_dir.is_file():
+        project_dir = project_dir.parent
+    payload = _gradle_manifest_material(project_dir) + f"\0project={project or ''}"
+    key = _key("gradle", payload, configuration)
+    hit = _cached(cache_dir, key)
+    if hit is not None:
+        return DepSet(tuple(hit))
+    work = Path(cache_dir) if cache_dir else project_dir
+    work.mkdir(parents=True, exist_ok=True)
+    out_file = (work / f"{key}.rawcp").resolve()
+    _gradle_build_classpath(
+        gradle, str(project_dir.resolve()), configuration, project, str(out_file), cwd
+    )
+    jars = _parse_classpath(out_file.read_text())
+    if cache_dir:
+        (Path(cache_dir) / f"{key}.classpath").write_text("\n".join(jars))
+    return DepSet(tuple(jars))
+
+
 class AbiFile(FileData):
     """A jar/class compared through the JVM ABI lens, not its bytes: a
     dependent recompiles on an API change, not an implementation-only one.

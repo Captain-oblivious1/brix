@@ -124,6 +124,145 @@ def test_scope_is_part_of_the_cache_key(tmp_path, monkeypatch):
     assert scopes == ["compile", "runtime"], "different scopes must not collide"
 
 
+# --- Gradle adapter ---
+
+
+def _write_gradle_project(tmp_path, build="dependencies { }", catalog=None):
+    (tmp_path / "build.gradle").write_text(build)
+    if catalog is not None:
+        (tmp_path / "gradle").mkdir(exist_ok=True)
+        (tmp_path / "gradle" / "libs.versions.toml").write_text(catalog)
+
+
+def test_gradle_manifest_material_covers_build_and_catalog(tmp_path):
+    _write_gradle_project(tmp_path, build="A", catalog="B")
+    material = java._gradle_manifest_material(tmp_path)
+    assert "build.gradle\0A" in material
+    assert "gradle/libs.versions.toml\0B" in material
+
+
+def test_gradle_manifest_material_raises_when_no_build_files(tmp_path):
+    with pytest.raises(ValueError):
+        java._gradle_manifest_material(tmp_path)
+
+
+def _fake_gradle_resolver(jars):
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+        open(out_file, "w").write(os.pathsep.join(jars))
+    return run
+
+
+def test_gradle_resolves_from_a_project_dir_and_caches(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_gradle_project(proj, build="deps v1")
+    calls = []
+
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+        calls.append(configuration)
+        open(out_file, "w").write(os.pathsep.join(["/g/foo.jar", "/g/bar.jar"]))
+
+    monkeypatch.setattr(java, "_gradle_build_classpath", run)
+    cache = str(tmp_path / "cache")
+    ds = java.gradle(proj, cache_dir=cache)
+    assert ds.artifacts == ("/g/foo.jar", "/g/bar.jar")
+    # A second identical call is served from the cache — Gradle is not re-run.
+    ds2 = java.gradle(proj, cache_dir=cache)
+    assert ds2.artifacts == ds.artifacts
+    assert calls == ["compileClasspath"], "second resolve should have been cached"
+
+
+def test_gradle_accepts_a_build_file_path(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_gradle_project(proj)
+    monkeypatch.setattr(
+        java, "_gradle_build_classpath", _fake_gradle_resolver(["/g/z.jar"])
+    )
+    ds = java.gradle(proj / "build.gradle", cache_dir=str(tmp_path / "c"))
+    assert ds.artifacts == ("/g/z.jar",)
+
+
+def test_gradle_configuration_and_project_are_part_of_the_cache_key(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_gradle_project(proj)
+    seen = []
+
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+        seen.append((configuration, project))
+        open(out_file, "w").write("/g/x.jar")
+
+    monkeypatch.setattr(java, "_gradle_build_classpath", run)
+    cache = str(tmp_path / "cache")
+    java.gradle(proj, configuration="compileClasspath", cache_dir=cache)
+    java.gradle(proj, configuration="runtimeClasspath", cache_dir=cache)  # new conf
+    java.gradle(proj, project=":app", cache_dir=cache)  # new project
+    assert seen == [
+        ("compileClasspath", None),
+        ("runtimeClasspath", None),
+        ("compileClasspath", ":app"),
+    ]
+
+
+def test_changing_a_build_file_reresolves(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_gradle_project(proj, build="deps v1")
+    seen = []
+
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+        seen.append(True)
+        open(out_file, "w").write("/g/x.jar")
+
+    monkeypatch.setattr(java, "_gradle_build_classpath", run)
+    cache = str(tmp_path / "cache")
+    java.gradle(proj, cache_dir=cache)
+    _write_gradle_project(proj, build="deps v2")  # edit build.gradle -> new key
+    java.gradle(proj, cache_dir=cache)
+    assert len(seen) == 2
+
+
+def test_gradle_build_classpath_builds_task_and_init_script(tmp_path, monkeypatch):
+    argv = {}
+
+    def fake_run(cmd, check, cwd):
+        argv["cmd"] = cmd
+        argv["cwd"] = cwd
+
+    monkeypatch.setattr(java.subprocess, "run", fake_run)
+    out = tmp_path / "cp.rawcp"
+    java._gradle_build_classpath(
+        "./gradlew", str(tmp_path), "runtimeClasspath", "app", str(out), cwd=None
+    )
+    cmd = argv["cmd"]
+    # A leading colon is normalized onto the project path.
+    assert ":app:brixPrintClasspath" in cmd
+    # Config/out are baked into the script, not passed as -P (which some builds
+    # validate and reject) — so no project properties on the command line.
+    assert not any(a.startswith("-P") for a in cmd)
+    assert argv["cwd"] == str(tmp_path)  # defaults to the project dir
+    # The init script was written next to the output and carries the baked-in
+    # configuration and output path.
+    init = out.with_suffix(".init.gradle")
+    script = init.read_text()
+    assert "brixPrintClasspath" in script
+    assert "runtimeClasspath" in script and str(out) in script
+    assert "--init-script" in cmd and str(init) in cmd
+
+
+def test_gradle_root_project_task_has_no_project_prefix(tmp_path, monkeypatch):
+    argv = {}
+    monkeypatch.setattr(
+        java.subprocess, "run", lambda cmd, check, cwd: argv.update(cmd=cmd)
+    )
+    out = tmp_path / "cp.rawcp"
+    java._gradle_build_classpath(
+        "gradle", str(tmp_path), "compileClasspath", None, str(out)
+    )
+    assert ":brixPrintClasspath" in argv["cmd"]
+
+
 # --- the typed actions accept a DepSet ---
 
 

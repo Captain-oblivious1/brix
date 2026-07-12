@@ -43,7 +43,7 @@ the manifest. This is the *migration* path — keep your declarations where they
 are.
 
 - `java.pom(path)` — resolve a `pom.xml`'s declared deps (implemented)
-- `java.gradle(path)` — resolve a `build.gradle`'s classpath (planned)
+- `java.gradle(path)` — resolve a Gradle project's configuration classpath (implemented)
 - `cpp.conanfile(path)` / `cpp.vcpkg_json(path)` (planned)
 
 **Resolve inline coordinates** (declare in `brix.py`). Named by the engine. This
@@ -71,15 +71,46 @@ whatever your production build ships.
 
 ## Resolution timing and caching (JVM, today)
 
-`java.pom` / `java.maven` resolve **eagerly** at graph construction and **memoize**
-the classpath under `cache_dir` (default `.brix-deps`), keyed by the pom bytes /
-the coordinate list + scope. So a no-op build re-reads the cache instead of
-re-running Maven; editing the pom or the coordinate list re-resolves. The actual
-`mvn` invocation is isolated behind `java._maven_build_classpath` (so tests run
-without a live Maven), and `mvn=`/`cwd=` let you point at a `./mvnw` wrapper.
+`java.pom` / `java.maven` / `java.gradle` resolve **eagerly** at graph
+construction and **memoize** the classpath under `cache_dir` (default
+`.brix-deps`). So a no-op build re-reads the cache instead of re-running the
+resolver; editing what the key covers re-resolves. The resolver invocation is
+isolated behind a seam (`java._maven_build_classpath`,
+`java._gradle_build_classpath`) so tests run without a live Maven/Gradle, and
+`mvn=`/`gradle=`/`cwd=` let you point at a `./mvnw` or `./gradlew` wrapper.
 
-The resolved paths are machine-specific (`~/.m2/...`), so the cache is a local
-build artifact, never committed — the dependency *declarations* stay in the pom.
+The cache key differs by adapter because the manifest does:
+
+- **Maven** (`pom`/`maven`): the pom bytes (or coordinate list) + scope. A pom is
+  largely self-contained.
+- **Gradle** (`gradle`): the bytes of *all* dependency-declaring files in the
+  project dir — `build.gradle(.kts)`, `settings.gradle(.kts)`,
+  `gradle.properties`, and a `gradle/libs.versions.toml` version catalog — plus
+  the configuration name and target project path. Gradle spreads declarations
+  across files, so keying on `build.gradle` alone would miss a catalog bump.
+  Limitation: only the target project's own directory is scanned, so a version
+  catalog at the *repo root* of a multi-project build is not seen by the key —
+  bump a build file, or clear `.brix-deps`, to force re-resolution in that case.
+
+Gradle has no `dependency:build-classpath` goal, so `java.gradle` injects a
+temporary **init script** (`--init-script`, never editing the project's own
+build files) that writes a configuration's resolved `files`. Pass `project=` (a
+Gradle project path like `":service-a"`) to target a subproject of a
+multi-project build, and `configuration=` to pick `compileClasspath` (default) /
+`runtimeClasspath` / `testRuntimeClasspath` — the Gradle analog of a Maven scope.
+Config and output path are baked into the generated script, not passed as `-P`
+properties: some builds validate project properties and reject unknown ones
+(junit5's `build-parameters` plugin does), so external properties are a
+collision surface `java.gradle` avoids.
+
+`java.gradle` returns only **external** artifacts (jars): a sibling
+project-dependency in a multi-project build resolves to a class *directory*,
+which is dropped. That is the right split for the monorepo case — those sibling
+modules are brix graph nodes you build, not opaque jars you adopt.
+
+The resolved paths are machine-specific (`~/.m2/...`, `~/.gradle/caches/...`), so
+the cache is a local build artifact, never committed — the dependency
+*declarations* stay in the pom / build files.
 
 **Planned maturation:** make resolution itself a graph *node* (its output the
 classpath), so a pom/`build.gradle` edit re-triggers resolution and downstream

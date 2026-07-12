@@ -37,12 +37,12 @@ IncrementalBuilder (fingerprint skip + deleted-source cleanup), the result
 cache, atomic staging (incl. held-for-review), persistent warm workers, the
 reporter seam, status/clean with a CLI, typed C++/Java actions, Spring Boot
 executable-jar packaging (`brix.springboot`), dependency resolution that drives
-Maven and consumes the classpath (`java.pom`/`java.maven` → composable `DepSet`),
-nested expansion, per-action environments, glob exclusion (`-`), and the
-`content_key` comparison lenses (`jvm-abi`/`ts-dts`) are all implemented and
-working.
-**330 Python tests pass on the default (Rust) engine**; 267 of them also run
-under `BRIX_ENGINE=py` (the other ~63 are exhaustive/toolchain-heavy equivalence
+Maven *or Gradle* and consumes the classpath (`java.pom`/`java.maven`/`java.gradle`
+→ composable `DepSet`), nested expansion, per-action environments, glob exclusion
+(`-`), and the `content_key` comparison lenses (`jvm-abi`/`ts-dts`) are all
+implemented and working.
+**342 Python tests pass on the default (Rust) engine**; 279 of them also run
+under `BRIX_ENGINE=py` (the other ~65 are exhaustive/toolchain-heavy equivalence
 sweeps pinned to the shipping engine, with the golden fixtures pinning that the
 two engines agree byte-for-byte), plus **134 Rust tests** — many cross-checking the two
 engines byte-for-byte via golden fixtures — and a JDK end-to-end test that
@@ -410,6 +410,26 @@ entry. Lesson baked into the benchmark: measure the release `.so`.)
 
 ## Completed
 
+- **Gradle dependency resolution (`java.gradle`) — adopt a Gradle build.** The
+  Gradle counterpart of `java.pom`, on the critical path for the real ~50-service
+  Gradle monorepo: `java.gradle(project_dir, project=":svc", configuration=...)`
+  resolves a configuration's classpath (`compileClasspath` default /
+  `runtimeClasspath` / `testRuntimeClasspath` — the Gradle analog of a Maven
+  scope) into a `DepSet`. Naming the *engine* is load-bearing: Gradle picks the
+  highest requested version on a conflict where Maven picks the nearest, so the
+  same coordinates can resolve differently. Two Gradle-specific mechanics: it has
+  no `dependency:build-classpath` goal, so `java.gradle` injects a temporary
+  **init script** (`--init-script`, never touching the project's own build files;
+  config baked in, not passed as `-P` — junit5's `build-parameters` plugin
+  *rejects* unknown project properties); and Gradle spreads declarations across
+  files, so the cache key hashes all of them (build scripts by glob — junit5 uses
+  `<module>.gradle.kts`, not `build.gradle.kts` — plus settings, properties, and a
+  `libs.versions.toml` catalog). Returns only **external** jars; a sibling
+  project-dependency resolves to a class *dir* and is dropped (right for a
+  monorepo — those modules are brix graph nodes, not adopted jars). **Proven:**
+  drove junit5's `./gradlew` end-to-end to resolve real subproject classpaths
+  (apiguardian, opentest4j), with the second call served from cache (no Gradle
+  re-run). `tests/test_deps.py` grew 8 Gradle cases (25 total). `docs/dependencies.md`.
 - **C++ dependency resolution (`cpp.pkg_config`) — the `DepSet` generalizes.**
   Same pattern as the JVM adapters, one axis over: `cpp.pkg_config(["zlib"])`
   queries the system's pkg-config (behind a testable seam) and returns a
