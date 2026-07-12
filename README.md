@@ -284,9 +284,6 @@ These are self-contained and come with tests. No Fable needed.
   Two small enablers fall out: an optional description slot for `aliases` (today
   bare path mappings), and surfacing each `commands=` callable's `__doc__`. Keeps
   to running the build file directly (`brix.py help`), not a global launcher.
-- **A `brix` command, like `git`.** `brix init` sets up a new project with a
-  starter build file; `brix build` runs it. Today there's no `brix` command — you
-  run your build file directly with Python.
 - **Draw a picture of the build.** Boxes for steps, arrows for what depends on
   what, instead of a text list.
 - **Ready-made starter templates** for a Java service and a TypeScript service, so
