@@ -271,6 +271,19 @@ These are self-contained and come with tests. No Fable needed.
 
 **Making it easy to start:**
 
+- **`brix.py help` — show the *live* configuration, not just the command list.**
+  Argparse's `-h` lists the built-in subcommands, but everything project-specific
+  lives in the `cli.main(...)` call and is invisible without reading the file:
+  whether the atomic/cache layers are wired (so whether `--stage` / `commit` /
+  `discard` even apply), the target **aliases** (`app → app/dist/main.js`), the
+  custom **`commands=`**, and the metadata / staging / cache paths. `help` should
+  **introspect the builder chain** — walk each builder's `.inner` and name the
+  layers (Atomic → Cache → Incremental) — and print the active stack, the aliases
+  and custom commands (with descriptions), and the paths, so a user knows what
+  `build` will actually do without opening `brix.py`. Self-contained, Opus-sized.
+  Two small enablers fall out: an optional description slot for `aliases` (today
+  bare path mappings), and surfacing each `commands=` callable's `__doc__`. Keeps
+  to running the build file directly (`brix.py help`), not a global launcher.
 - **A `brix` command, like `git`.** `brix init` sets up a new project with a
   starter build file; `brix build` runs it. Today there's no `brix` command — you
   run your build file directly with Python.
