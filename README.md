@@ -370,8 +370,38 @@ numbers (release engine). One lever falls out, and it is milder than first feare
   cold-CLI tax. That is a mild annoyance, not a painful one — a **nice-to-have**,
   not the big scaling win it first looked like. Every `brix build` today
   re-realizes globs, re-expands, and re-checks freshness cold with no filesystem
-  watch; a daemon would erase that, but it is not urgent. Overlaps the
-  file-watcher / partial-loading ideas above.
+  watch; a daemon would erase that, but it is not urgent.
+
+- **Filesystem-watcher change detection (parked — design captured below).** The
+  concrete form of "collapse the no-op floor": a pluggable `ChangeSource` that,
+  given a build-owned token, reports only the paths changed since the last build,
+  so a no-op becomes **O(changed)** instead of O(all files) — git's `git status`
+  speed, by the same technique git uses.
+  - *Mechanism, not git.* The watching primitive is the OS (inotify /
+    FSEvents / `ReadDirectoryChangesW`); backends are a native watcher (Rust
+    `notify` crate), Watchman, or git's fsmonitor daemon. **No git repo, commit,
+    or staging required** — the token is anchored to the last *build*, not to any
+    VCS state (using `git status`/index-diff would be the wrong tool: it anchors
+    to commits and would report the same dirty set every build). Works on Windows
+    (git's built-in fsmonitor shipped Windows-first; and it matters *more* there,
+    since Windows FS scanning is slow — the exact problem Microsoft's Scalar /
+    VFS-for-Git solve). Rust `#[cfg]` handles the few platform-specific leaf
+    functions (stat-identity fields); `std` + the `notify` crate cover the rest.
+  - *Why parked.* The payoff (~3–4s no-op → instant at 50-service scale) is a
+    real-monorepo-onboarding win, not a today-problem. It is the **correctness-
+    critical invalidation path** — a missed event silently ships a stale build,
+    the exact failure the incremental-≡-clean oracles guard — so the *skipping*
+    logic is Fable-territory. And it only pays off with a **resident** watcher
+    (a persistent daemon holding the watch + token), so it is coupled to the
+    daemon lever above.
+  - *How to build it (when it bites).* Introduce the `ChangeSource` seam **and the
+    first real watcher backend together, in one increment** — not seam-first (the
+    interface must be shaped by a real consumer: tokens, watch descriptors,
+    overflow/resync semantics). Route the equivalence oracles *through* the change
+    source so a dropped event fails a test, and keep a mandatory **full-scan
+    fallback** for the cold start, a watcher crash, or an event-queue overflow.
+    A seam with only the full-scan implementation is speculative abstraction with
+    no payoff — don't land one in isolation.
 
 (An earlier "Rust executor is ~5× slower on clean builds" note was withdrawn — it
 was a *debug*-build artifact; on the release engine Rust matches or beats the
