@@ -155,11 +155,14 @@ language-neutral.** The feared per-language matrix reduces to **one** true
 mismatch plus a set of mechanical coverage gaps and acceptable performance
 gradients. Concretely:
 
-- **P0 — adopt the uniformity invariant** (add to the README design rules) and
-  **add the interim loud guard**: any step that self-resolves a staged sibling
-  under a staging layer fails with one uniform "not supported under atomic yet —
-  use the plain stack" message. Turns a silent, language-specific mismatch into
-  an explicit, uniform boundary *today*, for zero architectural risk.
+- **P0 — DONE (2026-07-12).** The uniformity invariant is now README design
+  rule 13, and the interim guard shipped: an action marks
+  `self_resolved_inputs` (today `ts.CompileAction` with cross-module
+  `dependencies=`), `atomic.staging_hazards(graph)` collects them, and
+  `AtomicBuilder.build()` refuses — loud, engine-agnostic, before any work —
+  with one uniform "use the plain stack" message. General by construction: any
+  future foreign-resolver lane that marks its inputs is covered for free.
+  `tests/test_ts.py` carries the guard tests.
 - **P1 — the staged-overlay / sandbox primitive.** The single fix that erases the
   matrix and equalizes under-declaration safety. Decide the model (full merged
   view vs. "stage finals, write intermediates in place" vs. targeted

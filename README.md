@@ -1541,6 +1541,23 @@ them:
 12. **Python owns user composition; Rust eventually owns the engine** —
     metadata, graph algorithms, scheduling, caching, fingerprints, and
     performance-critical execution live below the DSL boundary.
+13. **Uniform capabilities across languages — no per-language feature matrix.**
+    A correctness *feature* (atomic staging, caching, incrementality,
+    sandboxing) either works for every language or is off for every language;
+    languages may differ in *coverage* (which ecosystems have a resolver) and
+    *optimization* (which have a semantic lens or a warm worker), never in
+    whether a correctness feature applies. The engine stays language-neutral;
+    everything language-specific is a plugin over a small fixed seam set
+    (content lens, dependency resolver, dependency-discovery reader, warm
+    worker, typed helper — `docs/capability-audit.md`). Corollary: where a
+    feature *cannot yet* apply uniformly it is **refused loudly and
+    identically** for every language, never silently allowed for some — e.g.
+    the atomic builder rejecting a tool-self-resolved intra-build artifact
+    (`atomic.staging_hazards`) rather than shipping a stale result. A lens is
+    only as trustworthy as its equivalence-oracle: a lens that is *unsound* for
+    a language (Kotlin `inline`, C++ templates) is a correctness bug, not a
+    missed optimization, so each ships an oracle covering that language's
+    cross-module-inlining case.
 
 ---
 

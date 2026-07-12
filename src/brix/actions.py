@@ -67,6 +67,7 @@ class ExternalProcessAction(Expandable):
         env: dict[str, DataExpr | str] | None = None,
         worker: "WorkerSpec | None" = None,
         depfile: str | None = None,
+        self_resolved_inputs: tuple[str, ...] = (),
     ) -> None:
         from .data import ValueData
 
@@ -87,6 +88,15 @@ class ExternalProcessAction(Expandable):
         # editing one re-stales this action. Not part of identity/fingerprint
         # itself — just a marker telling the scanner where to look.
         self.depfile = depfile
+        # Input keys whose paths this action's *tool* resolves itself (a foreign
+        # resolver: a TS `import`, a generated `#include`) rather than brix
+        # substituting them into a `{placeholder}`, AND which are intra-build
+        # artifacts of another step. Such an input is invisible to the atomic
+        # staging overlay — the tool reads the real workspace, not staging — so
+        # a build carrying one is unsound under atomic (docs/capability-audit.md,
+        # "the one true mismatch"). Build-time validation only (the atomic
+        # builder refuses it); not part of the wire spec or the fingerprint.
+        self.self_resolved_inputs = tuple(self_resolved_inputs)
 
     @property
     def label(self) -> str:
@@ -110,6 +120,7 @@ class ExternalProcessAction(Expandable):
             env={k: _substitute_expr(v, bindings) for k, v in self.env.items()},
             worker=self.worker,
             depfile=depfile,
+            self_resolved_inputs=self.self_resolved_inputs,
         )
 
     def __repr__(self) -> str:

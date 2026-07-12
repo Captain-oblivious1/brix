@@ -135,10 +135,16 @@ class CompileAction(Action):
             "options": _options_expr(self.options),
             "sources": self.sources,
         }
+        self_resolved: tuple[str, ...] = ()
         if self.dependencies:
             # ts-dts-lensed; not a command placeholder (tsc finds them on disk),
             # but declared so the fingerprint tracks the upstream API surface.
             inputs["types"] = dts(DataUnion(*self.dependencies))
+            # tsc resolves these `import`s off the real filesystem, so they are
+            # invisible to atomic staging — flag them so the atomic builder
+            # refuses this build with one uniform message rather than silently
+            # reading a stale declaration (docs/capability-audit.md).
+            self_resolved = ("types",)
 
         return [
             ExternalProcessAction(
@@ -148,5 +154,6 @@ class CompileAction(Action):
                 ),
                 inputs=inputs,
                 outputs=outputs,
+                self_resolved_inputs=self_resolved,
             )
         ]

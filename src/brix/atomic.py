@@ -39,12 +39,37 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .actions import DeleteFilesAction
+from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
 from .layers import BuildLayer, NodeContext
 from .process import ProcessResult
 
 COMMIT_MARKER = "COMMIT"
 HELD_MARKER = "HELD"
+
+
+def staging_hazards(graph) -> list[str]:
+    """Labels of actions that read an intra-build artifact their *tool* resolves
+    itself — a foreign resolver (a TypeScript ``import``, a generated
+    ``#include``) — which the staging overlay hides from that tool.
+
+    Under atomic staging such an action can silently read a *stale* prior
+    committed version instead of this build's staged output, shipping a wrong
+    result — the one true capability mismatch in docs/capability-audit.md. The
+    atomic builder refuses a build carrying one (P0 interim guard) until the
+    staged-overlay/sandbox fix lands; the plain incremental stack builds it
+    correctly today. General by construction: any action that marks
+    ``self_resolved_inputs`` (today `ts.CompileAction` with cross-module
+    ``dependencies=``) is caught, so future foreign-resolver lanes are covered
+    for free."""
+    hazards: list[str] = []
+    stack: list = list(graph.actions)
+    while stack:
+        action = stack.pop()
+        if isinstance(action, ExpandAll):
+            stack.append(action.child)
+        elif isinstance(action, ExternalProcessAction) and action.self_resolved_inputs:
+            hazards.append(action.label)
+    return hazards
 
 
 def _staged_counts(staging: Path) -> tuple[int, int]:

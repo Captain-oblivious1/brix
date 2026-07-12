@@ -4,7 +4,9 @@ impl-only-replay equivalence property (the ts-dts counterpart of the jvm-abi
 shortcut) are exercised, tsc-gated, in test_ts_equivalence.py.
 """
 
-from brix import Graph, ts
+import pytest
+
+from brix import AtomicBuilder, Graph, IncrementalBuilder, ts
 from brix.data import DataFactory, FileData, ToolData
 from brix.ts import DtsFile, DtsGlob
 
@@ -104,3 +106,50 @@ def test_ts_graph_uses_only_the_builtin_lens():
     # ts-dts is core-native, so nothing crosses the engine boundary as a
     # custom content_identity callback.
     assert custom_identity_names(g) == set()
+
+
+# --- P0 uniformity guard: atomic refuses a tool-self-resolved intra-build dep ---
+
+
+def _cross_module_graph(root):
+    g = Graph()
+    d = g.data
+    tsc = ToolData("tsc")
+    g.add(
+        ts.CompileAction(sources=d.glob("a/{n}.ts"), out_dir="a/dist", tsc=tsc),
+        ts.CompileAction(
+            sources=d.glob("b/{n}.ts"),
+            out_dir="b/dist",
+            tsc=tsc,
+            dependencies=[d.file("a/dist/a.d.ts")],  # tsc self-resolves this import
+        ),
+    )
+    return g
+
+
+def test_dependencies_mark_the_action_self_resolved():
+    g = _cross_module_graph(None)
+    from brix.atomic import staging_hazards
+
+    # The dependent (b) is flagged; the leaf (a) is not.
+    assert staging_hazards(g) == ["tsc -> b/dist"]
+
+
+def test_atomic_builder_refuses_cross_module_ts(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a/a.ts").write_text("export const x = 1;\n")
+    (tmp_path / "b/b.ts").write_text("export const y = 2;\n")
+    inner = IncrementalBuilder(lambda: _cross_module_graph(tmp_path), root=tmp_path)
+    builder = AtomicBuilder(inner, staging_dir="build/staging")
+    with pytest.raises(ValueError, match="atomic staging can't build"):
+        builder.build(reporter=None)
+
+
+def test_single_module_ts_is_fine_under_atomic():
+    # No cross-module dependency -> no self-resolution -> no hazard.
+    g = Graph()
+    g.add(ts.CompileAction(sources=g.data.glob("src/{n}.ts"), out_dir="dist"))
+    from brix.atomic import staging_hazards
+
+    assert staging_hazards(g) == []

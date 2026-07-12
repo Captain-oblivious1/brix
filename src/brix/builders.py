@@ -255,6 +255,22 @@ class AtomicBuilder:
         review — the workspace changes only at :meth:`commit`.
         ``worker_idle_timeout``: see `IncrementalBuilder.build`."""
         from . import engine
+        from .atomic import staging_hazards
+
+        # P0 uniformity guard: refuse (loud, engine-agnostic, before any work) a
+        # build whose tool self-resolves an intra-build artifact staging would
+        # hide — never silently ship a stale result (docs/capability-audit.md).
+        hazards = staging_hazards(self.source_graph())
+        if hazards:
+            raise ValueError(
+                "atomic staging can't build an action whose tool resolves an "
+                "intra-build artifact itself (a TypeScript import, a generated "
+                "#include) — staging hides that artifact from the tool, which can "
+                f"then silently read a stale one. Affected: {', '.join(hazards)}. "
+                "Use the plain incremental stack (no AtomicBuilder) for this "
+                "build, or compile the module whole-program in one step. See "
+                "docs/capability-audit.md."
+            )
 
         rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets, hold=hold,
                                   worker_idle_timeout=worker_idle_timeout)
