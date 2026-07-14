@@ -510,7 +510,8 @@ oracles through the view; keep the plain stack as the always-available fallback.
 - **Explicit ordering without a shared file (`Graph.force_order`).** A graph
   can now say `graph.force_order(setup, tests)` when two actions must be ordered
   but exchange no data. The default `on-success` trigger skips the later action
-  after failure; `trigger="on-completion"` runs it after either outcome. The
+  after failure; `trigger=EdgeTrigger.ON_COMPLETION` runs it after either
+  outcome. The
   relationship appears in plans as `explicit ordering`, and target selection
   pulls in the required predecessor. Both actions must already belong to the
   graph. The optional index-based wire shape is implemented in the Python

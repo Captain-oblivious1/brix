@@ -236,7 +236,9 @@ def test_force_order_supports_on_completion():
     graph = Graph()
     setup = _writer("setup", graph.data.file("setup.done"))
     cleanup = _writer("cleanup", graph.data.file("cleanup.done"))
-    graph.add(setup, cleanup).force_order(setup, cleanup, trigger="on-completion")
+    graph.add(setup, cleanup).force_order(
+        setup, cleanup, trigger=EdgeTrigger.ON_COMPLETION
+    )
     edge = CleanBuilder(graph).plan().edges[0]
     assert edge.trigger is EdgeTrigger.ON_COMPLETION
 
@@ -261,11 +263,13 @@ def test_force_order_requires_registered_distinct_actions():
         graph.force_order(setup, tests)
     with pytest.raises(ValueError, match="two different"):
         graph.force_order(setup, setup)
+    with pytest.raises(TypeError, match="EdgeTrigger"):
+        graph.force_order(setup, setup, trigger="on-completion")
 
 
 @pytest.mark.parametrize(
     ("trigger", "after_runs"),
-    [("on-success", False), ("on-completion", True)],
+    [(EdgeTrigger.ON_SUCCESS, False), (EdgeTrigger.ON_COMPLETION, True)],
 )
 def test_force_order_trigger_behavior_through_default_engine(tmp_path, trigger, after_runs):
     graph = Graph()
