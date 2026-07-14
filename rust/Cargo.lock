@@ -58,6 +58,7 @@ name = "brix-py"
 version = "0.1.0"
 dependencies = [
  "brix-core",
+ "brix-workerd",
  "pyo3",
  "serde_json",
 ]

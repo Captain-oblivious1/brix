@@ -1,5 +1,18 @@
 # Development log
 
+- **Self-contained native wheels.** Maturin is now the PEP 517 backend for the
+  mixed Python/Rust package: a Brix wheel contains the Python API, the
+  `brix.brix_py` native engine, both Java helper sources, and an installed
+  `brix-workerd` launcher. The daemon implementation is shared as the
+  `brix-workerd` Rust library and compiled into the extension, so releases do
+  not have to smuggle a second platform binary into wheel data. Runtime daemon
+  discovery checks the active Python environment's scripts directory and does
+  not depend on shell activation. `scripts/wheel_smoke.py` builds a release
+  wheel, installs it without dependencies into a clean virtual environment
+  outside the checkout, runs a real Rust-engine build, verifies package data,
+  and reaches the daemon entry point. Full Python, Rust, HTTP-cache, and daemon
+  suites pass.
+
 - **Pinned the public Python v1 API.** The top-level `brix` package now exposes
   build authoring plus intentional extension seams, not scheduler and storage
   implementation details. Execution nodes/plans, node state tables, concrete

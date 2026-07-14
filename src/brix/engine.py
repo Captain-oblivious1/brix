@@ -14,7 +14,7 @@ content-identity plugins ride along as the extension traits of
 ``digest`` are Python callables the core invokes across the boundary
 (from build worker threads — they must not assume the main thread).
 
-The extension is looked up as an installed ``brix_py`` module first, then
+The extension is looked up as the installed ``brix.brix_py`` module first, then
 ``$BRIX_RUST_ENGINE_LIB``, then the dev tree (``rust/target/{release,debug}``).
 No extension anywhere: the *default* falls back to the Python engine (a
 pure-Python checkout must keep building), but an explicit
@@ -24,10 +24,12 @@ benchmark the wrong engine.
 
 from __future__ import annotations
 
+import importlib
 import importlib.machinery
 import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,7 +46,11 @@ _extension_cache = _UNSET
 
 def _find_extension():
     try:
-        import brix_py  # an installed wheel ships the extension as a module
+        return importlib.import_module(".brix_py", __package__)
+    except ImportError:
+        pass
+    try:
+        import brix_py  # compatibility with an older standalone dev install
 
         return brix_py
     except ImportError:
@@ -292,6 +298,11 @@ def _worker_daemon_config(worker_idle_timeout: int | None) -> dict:
             candidate = Path(so).parent / "brix-workerd"
             if candidate.is_file():
                 workerd = str(candidate)
+    if not workerd:
+        executable = "brix-workerd.exe" if os.name == "nt" else "brix-workerd"
+        candidate = Path(sys.executable).parent / executable
+        if candidate.is_file():
+            workerd = str(candidate)
     return {
         "worker_idle_timeout": worker_idle_timeout,
         "workerd": workerd or "brix-workerd",

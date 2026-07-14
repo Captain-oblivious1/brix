@@ -86,6 +86,8 @@ See the [roadmap](docs/roadmap.md) for the full prioritized list.
   execution plans, builders, and design rules.
 - [Python API](docs/python-api.md) — supported top-level authoring and extension
   interfaces.
+- [Packaging and releases](docs/packaging.md) — wheels, editable installs, and
+  the isolated release smoke test.
 - [Roadmap](docs/roadmap.md) — every unfinished, blocked, parked, or undecided
   item from the former README TODO section.
 - [Development log](docs/development-log.md) — the detailed completed history.

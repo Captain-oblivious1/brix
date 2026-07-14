@@ -72,9 +72,9 @@ below is tagged with the model that should do it.
    `rust/golden/generate.py` generates the byte-parity fixtures from it
    and Python stays the reference implementation. Consequences to
    accept at that point: `BRIX_ENGINE=py` becomes a clear error, and a
-   checkout without the compiled extension cannot build (the animation
-   project then hard-requires `cargo build -p brix-py` or a maturin
-   wheel). **[Fable]** — the trickiest part of the whole project; one
+   checkout without the compiled extension cannot build (development checkouts
+   use an editable Maturin install; releases now ship the extension and worker
+   launcher in a self-contained wheel). **[Fable]** — the trickiest part of the whole project; one
    subtle ordering bug here breaks builds, so it needs the most careful
    model reviewing it line by line.
 3. **A JavaScript/TypeScript way to write build files** — same features as the

@@ -541,11 +541,22 @@ fn clean(py: Python<'_>, spec_json: &str, config_json: &str) -> PyResult<String>
     Ok(json!({ "removed": removed }).to_string())
 }
 
+/// Console-script entry for the bundled cross-build worker holder. The Rust
+/// daemon parses this process's argv and detaches exactly like the standalone
+/// development binary; the GIL must not remain held across its serve loop.
+#[pyfunction]
+fn workerd_main(py: Python<'_>) -> PyResult<()> {
+    let argv: Vec<String> = py.import("sys")?.getattr("argv")?.extract()?;
+    py.detach(|| brix_workerd::run_args(argv.into_iter().skip(1).collect()));
+    Ok(())
+}
+
 #[pymodule]
 fn brix_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(status, m)?)?;
     m.add_function(wrap_pyfunction!(clean, m)?)?;
+    m.add_function(wrap_pyfunction!(workerd_main, m)?)?;
     m.add("__engine__", "rust")?;
     Ok(())
 }

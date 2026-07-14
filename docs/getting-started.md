@@ -1,19 +1,15 @@
 # Getting started
 
 Brix requires Python 3.11 or newer. From a source checkout, create a virtual
-environment, install the Python package in editable mode, and build the Rust
-extension:
+environment and install the project in editable mode. Maturin builds the Rust
+extension and installs the worker launcher automatically:
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[dev]'
-cd rust
-cargo build --release -p brix-py
-cd ..
 ```
 
-The release extension is discovered automatically under `rust/target/release`.
 Set `BRIX_ENGINE=py` when deliberately running the Python reference engine.
 
 ## Try the repository examples

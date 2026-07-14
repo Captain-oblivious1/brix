@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
 [project]
 name = "brix"
@@ -14,8 +14,19 @@ authors = [{ name = "Duane Knesek", email = "duane.knesek@gmail.com" }]
 [project.optional-dependencies]
 dev = ["pytest"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[project.scripts]
+brix-workerd = "brix.workerd_cli:main"
+
+[tool.maturin]
+manifest-path = "rust/brix-py/Cargo.toml"
+python-source = "src"
+python-packages = ["brix"]
+module-name = "brix.brix_py"
+bindings = "pyo3"
+strip = true
+include = [
+  { path = "src/brix/_java/*.java", format = ["sdist", "wheel"] },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
