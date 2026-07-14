@@ -1,5 +1,13 @@
 # Development log
 
+- **Pinned the public Python v1 API.** The top-level `brix` package now exposes
+  build authoring plus intentional extension seams, not scheduler and storage
+  implementation details. Execution nodes/plans, node state tables, concrete
+  layers, metadata internals, delete actions, data factories, and raw built-in
+  lens modules remain available from their defining modules for Brix itself but
+  are no longer advertised as authoring API. `docs/python-api.md` documents the
+  boundary and an exact `__all__` contract test prevents accidental leakage.
+
 - **Explicit ordering without a shared file (`Graph.force_order`).** A graph
   can now say `graph.force_order(setup, tests)` when two actions must be ordered
   but exchange no data. The default `on-success` trigger skips the later action
@@ -990,4 +998,3 @@
   concurrency) and `tests/test_worker_daemon.py` through the full
   boundary. Suite: 211 both engines; cargo 13 suites; clippy clean.
   Next: the Gradle acceptance benchmark, scenarios 4/5 warm.
-

@@ -84,6 +84,8 @@ See the [roadmap](docs/roadmap.md) for the full prioritized list.
 - [Getting started](docs/getting-started.md) — run the tests and examples.
 - [Specification](docs/specification.md) — behavior, graph model, actions,
   execution plans, builders, and design rules.
+- [Python API](docs/python-api.md) — supported top-level authoring and extension
+  interfaces.
 - [Roadmap](docs/roadmap.md) — every unfinished, blocked, parked, or undecided
   item from the former README TODO section.
 - [Development log](docs/development-log.md) — the detailed completed history.

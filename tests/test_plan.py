@@ -3,7 +3,8 @@ import sys
 
 import pytest
 
-from brix import CleanBuilder, EdgeTrigger, ExpandAll, ExternalProcessAction, Graph, NodeKind
+from brix import CleanBuilder, EdgeTrigger, ExpandAll, ExternalProcessAction, Graph
+from brix.plan import NodeKind
 
 
 def make_compile_link_graph() -> Graph:

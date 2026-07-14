@@ -13,10 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from brix import CacheBuilder, IncrementalBuilder, NodeState
+from brix import CacheBuilder, IncrementalBuilder
 from brix import engine
 from brix.data import FileData
 from brix.java import AbiFile
+from brix.plan import NodeState
 
 
 def _lens_file(path: str, content_key: str) -> FileData:

@@ -10,9 +10,8 @@ from brix import (
     ExpandAll,
     ExternalProcessAction,
     Graph,
-    NodeState,
-    NodeStateTable,
 )
+from brix.plan import NodeState, NodeStateTable
 
 
 def test_state_table_defaults_to_pending():

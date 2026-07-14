@@ -14,10 +14,10 @@ from brix import (
     IncrementalBuilder,
     NodeContext,
     Reporter,
-    TimeAndHashChangeDetector,
     WorkerSpec,
 )
 from brix.incremental import action_fingerprint
+from brix.metadata import TimeAndHashChangeDetector
 
 WORKERS = Path(__file__).parent / "workers"
 EXEC_WORKER = WORKERS / "exec_worker.py"

@@ -4,7 +4,8 @@ import json
 import sys
 from collections import Counter
 
-from brix import IncrementalBuilder, NodeState
+from brix import IncrementalBuilder
+from brix.plan import NodeState
 
 UPPER_TOOL = """\
 import sys

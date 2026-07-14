@@ -14,16 +14,14 @@ import sys
 from brix import (
     CleanBuilder,
     EdgeTrigger,
-    ExecutionPlan,
     ExpandAll,
     ExternalProcessAction,
     Graph,
     IncrementalBuilder,
-    NodeKind,
-    NodeState,
     Reporter,
 )
 from brix.executor import execute
+from brix.plan import ExecutionPlan, NodeKind, NodeState
 
 
 def ok_action(name):

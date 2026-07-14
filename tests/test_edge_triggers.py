@@ -3,14 +3,12 @@
 import sys
 
 from brix import (
-    DeleteFilesAction,
     EdgeTrigger,
-    ExecutionPlan,
     ExternalProcessAction,
-    NodeKind,
-    NodeState,
 )
+from brix.actions import DeleteFilesAction
 from brix.executor import execute
+from brix.plan import ExecutionPlan, NodeKind, NodeState
 
 
 def _failing_action():

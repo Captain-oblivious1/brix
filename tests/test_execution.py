@@ -3,7 +3,8 @@
 import sys
 import textwrap
 
-from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph, NodeState
+from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph
+from brix.plan import NodeState
 
 UPPER_TOOL = textwrap.dedent(
     """
