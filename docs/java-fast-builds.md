@@ -6,8 +6,8 @@ engine concepts that requires — **persistent workers** and
 **content-identity fingerprints (ABI hashing)** — plus the `brix.java`
 changes that ride on them. Like `docs/rust-port.md`, it is written so a
 model that didn't design brix can implement it without reinterpreting
-anything. The ground rules in README.md still bind; nothing here bends
-them.
+anything. The ground rules in `specification.md` still bind; nothing here
+bends them.
 
 ## Why Gradle is fast, and what brix already has
 

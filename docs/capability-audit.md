@@ -82,7 +82,7 @@ hits it only with generated headers and Java essentially never.
 Because the root cause is a single property of the staging mechanism, **one fix
 removes the entire matrix**: make a subprocess's own reads see the merged
 (workspace + staging) view. That is the parked design note *"staged-overlay
-visibility for foreign resolvers"* (README → Performance next steps), and it is
+visibility for foreign resolvers"* ([roadmap](roadmap.md#parked-design-staged-overlay-visibility-for-foreign-resolvers)), and it is
 the **same primitive as the Sandboxing project** (impose a filesystem view on a
 step) — build them once. Until then, two escape hatches already keep builds
 *correct*: the plain incremental stack (outputs written in place), or compiling a
@@ -129,10 +129,11 @@ collections a generator action produces *during the same build*, so
 
 **Sufficiency gaps found:**
 
-1. **Pure-ordering edges (no shared file).** "Start the service, then run tests
-   against it" — an ordering that isn't mediated by a file — is *not expressible*
-   yet (already a README correctness-fix item). Also bites codegen-then-consume
-   where the dependency is a directory rather than a tracked file. **P1.**
+1. **Pure-ordering edges (no shared file) — DONE.** `Graph.force_order(before,
+   after)` expresses ordering that is not mediated by a file, with typed
+   `EdgeTrigger` control over success/completion behavior. Target selection
+   pulls in the forced predecessor, and the relationship crosses the shared
+   Rust boundary.
 2. **Build variants / configuration axis.** Debug/release, target arch, feature
    flags — buildable by hand by parameterizing the graph, but there is no
    first-class "variant" concept, so "build all N variants" has no ergonomic
@@ -155,7 +156,7 @@ language-neutral.** The feared per-language matrix reduces to **one** true
 mismatch plus a set of mechanical coverage gaps and acceptable performance
 gradients. Concretely:
 
-- **P0 — DONE (2026-07-12).** The uniformity invariant is now README design
+- **P0 — DONE (2026-07-12).** The uniformity invariant is now specification design
   rule 13, and the interim guard shipped: an action marks
   `self_resolved_inputs` (today `ts.CompileAction` with cross-module
   `dependencies=`), `atomic.staging_hazards(graph)` collects them, and

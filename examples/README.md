@@ -36,6 +36,7 @@ Each has its own `README.md` with clone + setup steps. Checkouts go in
 | `spring-petclinic/` | spring-petclinic (Maven) | a real Spring Boot app: `java.pom("pom.xml")` drives Maven for the ~90-jar classpath, compiled + packaged + `brix.springboot.SpringBootJar` → an executable fat jar that boots with `java -jar`. brix drives the resolver and owns compile + package + incremental |
 | `the_silver_searcher/` | ggreer/the_silver_searcher (autotools) | a real C tool (`ag`): `cpp.pkg_config(["libpcre","zlib","liblzma"])` resolves its system-library deps; brix compiles the 12 TUs (win32 one dropped via glob `-`) and links the working binary |
 
-**Next dogfood targets** (see the repo README's "Feature-completeness
-dogfooding" section): an annotation-processor project (add `-processorpath`
+**Next dogfood targets** (see the [roadmap's feature-completeness dogfooding
+section](../docs/roadmap.md#feature-completeness-dogfooding-in-progress--prove-brix-on-real-projects-before-starting-track-3)):
+an annotation-processor project (add `-processorpath`
 to `JarAction`), and `jackson-databind` (multi-module test selection).

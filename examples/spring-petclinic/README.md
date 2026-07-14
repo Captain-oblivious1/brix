@@ -59,4 +59,5 @@ Rust engine by default, with the warm javac worker persisting between builds.
 - **The executable jar boots slower than a flat classpath** (nested-jar loading
   has overhead). That is inherent to the Spring Boot jar format, not brix.
 - No annotation processors here (petclinic uses none). Lombok/`-processorpath`
-  is the next Java dogfood — see the repo README's dogfooding section.
+  is the next Java dogfood — see the
+  [roadmap](../../docs/roadmap.md#feature-completeness-dogfooding-in-progress--prove-brix-on-real-projects-before-starting-track-3).

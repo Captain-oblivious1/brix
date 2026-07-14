@@ -1,11 +1,13 @@
-Read README.md in full before doing anything — it is the spec, the design
-rules, the prioritized TODO list, and the completed-work log for this
-project (brix, a build-system toolkit). Treat its "Design rules" as fixed.
+Read README.md first, then follow its documentation links. The stable behavior
+and design rules are in docs/specification.md, prioritized TODOs are in
+docs/roadmap.md, and completed work is in docs/development-log.md. Treat the
+specification's "Design rules" as fixed.
 
 Standing working rules (from Duane, non-negotiable):
 - Discuss design questions in short back-and-forth BEFORE editing code or
   docs; only change artifacts after agreement.
-- Update README.md (TODO + Completed) as part of every commit.
+- Update the roadmap, development log, specification, and README as appropriate
+  for every commit.
 - The 130-test suite in tests/ is the executable spec; it must stay green.
   Run: python -m pytest tests/ -q
 
@@ -21,7 +23,7 @@ doc seems wrong or odd, it is probably load-bearing: raise it, don't
 First task: generate class diagrams for every class in src/brix/ (Duane is
 a visual person; SVG or Mermaid, added to docs/, verified renderable —
 use rsvg-convert or headless Vivaldi for screenshots, NOT Firefox). Then
-proceed with the README TODO in order (1. pluggable cache store, 2. JVM
+proceed with the roadmap in order (1. pluggable cache store, 2. JVM
 fast-builds phases 1–2, 3. Rust port phases 1–2), pausing at anything the
 docs flag as needing full-strength review (Rust phase 3, JVM phase 3).
 

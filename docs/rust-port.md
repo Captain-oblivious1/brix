@@ -3,7 +3,7 @@
 This document is the execution contract for porting the brix engine to
 Rust. It is written so that a model (or person) who did **not** design
 brix can carry out the port without reinterpreting anything. Read it with
-`README.md` (the spec) and treat `tests/` as the acceptance suite.
+`specification.md` and treat `tests/` as the acceptance suite.
 
 **Prime directive: the Python test suite is the spec.** The tests run
 unchanged against the Python API throughout the port. If a behavior seems
