@@ -1,8 +1,9 @@
 from pathlib import Path
+import sys
 
 import pytest
 
-from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph, NodeKind
+from brix import CleanBuilder, EdgeTrigger, ExpandAll, ExternalProcessAction, Graph, NodeKind
 
 
 def make_compile_link_graph() -> Graph:
@@ -217,6 +218,75 @@ def test_plan_allows_non_overlapping_outputs():
         _writer("objects", graph.data.glob("build/{name}.o")),
     )
     assert len(CleanBuilder(graph).plan().nodes) == 2
+
+
+def test_force_order_adds_explicit_edge():
+    graph = Graph()
+    setup = _writer("setup", graph.data.file("setup.done"))
+    tests = _writer("tests", graph.data.file("tests.done"))
+    graph.add(setup, tests).force_order(setup, tests)
+    plan = CleanBuilder(graph).plan()
+    edge = next(e for e in plan.edges if e.reason == "explicit ordering")
+    assert (edge.from_id, edge.to_id) == (0, 1)
+    assert edge.trigger is EdgeTrigger.ON_SUCCESS
+    assert "explicit ordering" in plan.describe()
+
+
+def test_force_order_supports_on_completion():
+    graph = Graph()
+    setup = _writer("setup", graph.data.file("setup.done"))
+    cleanup = _writer("cleanup", graph.data.file("cleanup.done"))
+    graph.add(setup, cleanup).force_order(setup, cleanup, trigger="on-completion")
+    edge = CleanBuilder(graph).plan().edges[0]
+    assert edge.trigger is EdgeTrigger.ON_COMPLETION
+
+
+def test_force_order_target_pulls_in_predecessor():
+    graph = Graph()
+    setup = _writer("setup", graph.data.file("setup.done"))
+    tests = _writer("tests", graph.data.file("tests.done"))
+    unrelated = _writer("unrelated", graph.data.file("other.done"))
+    graph.add(setup, tests, unrelated).force_order(setup, tests)
+    plan = CleanBuilder(graph).plan(targets=["tests.done"])
+    assert [node.label for node in plan.nodes] == ["setup", "tests"]
+    assert any(e.reason == "explicit ordering" for e in plan.edges)
+
+
+def test_force_order_requires_registered_distinct_actions():
+    graph = Graph()
+    setup = _writer("setup", graph.data.file("setup.done"))
+    tests = _writer("tests", graph.data.file("tests.done"))
+    graph.add(setup)
+    with pytest.raises(ValueError, match="must each be added"):
+        graph.force_order(setup, tests)
+    with pytest.raises(ValueError, match="two different"):
+        graph.force_order(setup, setup)
+
+
+@pytest.mark.parametrize(
+    ("trigger", "after_runs"),
+    [("on-success", False), ("on-completion", True)],
+)
+def test_force_order_trigger_behavior_through_default_engine(tmp_path, trigger, after_runs):
+    graph = Graph()
+    failed = ExternalProcessAction(
+        name="setup", command_line=f"{sys.executable} -c 'raise SystemExit(1)'"
+    )
+    marker = tmp_path / "after-ran"
+    script = tmp_path / "after.py"
+    script.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\n")
+    after = ExternalProcessAction(
+        name="after",
+        command_line="{python} {script}",
+        inputs={
+            "python": graph.data.tool(sys.executable),
+            "script": graph.data.file("after.py"),
+        },
+    )
+    graph.add(failed, after).force_order(failed, after, trigger=trigger)
+    result = CleanBuilder(graph, root=tmp_path).build()
+    assert not result.success
+    assert marker.exists() is after_runs
 
 
 def test_plan_rejects_conflicting_expanded_outputs():

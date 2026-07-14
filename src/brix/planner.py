@@ -154,10 +154,13 @@ def _node_label(action: Action) -> str:
 
 def plan_graph(graph: Graph, root: Path, targets: list[str] | None = None) -> ExecutionPlan:
     actions = graph.actions
+    origins = list(range(len(actions)))
     if targets:
-        from .targets import select_actions
+        from .targets import select_actions_with_origins
 
-        actions = select_actions(actions, targets)
+        selected = select_actions_with_origins(actions, targets, graph.forced_orders)
+        origins = [origin for origin, _ in selected]
+        actions = [action for _, action in selected]
     validate_output_ownership(actions)
     plan = ExecutionPlan(root=root)
     for action in actions:
@@ -170,4 +173,13 @@ def plan_graph(graph: Graph, root: Path, targets: list[str] | None = None) -> Ex
             reason = infer_dependency(producer.action, consumer.action)
             if reason is not None:
                 plan.add_edge(producer.id, consumer.id, reason)
+    for before, after, trigger in graph.forced_orders:
+        for before_id, before_origin in enumerate(origins):
+            if before_origin != before:
+                continue
+            for after_id, after_origin in enumerate(origins):
+                if after_origin == after:
+                    plan.add_edge(
+                        before_id, after_id, "explicit ordering", trigger=trigger
+                    )
     return plan

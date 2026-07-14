@@ -83,7 +83,13 @@ def action_to_spec(action: Action) -> dict:
 
 
 def graph_to_spec(graph: Graph) -> dict:
-    return {"version": SPEC_VERSION, "actions": [action_to_spec(a) for a in graph.actions]}
+    spec = {"version": SPEC_VERSION, "actions": [action_to_spec(a) for a in graph.actions]}
+    if graph.forced_orders:
+        spec["forced_orders"] = [
+            {"before": before, "after": after, "trigger": trigger.value}
+            for before, after, trigger in graph.forced_orders
+        ]
+    return spec
 
 
 def _atoms_of(action: Action):

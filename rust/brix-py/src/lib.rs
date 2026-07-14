@@ -380,8 +380,13 @@ fn build(
     });
 
     let spec = brix_core::spec::parse(spec_json).map_err(PyValueError::new_err)?;
-    let mut plan = brix_core::planner::plan_graph(spec.actions, &root, targets.as_deref())
-        .map_err(PyValueError::new_err)?;
+    let mut plan = brix_core::planner::plan_graph_with_orders(
+        spec.actions,
+        &spec.forced_orders,
+        &root,
+        targets.as_deref(),
+    )
+    .map_err(PyValueError::new_err)?;
     let custom = custom_identities(identities);
     let layers = build_layers(&config, &root, &stores.unwrap_or_default(), custom.clone())
         .map_err(PyValueError::new_err)?;
@@ -450,6 +455,7 @@ fn build(
 /// the config's root, directory knobs, and targets.
 struct InspectConfig {
     actions: Vec<brix_core::Action>,
+    forced_orders: Vec<brix_core::spec::ForcedOrder>,
     root: String,
     metadata_dir: String,
     staging_dir: String,
@@ -478,7 +484,14 @@ fn parse_inspect_config(spec_json: &str, config_json: &str) -> PyResult<InspectC
         l.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
     });
     let spec = brix_core::spec::parse(spec_json).map_err(PyValueError::new_err)?;
-    Ok(InspectConfig { actions: spec.actions, root, metadata_dir, staging_dir, targets })
+    Ok(InspectConfig {
+        actions: spec.actions,
+        forced_orders: spec.forced_orders,
+        root,
+        metadata_dir,
+        staging_dir,
+        targets,
+    })
 }
 
 /// Build-state inspection without building: the StatusReport JSON of
@@ -497,8 +510,9 @@ fn status(
     let custom = custom_identities(identities);
     let report = py
         .detach(|| {
-            brix_core::status::compute_status(
+            brix_core::status::compute_status_with_orders(
                 cfg.actions,
+                &cfg.forced_orders,
                 std::path::Path::new(&cfg.root),
                 &cfg.metadata_dir,
                 &cfg.staging_dir,

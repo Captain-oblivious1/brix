@@ -7,6 +7,7 @@
 //! everything that varies at run time lives in the scheduler-owned
 //! `NodeStateTable`, where status only moves forward.
 
+use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::actions::Action;
@@ -47,7 +48,8 @@ impl NodeState {
 /// `OnSuccess` is the default: the source must be DONE, and a failure
 /// cascades a skip. `OnCompletion` fires whether the source succeeded or
 /// failed — for cleanup that must run *because* its trigger failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum EdgeTrigger {
     #[default]
     OnSuccess,

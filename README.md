@@ -252,10 +252,6 @@ These are self-contained and come with tests. No Fable needed.
 
 **Correctness fixes** (holes found in the "what might we be missing?" review):
 
-- **Let you say "run B after A" without a shared file.** Today brix works out
-  ordering only from files — A makes a file, B reads it. Some steps need to be
-  ordered without sharing a file, like "start the service, then run tests against
-  it." There's no way to express that yet.
 - **An optional "always re-check file contents" mode.** To go fast, brix assumes a
   file is unchanged when its size and timestamp both match. In rare cases a file's
   contents can change while those stay the same; this mode would catch it, at the
@@ -510,6 +506,15 @@ land as one mechanism — not a seam plus a TS-only path. Route the equivalence
 oracles through the view; keep the plain stack as the always-available fallback.
 
 ## Completed
+
+- **Explicit ordering without a shared file (`Graph.force_order`).** A graph
+  can now say `graph.force_order(setup, tests)` when two actions must be ordered
+  but exchange no data. The default `on-success` trigger skips the later action
+  after failure; `trigger="on-completion"` runs it after either outcome. The
+  relationship appears in plans as `explicit ordering`, and target selection
+  pulls in the required predecessor. Both actions must already belong to the
+  graph. The optional index-based wire shape is implemented in the Python
+  planner and Rust core, with default-engine and targeted-build tests.
 
 - **Reject conflicting output ownership.** Planning now fails before anything
   runs when two selected actions' declared output sets can name the same path,

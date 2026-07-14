@@ -13,7 +13,8 @@ use crate::actions::Action;
 use crate::data::{DataAtom, DataExpr};
 use crate::patterns::overlaps_shared;
 use crate::plan::{ExecutionPlan, NodeKind};
-use crate::targets::select_actions;
+use crate::spec::ForcedOrder;
+use crate::targets::select_actions_with_origins;
 
 /// Decide whether a producer output atom and a consumer input atom can name
 /// the same path. Mirrors `_atoms_overlap`: two regex atoms never compare;
@@ -136,10 +137,30 @@ pub fn plan_graph(
     root: &str,
     targets: Option<&[String]>,
 ) -> Result<ExecutionPlan, String> {
-    let actions = match targets {
-        Some(t) if !t.is_empty() => select_actions(&actions, t)?,
-        _ => actions,
+    plan_graph_with_orders(actions, &[], root, targets)
+}
+
+pub fn plan_graph_with_orders(
+    actions: Vec<Action>,
+    forced_orders: &[ForcedOrder],
+    root: &str,
+    targets: Option<&[String]>,
+) -> Result<ExecutionPlan, String> {
+    if forced_orders
+        .iter()
+        .any(|o| o.before >= actions.len() || o.after >= actions.len())
+    {
+        return Err("forced order action index is out of range".to_string());
+    }
+    if forced_orders.iter().any(|o| o.before == o.after) {
+        return Err("forced order requires two different actions".to_string());
+    }
+    let selected = match targets {
+        Some(t) if !t.is_empty() => select_actions_with_origins(&actions, t, forced_orders)?,
+        _ => actions.into_iter().enumerate().collect(),
     };
+    let origins: Vec<usize> = selected.iter().map(|(origin, _)| *origin).collect();
+    let actions: Vec<Action> = selected.into_iter().map(|(_, action)| action).collect();
     validate_output_ownership(&actions)?;
     let mut plan = ExecutionPlan::new(root);
     for action in &actions {
@@ -157,6 +178,23 @@ pub fn plan_graph(
             }
             if let Some(reason) = infer_dependency(&actions[pi], &actions[ci]) {
                 plan.add_edge(pi, ci, reason);
+            }
+        }
+    }
+    for order in forced_orders {
+        for (before_id, before_origin) in origins.iter().enumerate() {
+            if *before_origin != order.before {
+                continue;
+            }
+            for (after_id, after_origin) in origins.iter().enumerate() {
+                if *after_origin == order.after {
+                    plan.add_edge_triggered(
+                        before_id,
+                        after_id,
+                        "explicit ordering".to_string(),
+                        order.trigger,
+                    );
+                }
             }
         }
     }
@@ -232,5 +270,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan_graph(actions, "/root", None).unwrap().nodes.len(), 2);
+    }
+
+    #[test]
+    fn forced_order_adds_edge_and_pulls_predecessor_for_target() {
+        let spec = crate::spec::parse(
+            r#"{"version":1,"actions":[
+              {"kind":"process","name":"setup","command_line":"setup","outputs":{"out":[{"kind":"file","path":"setup.done"}]}},
+              {"kind":"process","name":"tests","command_line":"tests","outputs":{"out":[{"kind":"file","path":"tests.done"}]}},
+              {"kind":"process","name":"other","command_line":"other","outputs":{"out":[{"kind":"file","path":"other.done"}]}}
+            ],"forced_orders":[{"before":0,"after":1,"trigger":"on-completion"}]}"#,
+        ).unwrap();
+        let targets = vec!["tests.done".to_string()];
+        let plan = plan_graph_with_orders(
+            spec.actions,
+            &spec.forced_orders,
+            "/root",
+            Some(&targets),
+        )
+        .unwrap();
+        assert_eq!(
+            plan.nodes.iter().map(|n| n.label.as_str()).collect::<Vec<_>>(),
+            vec!["setup", "tests"]
+        );
+        let edge = plan
+            .edges
+            .iter()
+            .find(|e| e.reason == "explicit ordering")
+            .unwrap();
+        assert_eq!((edge.from_id, edge.to_id), (0, 1));
+        assert_eq!(edge.trigger, crate::plan::EdgeTrigger::OnCompletion);
     }
 }
