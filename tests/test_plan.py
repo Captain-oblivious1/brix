@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph, NodeKind
 
 
@@ -108,7 +110,7 @@ def test_same_collection_expansions_do_not_false_cycle():
     assert not any(e.from_id == 1 and e.to_id == 0 for e in plan.edges)
 
 
-def test_different_collections_keep_the_conservative_edge():
+def test_different_collections_keep_the_conservative_conflict():
     # Same shape, but the expansions iterate *different* collections: their
     # {video}s are independent values, so the conservative overlap (and the
     # cycle it implies) must stay — sharing is only inferred, never assumed.
@@ -136,8 +138,11 @@ def test_different_collections_keep_the_conservative_edge():
             ),
         ),
     )
-    plan = CleanBuilder(graph).plan()
-    assert any(e.from_id == 1 and e.to_id == 0 for e in plan.edges)
+    # The independent {video} values also make the two output patterns
+    # conservatively overlap, so unique ownership now rejects this graph
+    # before its old inferred cycle can reach the scheduler.
+    with pytest.raises(ValueError, match="conflicting outputs"):
+        CleanBuilder(graph).plan()
 
 
 def test_plan_no_edge_between_unrelated_actions():
@@ -159,6 +164,78 @@ def test_plan_no_edge_between_unrelated_actions():
     )
     plan = CleanBuilder(graph).plan()
     assert plan.edges == []
+
+
+def _writer(name, output):
+    return ExternalProcessAction(
+        name=name,
+        command_line="write {out}",
+        outputs={"out": output},
+    )
+
+
+def test_plan_rejects_same_concrete_output():
+    graph = Graph()
+    graph.add(
+        _writer("first", graph.data.file("build/result.txt")),
+        _writer("second", graph.data.file("build/result.txt")),
+    )
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"conflicting outputs: 'first' and 'second' may both write "
+            r"build/result\.txt; every output path must have exactly one owner"
+        ),
+    ):
+        CleanBuilder(graph).plan()
+
+
+def test_plan_rejects_pattern_and_concrete_output():
+    graph = Graph()
+    graph.add(
+        _writer("many", graph.data.glob("build/{name}.txt")),
+        _writer("one", graph.data.file("build/result.txt")),
+    )
+    with pytest.raises(ValueError, match=r"build/\{name\}\.txt ~ build/result\.txt"):
+        CleanBuilder(graph).plan()
+
+
+def test_plan_rejects_overlapping_output_patterns():
+    graph = Graph()
+    graph.add(
+        _writer("text", graph.data.glob("build/{name}.txt")),
+        _writer("all", graph.data.glob("build/{file}")),
+    )
+    with pytest.raises(ValueError, match="conflicting outputs"):
+        CleanBuilder(graph).plan()
+
+
+def test_plan_allows_non_overlapping_outputs():
+    graph = Graph()
+    graph.add(
+        _writer("text", graph.data.glob("build/{name}.txt")),
+        _writer("objects", graph.data.glob("build/{name}.o")),
+    )
+    assert len(CleanBuilder(graph).plan().nodes) == 2
+
+
+def test_plan_rejects_conflicting_expanded_outputs():
+    graph = Graph()
+    sources = graph.data.glob("src/{name}.txt")
+    graph.add(
+        ExpandAll(
+            element_name="name",
+            collection=sources,
+            child=_writer("first {name}", graph.data.file("build/{name}.out")),
+        ),
+        ExpandAll(
+            element_name="name",
+            collection=sources,
+            child=_writer("second {name}", graph.data.file("build/{name}.out")),
+        ),
+    )
+    with pytest.raises(ValueError, match="conflicting outputs"):
+        CleanBuilder(graph).plan()
 
 
 def test_describe_mentions_labels():

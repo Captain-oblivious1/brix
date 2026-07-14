@@ -107,6 +107,40 @@ def infer_dependency(producer: Action, consumer: Action) -> str | None:
     return None
 
 
+def validate_output_ownership(actions: list[Action]) -> None:
+    """Reject two actions whose declared output sets can name one path.
+
+    Output ownership must be unique: otherwise parallel execution makes the
+    final contents depend on which writer finishes last.  Use the same
+    conservative overlap relation as dependency inference, including its
+    same-collection binding refinement.
+    """
+    for left_index, left in enumerate(actions):
+        for right in actions[left_index + 1 :]:
+            shared = shared_bindings(left, right)
+            for left_atom in output_atoms(left):
+                for right_atom in output_atoms(right):
+                    exact_regex = (
+                        isinstance(left_atom, RegexData)
+                        and isinstance(right_atom, RegexData)
+                        and left_atom.regex.pattern == right_atom.regex.pattern
+                    )
+                    if exact_regex or _atoms_overlap(left_atom, right_atom, shared):
+                        left_text = _atom_text(left_atom)
+                        right_text = _atom_text(right_atom)
+                        overlap = (
+                            left_text
+                            if left_text == right_text
+                            else f"{left_text} ~ {right_text}"
+                        )
+                        raise ValueError(
+                            "conflicting outputs: "
+                            f"{_node_label(left)!r} and {_node_label(right)!r} "
+                            f"may both write {overlap}; every output path must "
+                            "have exactly one owner"
+                        )
+
+
 def _atom_text(atom: PathAtom) -> str:
     if isinstance(atom, RegexData):
         return atom.regex.pattern
@@ -124,6 +158,7 @@ def plan_graph(graph: Graph, root: Path, targets: list[str] | None = None) -> Ex
         from .targets import select_actions
 
         actions = select_actions(actions, targets)
+    validate_output_ownership(actions)
     plan = ExecutionPlan(root=root)
     for action in actions:
         kind = NodeKind.EXPAND if isinstance(action, ExpandAll) else NodeKind.PROCESS

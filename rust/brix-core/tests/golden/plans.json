@@ -38,12 +38,6 @@
   {
     "name": "stem",
     "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"process\", \"command_line\": \"mk {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"{video}.src\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"name\": \"raw {video}\"}, {\"kind\": \"process\", \"command_line\": \"mk {rawf} {out}\", \"inputs\": {\"rawf\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.mpg\"}]}, \"name\": \"final {video}\"}]}",
-    "targets": null,
-    "describe": "* [0] raw {video}\n* [1] final {video}\n    <- [0] raw {video}: data overlap: {video}.raw.mpg"
-  },
-  {
-    "name": "stem",
-    "spec": "{\"version\": 1, \"actions\": [{\"kind\": \"process\", \"command_line\": \"mk {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"{video}.src\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"name\": \"raw {video}\"}, {\"kind\": \"process\", \"command_line\": \"mk {rawf} {out}\", \"inputs\": {\"rawf\": [{\"kind\": \"file\", \"path\": \"{video}.raw.mpg\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"{video}.mpg\"}]}, \"name\": \"final {video}\"}]}",
     "targets": [
       "wealth.mpg"
     ],

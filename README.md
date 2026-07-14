@@ -256,9 +256,6 @@ These are self-contained and come with tests. No Fable needed.
   ordering only from files — A makes a file, B reads it. Some steps need to be
   ordered without sharing a file, like "start the service, then run tests against
   it." There's no way to express that yet.
-- **Warn when two steps write the same file.** Right now brix silently lets the
-  second one win, which can make a build come out differently depending on timing.
-  It should catch the collision instead.
 - **An optional "always re-check file contents" mode.** To go fast, brix assumes a
   file is unchanged when its size and timestamp both match. In rare cases a file's
   contents can change while those stay the same; this mode would catch it, at the
@@ -513,6 +510,15 @@ land as one mechanism — not a seam plus a TS-only path. Route the equivalence
 oracles through the view; keep the plain stack as the always-available fallback.
 
 ## Completed
+
+- **Reject conflicting output ownership.** Planning now fails before anything
+  runs when two selected actions' declared output sets can name the same path,
+  instead of letting parallel execution choose the last writer. The diagnostic
+  names both actions and the overlapping path expressions. Validation uses the
+  same conservative pattern relation and same-collection binding refinement as
+  dependency inference, catches exact regex duplicates, and runs after target
+  selection so make-style shortest-stem narrowing still works. Implemented in
+  both the Python reference planner and the Rust core with mirrored tests.
 
 - **TypeScript build (`brix.ts`) — the ts-dts lens gets its consumer.** The other
   half of the Java+TS stack, and the first real user of the `ts-dts` content lens
