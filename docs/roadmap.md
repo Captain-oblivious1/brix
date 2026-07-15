@@ -109,14 +109,16 @@ compile + package + incremental rebuild (a comment-only edit recompiles but does
 `cpp.pkg_config`; brix compiles its 12 TUs (win32 one dropped with glob `-`) and
 links a working `ag 2.2.0` (`examples/the_silver_searcher/`).
 
-**Next, in priority order (all Opus — dogfood + helper additions, no engine
-changes expected):**
-1. **Annotation processors** — a small Lombok/MapStruct project; add a
-   `-processorpath` option to `JarAction` and validate the processor jars are
-   tracked as fingerprint inputs.
-2. **Multi-module cross-suite test selection** — add `jackson-databind`
+**Next (Opus — dogfood + helper additions, no engine changes expected):**
+1. **Multi-module cross-suite test selection** — add `jackson-databind`
    (depends on `jackson-core`): a core impl change re-runs databind's tests
    but not annotations'.
+
+Completed: **annotation processors** — `JarAction(processorpath=...)` passes a
+separate processor path through the warm javac worker and fingerprints processor
+jars by their complete bytes, rather than their ABI. The self-contained
+`examples/annotation_processing/` dogfood and a JDK integration test prove that
+an implementation-only processor change recompiles and regenerates the app.
 
 Deferred (need features + dependency resolution — better with the real
 monorepo): **Kotlin modules** — the team plans to adopt Kotlin, and it reuses

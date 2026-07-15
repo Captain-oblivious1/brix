@@ -450,7 +450,13 @@ def javac_worker(
 
 
 class JarAction(Action):
-    """Compile Java sources and package them into a jar."""
+    """Compile Java sources and package them into a jar.
+
+    ``processorpath`` contains annotation-processor jars. Unlike ``classpath``,
+    these are tracked by their complete bytes: changing processor
+    implementation must recompile sources even when the processor's Java ABI
+    did not change.
+    """
 
     def __init__(
         self,
@@ -463,6 +469,7 @@ class JarAction(Action):
         classes_dir: str = "build/classes",
         entry_point: str | None = None,
         classpath: "DepSet | list[DataExpr] | None" = None,
+        processorpath: "DepSet | list[DataExpr] | None" = None,
         resource_dir: str | None = None,
         javac_worker: "WorkerSpec | None" = None,
     ) -> None:
@@ -474,6 +481,7 @@ class JarAction(Action):
         self.classes_dir = classes_dir
         self.entry_point = entry_point
         self.classpath = _as_classpath_list(classpath)
+        self.processorpath = _as_classpath_list(processorpath)
         # A resources root (e.g. "src/main/resources"): its whole tree is
         # packaged into the jar at the same relative paths as the classes, so
         # a module's META-INF/services registrations, .properties, etc. ship
@@ -484,10 +492,11 @@ class JarAction(Action):
         # java.javac_worker); otherwise it spawns javac. classpath= currently
         # rides the worker (the wrapper joins entries with the path separator).
         self.javac_worker = javac_worker
-        if classpath and javac_worker is None:
+        if (classpath or processorpath) and javac_worker is None:
             raise ValueError(
-                "JarAction: classpath= currently requires javac_worker= "
-                "(java.javac_worker(graph)); pass one, or drop classpath"
+                "JarAction: classpath= and processorpath= currently require "
+                "javac_worker= (java.javac_worker(graph)); pass one, or drop "
+                "the classpath arguments"
             )
 
     def lower(self) -> list[Action]:
@@ -506,6 +515,11 @@ class JarAction(Action):
             if self.classpath:
                 inputs["classpath"] = _classpath_union(self.classpath)
                 parts.append("--classpath {classpath}")
+            if self.processorpath:
+                # Processors are executable build-time code. Their complete
+                # bytes matter, not merely their public Java ABI.
+                inputs["processorpath"] = _runtime_union(self.processorpath)
+                parts.append("--processorpath {processorpath}")
             parts += ["--options {options}", "-d {classes_dir}", "--sources {sources}"]
             compile_java = ExternalProcessAction(
                 name=f"javac(worker) -> {self.classes_dir}",

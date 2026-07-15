@@ -78,6 +78,31 @@ def test_sources_union_flows_into_javac():
     assert templates == ["src/{c}.java", "build/gen/{c}.java"]
 
 
+def test_processorpath_is_passed_to_worker_and_tracked_by_bytes():
+    """Processor implementation changes matter even when its ABI is stable."""
+    from brix.workers import WorkerSpec
+
+    graph = Graph()
+    graph.add(
+        _jar_action(
+            classpath=[data.file("lib/annotations.jar")],
+            processorpath=[java.abi(data.file("lib/processors.jar"))],
+            javac_worker=WorkerSpec(name="javac", command_line="{j}", inputs={}),
+        )
+    )
+    compile_java, _ = graph.actions
+
+    assert "--processorpath {processorpath}" in compile_java.command_line
+    processor = list(compile_java.inputs["processorpath"].atoms())
+    assert [atom.path for atom in processor] == ["lib/processors.jar"]
+    assert all(atom.content_key is None for atom in processor)
+
+
+def test_processorpath_requires_worker():
+    with pytest.raises(ValueError, match="processorpath"):
+        _jar_action(processorpath=[data.file("lib/processors.jar")])
+
+
 def test_junit_test_action_uses_two_lenses():
     """The heart of selective test-running: the test *compile* depends on the
     classpath through the jvm-abi lens (API), the test *run* depends on the

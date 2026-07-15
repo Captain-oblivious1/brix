@@ -1,5 +1,14 @@
 # Development log
 
+- **Annotation processors are tracked as build-time code** —
+  `java.JarAction(processorpath=...)` now sends a separate `-processorpath`
+  through the warm javac worker. Processor jars use byte fingerprints, not the
+  `jvm-abi` compile-classpath lens, because an implementation-only processor
+  change can generate different output. A real-JDK integration test changes
+  only processor behavior and proves the application recompiles and produces
+  the new generated result. `examples/annotation_processing/` is a
+  self-contained processor → generated source → executable jar dogfood.
+
 - **Self-contained native wheels.** Maturin is now the PEP 517 backend for the
   mixed Python/Rust package: a Brix wheel contains the Python API, the
   `brix.brix_py` native engine, both Java helper sources, and an installed
@@ -249,8 +258,9 @@
   source** (PackageVersion from a template, via a tool action) and its one
   shaded compile dep (fastdoubleparser) as a plain classpath entry. Pure
   action composition — no engine change, both engines. Closes the biggest
-  remaining Java gap (tests). Next gaps if wanted: annotation processors,
-  and multi-module cross-suite selection (add jackson-databind).
+  remaining Java gap (tests). At the time, the next gaps were annotation
+  processors (now complete; see the newest entry) and multi-module cross-suite
+  selection (add jackson-databind).
 - **C++ dogfood — fmt built by brix, header tracking validated**
   (`examples/fmt/`): the C++ counterpart to the JUnit dogfood. Compiles
   fmt's classic library sources (`format.cc`, `os.cc`) plus a small app via

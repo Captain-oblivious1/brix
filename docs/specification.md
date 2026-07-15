@@ -220,6 +220,9 @@ java.JarAction(
     source_files=data.glob("src/main/java/{cls}.java"),
     output_file=data.file("build/libs/app.jar"),
     javac=data.tool("javac"), jar_tool=data.tool("jar"),
+    # Optional build-time code, tracked by full bytes rather than Java ABI:
+    processorpath=[data.file("lib/codegen-processor.jar")],
+    javac_worker=java.javac_worker(graph),
 )
 ```
 

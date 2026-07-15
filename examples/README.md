@@ -15,6 +15,7 @@ proven (each one has found a real bug or missing feature).
 | `cpp_app/` | a lifelike C++ project: typed `brix.cpp` actions, the full layer stack + CLI |
 | `cpp_to_java/` | composability: C++, generic, and Java actions in one graph |
 | `typescript/` | two-module TypeScript with `brix.ts`: `ts.CompileAction` per module + the **ts-dts** lens — an impl-only edit to the greeter replays the app; an exported-signature change rebuilds it (needs a local `tsc`: `npm install typescript@5`) |
+| `annotation_processing/` | a processor jar generates application source; processor implementation changes recompile the app even when its Java ABI stays unchanged |
 | `incremental_demo/` | build, rebuild, change a file, delete a source — watch what re-runs |
 | `layers_demo/` | the middleware layer stack (incremental / cache / atomic) on a live build |
 | `cli_demo/` | the CLI section of a project `brix.py` (`build`/`status`/`clean`/…) |
@@ -36,7 +37,6 @@ Each has its own `README.md` with clone + setup steps. Checkouts go in
 | `spring-petclinic/` | spring-petclinic (Maven) | a real Spring Boot app: `java.pom("pom.xml")` drives Maven for the ~90-jar classpath, compiled + packaged + `brix.springboot.SpringBootJar` → an executable fat jar that boots with `java -jar`. brix drives the resolver and owns compile + package + incremental |
 | `the_silver_searcher/` | ggreer/the_silver_searcher (autotools) | a real C tool (`ag`): `cpp.pkg_config(["libpcre","zlib","liblzma"])` resolves its system-library deps; brix compiles the 12 TUs (win32 one dropped via glob `-`) and links the working binary |
 
-**Next dogfood targets** (see the [roadmap's feature-completeness dogfooding
+**Next dogfood target** (see the [roadmap's feature-completeness dogfooding
 section](../docs/roadmap.md#feature-completeness-dogfooding-in-progress--prove-brix-on-real-projects-before-starting-track-3)):
-an annotation-processor project (add `-processorpath`
-to `JarAction`), and `jackson-databind` (multi-module test selection).
+`jackson-databind` (multi-module test selection).
