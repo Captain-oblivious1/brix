@@ -1,45 +1,64 @@
-# Building and testing jackson-core with brix
+# Multi-module Jackson builds and selective tests
 
-The selective-testing dogfood: build *and run the tests of* a famous real
-Java project, so a suite re-runs only when its inputs actually change. Along
-the way it exercises three things a real Java build needs — a generated
-source, packaged resources, and a JUnit 5 + AssertJ test suite.
+This dogfood builds the real Jackson 2.19.4 core modules as one Brix graph:
 
-## What it covers
+```text
+jackson-annotations ──┐
+                     ├──> jackson-databind
+jackson-core ─────────┘
+```
 
-- **Generated source**: `PackageVersion.java` is produced from a `.in`
-  template (jackson's maven-replacer step) by a small tool action, and feeds
-  the compile.
-- **Resources in the jar**: `src/main/resources` (the `META-INF/services`
-  `JsonFactory` registration) via `JarAction(resource_dir=…)`.
-- **One compile dep**: `ch.randelshofer:fastdoubleparser` (jackson shades it
-  into the distributed jar; for us it's a plain classpath entry).
-- **Selective test running** via `java.JUnitTestAction`: the test *compile*
-  depends on the classpath through the `jvm-abi` lens, the test *run* through
-  the **bytes**, so:
-  - nothing changed → the suite replays (skipped)
-  - a main implementation change → jackson-core recompiles and the suite
-    **re-runs** (its runtime classpath bytes changed)
-  - a comment-only edit anywhere → recompiles but the byte-identical output
-    lets the run **replay**
-  - a real test change → the main jar replays, only the tests recompile + run
-  - editing a file under `src/test/resources` → the suite re-runs
-    (`test_resource_dirs` declares test data as inputs)
+All 46 annotations sources, 135 core sources, and 480 databind sources compile
+into Brix-owned jars. Each module has a small JUnit smoke suite. The production
+sources are real Jackson; the small suites keep this example focused on build
+selection rather than recreating every third-party test dependency from the
+projects' Maven builds.
+
+## What it proves
+
+Compilation sees dependent jars through Brix's `jvm-abi` lens, while test runs
+see their complete runtime bytes. Therefore an implementation-only core edit:
+
+- recompiles and re-jars `jackson-core`;
+- does not recompile `jackson-databind` or either affected test suite, because
+  core's public ABI is unchanged;
+- reruns the core and databind suites, because both execute against core;
+- leaves the annotations compile and suite replayed, because annotations is not
+  downstream of core.
+
+The graph also retains the original dogfood coverage: generated
+`PackageVersion` sources, packaged `META-INF/services` resources, the
+fastdoubleparser compile dependency, the warm javac worker, caching, and three
+real-project jars.
 
 ## Setup
 
-    git clone --filter=blob:none https://github.com/FasterXML/jackson-core.git \
-        ~/Projects/brix_test/jackson-core
-    git -C ~/Projects/brix_test/jackson-core checkout jackson-core-2.19.4
-    examples/jackson/fetch-deps.sh          # JUnit console + AssertJ + fastdoubleparser
+```sh
+mkdir -p ~/Projects/brix_test
+git clone --filter=blob:none --branch jackson-core-2.19.4 \
+  https://github.com/FasterXML/jackson-core.git \
+  ~/Projects/brix_test/jackson-core
+git clone --filter=blob:none --branch jackson-annotations-2.19.4 \
+  https://github.com/FasterXML/jackson-annotations.git \
+  ~/Projects/brix_test/jackson-annotations
+git clone --filter=blob:none --branch jackson-databind-2.19.4 \
+  https://github.com/FasterXML/jackson-databind.git \
+  ~/Projects/brix_test/jackson-databind
+examples/jackson/fetch-deps.sh
+```
 
-Override the checkout with `BRIX_JACKSON_ROOT`. No atomic layer here: the
-JUnit console launcher reads the built jar by its real path.
+Set `BRIX_JACKSON_ROOT` to a different directory containing those three sibling
+checkouts. For compatibility, it may also point directly to `jackson-core`.
 
 ## Run
 
-    python examples/jackson/brix.py build     # generate + jar + compile + run tests
-    python examples/jackson/brix.py status
+```sh
+python examples/jackson/brix.py build
+python examples/jackson/brix.py status
+python examples/jackson/verify_selection.py
+```
 
-jackson-core's real suite (232 test sources, JUnit 5 + AssertJ) compiles and
-passes; edit a source and rebuild to watch exactly the right work re-run.
+`verify_selection.py` first establishes a fresh baseline, temporarily adds a
+private method to `JsonFactory`, and checks the exact actions that run. It
+restores the source in a `finally` block and rebuilds, leaving the checkout and
+Brix metadata fresh even if an assertion fails.

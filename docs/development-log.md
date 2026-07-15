@@ -1,5 +1,14 @@
 # Development log
 
+- **Multi-module Jackson selection on real production sources** — the Jackson
+  dogfood now compiles all three 2.19.4 core modules: 46 annotations sources,
+  135 core sources, and 480 databind sources. Three focused JUnit suites expose
+  the important dependency shape without importing databind's unrelated test
+  ecosystem. `verify_selection.py` makes a reversible private-method edit in
+  `JsonFactory` and proves the exact result: core recompiles and its jar changes;
+  core and databind suites rerun; databind, both affected test compiles, and the
+  entire annotations lane replay. This needed no engine changes—the existing
+  ABI compile lens and byte-level runtime lens compose correctly across modules.
 - **Annotation processors are tracked as build-time code** —
   `java.JarAction(processorpath=...)` now sends a separate `-processorpath`
   through the warm javac worker. Processor jars use byte fingerprints, not the

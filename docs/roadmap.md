@@ -109,12 +109,13 @@ compile + package + incremental rebuild (a comment-only edit recompiles but does
 `cpp.pkg_config`; brix compiles its 12 TUs (win32 one dropped with glob `-`) and
 links a working `ag 2.2.0` (`examples/the_silver_searcher/`).
 
-**Next (Opus — dogfood + helper additions, no engine changes expected):**
-1. **Multi-module cross-suite test selection** — add `jackson-databind`
-   (depends on `jackson-core`): a core impl change re-runs databind's tests
-   but not annotations'.
+Completed: **multi-module cross-suite test selection** — the Jackson dogfood
+now builds real 2.19.4 annotations, core, and databind jars plus one smoke suite
+per module. Its reversible verifier proves that a core implementation change
+reruns core and databind tests without recompiling databind or touching the
+annotations suite. No engine changes were needed.
 
-Completed: **annotation processors** — `JarAction(processorpath=...)` passes a
+Also completed: **annotation processors** — `JarAction(processorpath=...)` passes a
 separate processor path through the warm javac worker and fingerprints processor
 jars by their complete bytes, rather than their ABI. The self-contained
 `examples/annotation_processing/` dogfood and a JDK integration test prove that
