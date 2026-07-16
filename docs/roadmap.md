@@ -130,14 +130,24 @@ default and Spring cannot proxy them otherwise. Proven on the
 beans confirmed in the bytecode), rebuilds incrementally with content-aware jar
 skipping, and boots a full Spring context against the runtime classpath.
 
+**Multi-module Kotlin composition — done, and it caught a live bug.** `app`
+depends on `core`; brix infers the order from the shared jar and builds both.
+The `examples/kotlin_multimodule/` dogfood surfaced that `kotlin.JarAction` was
+ABI-lensing its classpath (inherited from the `java.JarAction` code it mirrors),
+which is **unsound for Kotlin**: an `inline fun`'s body is copied into consumers'
+bytecode, so an ABI-lensed dependency let brix *skip recompiling a dependent
+after an inline-body change that actually altered its output* — a stale-result
+bug, proven end-to-end. Fixed by **byte-tracking** the Kotlin classpath (sound;
+recompiles on any dependency change). `tests/test_kotlin_multimodule.py`
+(kotlinc-gated) pins the property; the example uses the plain incremental stack
+because kotlinc self-resolves `-classpath` (the parked staged-overlay limitation).
+
 Still deferred (needs the real monorepo to pin semantics): **multi-module
-Kotlin ABI skipping.** The `jvm-abi` lens is *unsound* for a consumed Kotlin
-module because an `inline fun` copies its body into cross-module call sites, so
-a Kotlin ABI lens must account for inline (and `const`, `@JvmStatic`, reified)
-before any downstream skip — this is Fable-territory (an equivalence oracle
-covering the inline case is the gate). Until then Kotlin outputs are byte-lensed
-(correct, just no cross-module skip). Warm-worker reuse for kotlinc is a
-separate optimization. (Spring Boot fat-jars: **done** — see spring-petclinic.)
+Kotlin ABI skipping** — recovering the skip that byte-tracking gives up. A
+Kotlin ABI lens must treat `inline` (and `const`, `@JvmStatic`, reified) bodies
+as interface; the gate is an equivalence oracle covering the inline case
+(Fable-territory). Warm-worker reuse for kotlinc is a separate optimization.
+(Spring Boot fat-jars: **done** — see spring-petclinic.)
 
 ### Opus queue — ready to do now
 

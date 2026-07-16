@@ -1,5 +1,23 @@
 # Development log
 
+- **Multi-module Kotlin composition, and a stale-result bug it caught.** A
+  two-module Kotlin build (`app` depends on `core`) exposed that
+  `kotlin.JarAction` was tracking its classpath through the `jvm-abi` lens —
+  inherited from the `java.JarAction` code it mirrors. That lens is **unsound
+  for Kotlin**: kotlinc copies an `inline fun`'s body into consumers' bytecode
+  at compile time, so an ABI-lensed dependency let brix *skip recompiling a
+  dependent after an inline-body change that had in fact changed its output.*
+  Proven end-to-end: with the old lens, editing an inline body in `core` left
+  `app` un-recompiled and stale; the ground-truth compiler diff confirmed
+  `app`'s bytecode really changed. Fixed by byte-tracking the Kotlin classpath
+  (`_runtime_union`, not `_classpath_union`): sound, recompiling on any
+  dependency change, at the cost of the cross-module skip a future Kotlin ABI
+  lens would recover. `tests/test_kotlin_multimodule.py` (kotlinc-gated) pins
+  both the inline case (must recompile, must match a clean build) and the
+  normal-body case (conservative recompile, still matches clean). The
+  `examples/kotlin_multimodule/` teaching dogfood demonstrates it and, like the
+  TypeScript example, uses the plain incremental stack because kotlinc
+  self-resolves `-classpath` (the parked staged-overlay-visibility limitation).
 - **Kotlin single-module builds (`brix.kotlin`)** — `kotlin.JarAction` compiles
   a whole Kotlin module with kotlinc and jars it, mirroring `java.JarAction`.
   kotlinc's `-classpath` takes one pathsep-joined token, so the resolved jars

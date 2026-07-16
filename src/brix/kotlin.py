@@ -20,16 +20,19 @@ Classpath handling follows the ``brix.java`` precedent for a JVM tool that is
 *not* the warm worker (``JUnitTestAction``'s run step): kotlinc's ``-classpath``
 takes a single ``File.pathSeparator``-joined token, so the resolved jar paths
 are joined into one value for the command line, while the same jars are
-declared as ABI-lensed fingerprint inputs so a dependency's API change
-recompiles the module and an implementation-only change does not.
+declared as byte-lensed fingerprint inputs so any change to a dependency
+recompiles the module.
 
-The ABI lens is applied to the *compile classpath* (external dependencies),
-never to this module's own outputs: a Kotlin ``inline fun`` copies its body
-into cross-module call sites, so the "body is not part of the interface"
-assumption behind ``jvm-abi`` is unsound for a Kotlin module *consumed* by
-another. Single-module builds have no such consumer; multi-module Kotlin needs
-a soundness-checked Kotlin ABI lens before any downstream skipping (tracked as
-future work — see docs/roadmap.md).
+The classpath is byte-lensed, **not** ABI-lensed the way ``java.JarAction`` is:
+a Kotlin ``inline fun`` (and ``const val``, reified type parameters) copies its
+body into consumers' bytecode at compile time, so the "body is not part of the
+interface" assumption behind ``jvm-abi`` is unsound for a *consumed* Kotlin
+module — ABI-lensing it would let brix skip recompiling after an inline-body
+change that actually altered the dependent's output. Byte tracking is the
+sound, conservative choice (it recompiles on any dependency change, gaining no
+cross-module skip); a soundness-checked Kotlin ABI lens that treats inline
+bodies as interface is future work (see docs/roadmap.md). External fixed jars
+never change mid-build, so byte-tracking them is free.
 """
 
 from __future__ import annotations
@@ -42,8 +45,8 @@ from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
 from .java import (
     _as_classpath_list,
     _classpath_paths,
-    _classpath_union,
     _options_expr,
+    _runtime_union,
 )
 
 if TYPE_CHECKING:
@@ -103,12 +106,22 @@ class JarAction(Action):
         }
         if self.classpath:
             # kotlinc wants one pathsep-joined -classpath token, so the resolved
-            # jar paths are baked into a value; the same jars ride along as an
-            # ABI-lensed fingerprint input (unreferenced by the template but
+            # jar paths are baked into a value; the same jars ride along as a
+            # byte-lensed fingerprint input (unreferenced by the template but
             # still hashed and dependency-inferred, like JUnitTestAction's run).
+            #
+            # Byte lens, NOT the jvm-abi lens java.JarAction uses: a Kotlin
+            # `inline fun` (and `const val`, reified type params) copies its body
+            # into this module's bytecode at compile time, so an ABI-lensed
+            # dependency would let brix skip recompiling after an inline-body
+            # change that DID alter our output — a stale-result bug. Byte
+            # tracking recompiles on any dependency change: sound, but no
+            # cross-module skip until a soundness-checked Kotlin ABI lens exists
+            # (docs/roadmap.md). External fixed jars don't change mid-build, so
+            # byte-tracking them costs nothing.
             joined = os.pathsep.join(_classpath_paths(self.classpath))
             inputs["classpath"] = ValueData(joined)
-            inputs["classpath_track"] = _classpath_union(self.classpath)
+            inputs["classpath_track"] = _runtime_union(self.classpath)
             parts.append("-classpath {classpath}")
         if self.spring_allopen is not None:
             # -Xplugin=<jar> glues the path onto the flag (one token); the preset

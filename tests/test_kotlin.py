@@ -42,7 +42,7 @@ def test_whole_module_output_is_recursive_class_glob():
     assert classes.pattern.template == "build/kclasses/{name}.class"
 
 
-def test_classpath_is_joined_value_plus_abi_fingerprint_input():
+def test_classpath_is_joined_value_plus_byte_fingerprint_input():
     compile_k, _ = _lower(
         classpath=[FileData("/d/spring.jar"), FileData("/d/kotlin-stdlib.jar")],
     )
@@ -50,10 +50,13 @@ def test_classpath_is_joined_value_plus_abi_fingerprint_input():
     assert "-classpath {classpath}" in compile_k.command_line
     joined = compile_k.inputs["classpath"].text
     assert joined == os.pathsep.join(["/d/spring.jar", "/d/kotlin-stdlib.jar"])
-    # ...and the same jars tracked through the jvm-abi lens (compilation cares
-    # about API, not implementation), not referenced by the template.
+    # ...and the same jars tracked by BYTES (no content_key), not referenced by
+    # the template. Deliberately not the jvm-abi lens java.JarAction uses: a
+    # Kotlin inline fun copies its body into consumers, so ABI-lensing a
+    # dependency would skip recompiling a dependent whose output actually
+    # changed. See test_kotlin_multimodule.py for the end-to-end proof.
     track = compile_k.inputs["classpath_track"]
-    assert {a.content_key for a in track.atoms()} == {"jvm-abi"}
+    assert all(getattr(a, "content_key", None) is None for a in track.atoms())
     assert "{classpath_track}" not in compile_k.command_line
 
 
