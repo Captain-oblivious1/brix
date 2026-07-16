@@ -1,5 +1,25 @@
 # Development log
 
+- **Kotlin single-module builds (`brix.kotlin`)** — `kotlin.JarAction` compiles
+  a whole Kotlin module with kotlinc and jars it, mirroring `java.JarAction`.
+  kotlinc's `-classpath` takes one pathsep-joined token, so the resolved jars
+  are baked into a value while the same jars ride as an ABI-lensed fingerprint
+  input (unreferenced by the template but hashed and dependency-inferred, like
+  `JUnitTestAction`'s run step). `spring_allopen=` reproduces Gradle's
+  `kotlin("plugin.spring")` by wiring the all-open compiler plugin with its
+  `spring` preset — a correctness feature, since Kotlin classes are `final` by
+  default and Spring cannot subclass-proxy them otherwise (it compiles clean,
+  then fails to boot). Proven on the new `spring-petclinic-kotlin` dogfood:
+  `java.gradle(...)` adopts the KTS build's `compileClasspath`; brix compiles
+  the 24 sources with all-open (non-`final` `CacheConfig` confirmed in the
+  bytecode, vs `final` without the plugin); a no-op rebuild does nothing and a
+  source edit recompiles the whole module while the content-aware jar step skips
+  re-jarring on byte-identical output; and the module boots a full Spring
+  context (Tomcat, JPA/Hibernate on H2, Spring Data) against the runtime
+  classpath. This module's own outputs are byte-lensed, not `jvm-abi`-lensed:
+  a Kotlin `inline fun` copies its body into cross-module call sites, so the
+  lens is unsound for a *consumed* Kotlin module — multi-module Kotlin ABI
+  skipping is deferred until a soundness-checked lens exists (see roadmap).
 - **Multi-module Jackson selection on real production sources** — the Jackson
   dogfood now compiles all three 2.19.4 core modules: 46 annotations sources,
   135 core sources, and 480 databind sources. Three focused JUnit suites expose

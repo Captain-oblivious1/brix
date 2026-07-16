@@ -121,10 +121,23 @@ jars by their complete bytes, rather than their ABI. The self-contained
 `examples/annotation_processing/` dogfood and a JDK integration test prove that
 an implementation-only processor change recompiles and regenerates the app.
 
-Deferred (need features + dependency resolution — better with the real
-monorepo): **Kotlin modules** — the team plans to adopt Kotlin, and it reuses
-the JVM lane (the `jvm-abi` lens and the warm worker), so it is high-reuse when
-scheduled. (Spring Boot fat-jars: **done** — see spring-petclinic above.)
+**Kotlin modules — single-module: done.** `brix.kotlin.JarAction` compiles a
+whole Kotlin module with kotlinc, adopts a Gradle KTS build's classpath through
+`java.gradle(...)`, and reproduces Gradle's `kotlin("plugin.spring")` via
+`spring_allopen=` — a correctness feature, since Kotlin classes are `final` by
+default and Spring cannot proxy them otherwise. Proven on the
+`spring-petclinic-kotlin` dogfood: it compiles the real module (non-`final`
+beans confirmed in the bytecode), rebuilds incrementally with content-aware jar
+skipping, and boots a full Spring context against the runtime classpath.
+
+Still deferred (needs the real monorepo to pin semantics): **multi-module
+Kotlin ABI skipping.** The `jvm-abi` lens is *unsound* for a consumed Kotlin
+module because an `inline fun` copies its body into cross-module call sites, so
+a Kotlin ABI lens must account for inline (and `const`, `@JvmStatic`, reified)
+before any downstream skip — this is Fable-territory (an equivalence oracle
+covering the inline case is the gate). Until then Kotlin outputs are byte-lensed
+(correct, just no cross-module skip). Warm-worker reuse for kotlinc is a
+separate optimization. (Spring Boot fat-jars: **done** — see spring-petclinic.)
 
 ### Opus queue — ready to do now
 

@@ -17,7 +17,7 @@ from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 from .status import ActionStatus, StatusReport, compute_status
 from .workers import WorkerSpec
-from . import cli, cpp, identity, java, springboot, ts
+from . import cli, cpp, identity, java, kotlin, springboot, ts
 
 __all__ = [
     "ActionStatus",
@@ -51,6 +51,7 @@ __all__ = [
     "cpp",
     "identity",
     "java",
+    "kotlin",
     "springboot",
     "ts",
 ]

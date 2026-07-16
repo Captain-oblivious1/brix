@@ -35,6 +35,7 @@ EXPECTED = {
     "cpp",
     "identity",
     "java",
+    "kotlin",
     "springboot",
     "ts",
 }

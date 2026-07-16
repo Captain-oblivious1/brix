@@ -72,8 +72,8 @@ usual development commands.
 The Python authoring API is feature-complete for the currently supported use
 cases, and the Rust core is the default engine. The two implementations are
 cross-checked with shared golden fixtures, while real-project examples exercise
-Java, C, C++, TypeScript, Spring Boot, dependency resolution, warm workers, and
-the build layers.
+Java, Kotlin, C, C++, TypeScript, Spring Boot, dependency resolution, warm
+workers, and the build layers.
 
 The remaining work is mainly Rust-engine soak and cleanup, more real-project
 dogfooding, usability improvements, and the future TypeScript authoring API.
