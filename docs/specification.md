@@ -72,6 +72,19 @@ them:
     a language (Kotlin `inline`, C++ templates) is a correctness bug, not a
     missed optimization, so each ships an oracle covering that language's
     cross-module-inlining case.
+14. **Every output path has exactly one owner.** Planning rejects a graph in
+    which two actions' declared output sets can name the same path, because
+    parallel execution would otherwise make the final contents depend on which
+    writer finished last. The check runs after target selection (so make-style
+    shortest-stem narrowing still applies), uses the same conservative pattern
+    relation and same-collection binding refinement as dependency inference,
+    and treats exact regex-pattern duplicates as a conflict (general regex
+    intersection is not guessed). It is enforced identically in the Python
+    reference planner and the Rust core, and the diagnostic names both actions
+    and the overlapping expression. The fix is to give each output a single
+    owner — e.g. when two compilers feed one module (Java + Kotlin), give each
+    its own classes directory and merge at the jar step rather than writing a
+    shared output tree.
 
 ---
 

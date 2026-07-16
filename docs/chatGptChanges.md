@@ -1,27 +1,33 @@
 # ChatGPT changes to Brix
 
-This document summarizes the work completed on the `chatGPT` branch from
-July 10 through July 14, 2026. It groups the changes by outcome rather than by
-the order in which individual files were edited. The commit ledger at the end
-provides the exact history.
+This document summarizes the work done on the `chatGPT` branch. The branch was
+created off `master` at commit `9f1efbb` ("P0 uniformity guard") and adds the
+commits listed in the ledger at the end (July 13–15, 2026). It groups the
+changes by outcome rather than by edit order.
+
+## Scope and attribution
+
+Everything below is what **this branch added on top of that `9f1efbb` base**.
+The base already contained a large amount of prior work — `content_key`
+comparison traits, `DepSet` with the `java.pom` / `java.maven` / `java.gradle`
+and `cpp.pkg_config` resolvers, Spring Boot executable jars, `brix.ts` and the
+`ts-dts` lens, glob subtraction, the capability-sufficiency audit, the atomic
+tool-self-resolution guard, and the scaling benchmark. That work is *not* part
+of this branch and is not claimed here; it is the context the evaluation was
+written against (see "The base this branch reviewed" below).
 
 ## Evaluation and priorities
 
-I reviewed Brix as a new implementation and wrote the findings in
-`codexEvaluation.md`, later rewriting the evaluation in plainer English. The
-review found that Brix already had a strong technical base: careful incremental
-correctness, semantic Java and TypeScript change detection, a Rust execution
-engine checked against a Python reference, and unusually good real-project
-dogfooding.
+I reviewed the existing Brix base as a fresh implementation and wrote the
+findings in `docs/codexEvaluation.md`, later rewriting the evaluation in plainer
+English. The review found that Brix already had a strong technical base: careful
+incremental correctness, semantic Java and TypeScript change detection, a Rust
+execution engine checked against a Python reference, and unusually good
+real-project dogfooding.
 
 The main recommendations were to make output ownership unambiguous, support
 ordering-only graph edges, simplify the documentation, narrow the public API,
-improve installation, continue real-project testing, and keep soaking the Rust
-engine before deleting the Python implementation.
-
-I also performed a capability-sufficiency audit. That audit separated missing
-features from cases already expressible through action composition and recorded
-larger designs that should remain parked until a real project justifies them.
+and improve installation — the items this branch then implemented.
 
 ## Graph correctness and ordering
 
@@ -33,7 +39,8 @@ and overlapping expressions involved. Tests cover concrete files, globs,
 regular expressions, expanded actions, false positives, and Python/Rust parity.
 
 This closes a correctness hole where the final output could otherwise depend on
-which action happened to finish last.
+which action happened to finish last. The rule is now recorded as design rule
+14 in `docs/specification.md`.
 
 ### Explicit ordering edges
 
@@ -73,16 +80,7 @@ The former very large README was divided by purpose:
 - `docs/packaging.md` explains installation and release artifacts.
 
 No historical material was discarded; it was moved to a more appropriate home.
-I also kept related design documents and example READMEs in sync as features
-landed.
-
-### Live-help design, not yet implemented
-
-I wrote down the intended behavior for a future `brix.py help` command. It
-should show the active builder stack, aliases, custom commands and their
-docstrings, metadata/cache/staging paths, and whether atomic staging operations
-apply. This remains roadmap work; the documentation commit did not implement
-the command.
+I also kept related design documents and example READMEs in sync.
 
 ## Installation and packaging
 
@@ -108,27 +106,6 @@ installation and a wheel rebuilt from the source distribution were also
 verified.
 
 ## Java build improvements
-
-### Spring Boot executable jars
-
-I added `brix.springboot.SpringBootJar` and a dependency-free Java
-`BootRepackager` helper. The Spring Petclinic dogfood now compiles its real
-sources, packages resources, produces an executable Spring Boot fat jar, and
-boots with `java -jar`.
-
-### Maven and Gradle dependency adoption
-
-I introduced `DepSet` and Java dependency helpers that let Brix drive an
-existing resolver while continuing to own compilation and incrementality:
-
-- `java.pom(...)` adopts dependencies declared in a Maven POM.
-- `java.maven(...)` resolves coordinates declared in a Brix build file.
-- `java.gradle(...)` adopts a Gradle configuration through an injected init
-  script without editing the project.
-
-Resolution is cached from the relevant build-file content, and resolved jars
-become normal tracked Brix inputs. Maven and Gradle remain explicitly named
-because their conflict-resolution rules differ.
 
 ### Annotation processors
 
@@ -168,72 +145,27 @@ method change in `JsonFactory` and verifies the exact selection result:
 This required no engine change. It confirmed that ABI-based compile inputs and
 byte-based runtime inputs already compose correctly across modules.
 
-## TypeScript support
+## The base this branch reviewed
 
-I added the typed `brix.ts` helper with `ts.CompileAction`, along with a
-two-module TypeScript example. Cross-module declaration inputs use the existing
-`ts-dts` content lens, so an implementation-only library edit can regenerate a
-byte-identical declaration and let dependent modules replay, while a public
-type change recompiles them.
+For context, these capabilities were **already present on `master`** when the
+branch was created and are not this branch's work. They are listed only so the
+evaluation and priorities above make sense:
 
-Tests cover lowering and incremental-versus-clean equivalence. Automatic
-discovery of a module's internal import graph remains future work.
+- the `content_key` comparison traits and lens roster;
+- `DepSet` and the `java.pom` / `java.maven` / `java.gradle` resolvers;
+- `cpp.pkg_config` and glob subtraction (`-`), with the Silver Searcher and
+  LevelDB dogfoods;
+- Spring Boot executable jars (`brix.springboot.SpringBootJar`) and the
+  Petclinic dogfood;
+- `brix.ts` / `ts.CompileAction` and the `ts-dts` lens;
+- the incremental-equivalence oracles (exhaustive, ABI, and depfile);
+- the capability-sufficiency audit and the atomic tool-self-resolution guard;
+- the scaling benchmark and its corrected (release-build) conclusions;
+- the parked designs (filesystem watcher, staged-overlay visibility) and the
+  future `brix.py help` specification.
 
-## C and C++ support
-
-I generalized `DepSet` beyond Java and added `cpp.pkg_config(...)`. It asks
-`pkg-config` for compiler flags, linker flags, and library files, then exposes
-those as tracked Brix inputs instead of opaque command-line text.
-
-The feature was dogfooded by building the real Silver Searcher project: 12 C
-translation units with PCRE, zlib, and lzma system dependencies, producing a
-working `ag` executable.
-
-I also added glob subtraction with the `-` operator in both engines. The LevelDB
-dogfood uses it to glob the real source tree while excluding platform-specific
-files instead of staging a curated source copy.
-
-## Content identities and correctness testing
-
-I completed the shift from the older `identity=` terminology to `content_key`,
-with comparison behavior owned by Rust content-key traits. Built-in content
-lenses now declare themselves through one roster instead of duplicated Python
-and Rust lists.
-
-I added incremental-equivalence oracles that compare incremental results with a
-clean rebuild. The coverage was strengthened from random sampling to bounded,
-exhaustive edit combinations and extended to:
-
-- ordinary byte-based inputs;
-- Java ABI-lensed dependencies;
-- compiler-discovered C/C++ header dependencies.
-
-These tests are specifically designed to catch the most dangerous build-system
-failure: incorrectly declaring a stale result fresh.
-
-## Atomic-build safety
-
-I added a guard for tools that resolve their own dependencies from paths while
-an atomic build is using a staged overlay. Such a tool can accidentally read an
-old workspace file instead of a newly staged producer output. Brix now refuses
-that unsafe combination unless the action explicitly supports overlay-aware
-resolution.
-
-The broader solution—giving foreign resolvers a staged filesystem view—was
-documented as a parked design and connected to the future sandboxing work. It
-was not partially implemented.
-
-## Performance investigation
-
-I added a scaling benchmark and measured graph/build overhead. The first
-results were misleading because they used a debug Rust extension, so I reran
-the measurements with a release build and corrected the documentation.
-
-The corrected result is that cold no-op cost grows roughly linearly and is
-noticeable but not yet urgent. A resident graph plus filesystem watcher could
-eventually make no-op builds proportional to changed files, but this was
-documented as parked correctness-sensitive work rather than rushed into the
-engine.
+This branch made only minor follow-on doc edits to a few of these (e.g.
+`docs/capability-audit.md`) while landing the changes above.
 
 ## Validation performed
 
@@ -251,17 +183,23 @@ The changes were validated proportionally to their scope, including:
 
 ## Remaining high-priority work
 
-The principal next usability item is the live `brix.py help` command described
-above. Other important remaining work includes documenting the reproducibility
-and cache-trust models, continuing real-project soak of the Rust engine, and
-delaying removal of the Python execution internals until that soak has been
-uneventful.
+The principal next usability item is the live `brix.py help` command specified
+in the roadmap. Other important remaining work includes documenting the
+reproducibility and cache-trust models, continuing real-project soak of the Rust
+engine, and delaying removal of the Python execution internals until that soak
+has been uneventful.
 
-Larger ideas—sandboxing/staged-overlay views, a resident filesystem watcher,
-remote execution, and a TypeScript authoring binding—remain intentionally
+Larger ideas — sandboxing/staged-overlay views, a resident filesystem watcher,
+remote execution, and a TypeScript authoring binding — remain intentionally
 parked or scheduled after the current API and engine have settled.
 
 ## Commit ledger
+
+These are the commits this branch adds on top of the `9f1efbb` base.
+
+### July 15
+
+- `4ce40f0` — Add `docs/chatGptChanges.md`.
 
 ### July 14
 
@@ -276,38 +214,3 @@ parked or scheduled after the current API and engine have settled.
 - `fd8be18` — Type force-order triggers.
 - `4862a14` — Add explicit graph ordering.
 - `08e8090` — Reject conflicting output ownership and add the evaluation.
-
-### July 12
-
-- `9f1efbb` — Refuse unsafe tool-self-resolved staged dependencies under atomic
-  builds.
-- `8d468b9` — Add the capability-sufficiency audit.
-- `595f6af` — Remove the obsolete global `brix` wrapper roadmap item.
-- `d30b508` — Specify live `brix.py help` behavior in the roadmap.
-- `0d77a71` — Record the staged-overlay visibility design for foreign resolvers.
-- `40e9e3a` — Add `brix.ts`, `ts.CompileAction`, and TypeScript dogfood.
-- `4c6862b` — Add Gradle dependency adoption.
-
-### July 11
-
-- `fb3d723` — Record the parked filesystem-watcher design.
-- `4494baf` — Dogfood `cpp.pkg_config` on the Silver Searcher.
-- `92842b3` — Add C/C++ dependency resolution through `pkg-config`.
-- `53ca038` — Add `DepSet`, `java.pom`, and `java.maven`.
-- `a7a3b06` — Correct scaling conclusions after identifying a debug-build
-  measurement error.
-- `afdf7a8` — Add the scaling benchmark.
-- `c63055d` — Expand incremental-equivalence coverage to exhaustive, ABI, and
-  depfile cases.
-- `2125f17` — Add the original incremental-versus-clean oracle.
-- `708a0d9` — Build the content-key registry from a lens-owned roster.
-- `534d3f2` — Remove duplicated built-in content-lens registration.
-- `8b7ce7a` — Add Spring Boot executable-jar support and Petclinic dogfood.
-
-### July 10
-
-- `25bed2e` — Correct the documented `ts-dts`/`content_key` status.
-- `4f0e7f1` — Update documentation to state that Rust is the default engine.
-- `634c115` — Replace `identity=` with the Rust `content_key` trait surface.
-- `b63d651` — Use real-tree globbing and exclusions in the LevelDB dogfood.
-- `e1f18b8` — Add glob subtraction in both engines.
