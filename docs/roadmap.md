@@ -264,6 +264,22 @@ careful model:
   Fable to review.
 - **Pending:** Duane will hand over a real C++ project to set up a build file for.
   Header dependency tracking is already built and ready for it.
+- **Declare v1 of the Python API (discussion — decide, may do nothing yet).**
+  Duane wants to eventually stamp the authoring API as stable. Open question was
+  whether to version the *import path* (`brix.cpp.v1`, later `brix.cpp.v2`).
+  Recommendation on the table (not yet decided): **don't** put the version in the
+  path. Two versions of the authoring API can't meaningfully coexist in one
+  process anyway (one process links one core + one Rust engine), so an in-path
+  version buys no real parallelism while forcing `.v1` into every build file's
+  imports — the exact churn a migration should avoid. Per-language versioning is
+  worst (all helpers share one core, so a pinned `cpp.v1` on a v2 core is
+  incoherent). Instead: cut `1.0.0` (semver on the distribution), freeze the
+  top-level contract (already pinned by `tests/test_public_api.py`), document a
+  stability policy in `docs/python-api.md`, and handle breaks with a
+  `DeprecationWarning` cycle → major bump. Keep explicit versioning where it
+  belongs: the Python↔Rust wire spec (`SPEC_VERSION`, already there). The 50-service
+  incremental migration is served by deprecation shims + per-env version pinning,
+  not parallel import trees. Decision is Duane's; capture-only for now.
 
 **Lower-priority ideas** (from the original spec): loading only part of a huge
 project's build at a time (only needed at hundreds of services), fancier change
