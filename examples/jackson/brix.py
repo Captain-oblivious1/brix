@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-"""Build and test jackson-core with brix — the selective-testing dogfood.
+"""Build three real Jackson modules and run one selective smoke suite per module.
 
-Exercises the whole Java story on a famous real project:
-  - a generated source (PackageVersion.java from a template) feeding the compile
-  - resources packaged into the jar (META-INF/services)
-  - JUnit 5 + AssertJ tests, run so a suite re-runs only when its inputs change
-
-    examples/jackson/fetch-deps.sh                 # test-framework jars (once)
-    python examples/jackson/brix.py build          # jar + compile + run tests
-    python examples/jackson/brix.py status
-
-Edit a main source and rebuild: jackson-core recompiles and the suite re-runs
-(the run classpath depends on the jar's bytes). Edit only a test and rebuild:
-the main jar replays, only the tests recompile and re-run.
-
-Checkout defaults to ~/Projects/brix_test/jackson-core (BRIX_JACKSON_ROOT).
+The graph is ``annotations -> databind <- core``. Compile edges use the
+``jvm-abi`` lens; test-run edges use complete jar bytes. Consequently, a core
+implementation change rebuilds core and reruns the core + databind suites, but
+does not recompile databind or touch the annotations suite.
 """
 
 import os
@@ -25,23 +15,48 @@ HERE = Path(__file__).resolve().parent
 sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
-from brix import Graph, cli, java  # noqa: E402
+from brix import CacheBuilder, Graph, IncrementalBuilder, cli, java  # noqa: E402
 from brix.actions import ExternalProcessAction  # noqa: E402
-from brix.data import FileData, ToolData  # noqa: E402
+from brix.data import FileData  # noqa: E402
 
-ROOT = Path(
-    os.environ.get("BRIX_JACKSON_ROOT", os.path.expanduser("~/Projects/brix_test/jackson-core"))
+_configured_root = Path(
+    os.environ.get("BRIX_JACKSON_ROOT", os.path.expanduser("~/Projects/brix_test"))
 ).resolve()
+# Preserve the old override, which pointed directly at jackson-core.
+ROOT = _configured_root.parent if _configured_root.name == "jackson-core" else _configured_root
 
+CORE = "jackson-core"
+ANNOTATIONS = "jackson-annotations"
+DATABIND = "jackson-databind"
 VERSION = "2.19.4"
-CONSOLE = "lib/junit-platform-console-standalone-1.11.4.jar"
-# jackson-core's one compile dep (shaded into the distributed jar, but a
-# plain classpath entry for us): the fast double parser it calls into.
-FASTDOUBLE = "lib/fastdoubleparser-2.0.1.jar"
-TEST_DEPS = ["lib/assertj-core-3.27.3.jar", "lib/byte-buddy-1.15.11.jar"]
+LIB = f"{CORE}/lib"
+CONSOLE = f"{LIB}/junit-platform-console-standalone-1.11.4.jar"
+FASTDOUBLE = f"{LIB}/fastdoubleparser-2.0.1.jar"
 GEN_VERSION = str(HERE / "gen_version.py")
-PKG_TEMPLATE = "src/main/java/com/fasterxml/jackson/core/json/PackageVersion.java.in"
-PKG_OUTPUT = "build/generated/com/fasterxml/jackson/core/json/PackageVersion.java"
+
+
+def _generated_version(
+    graph: Graph, *, module: str, package: str, artifact: str, output: str
+) -> None:
+    d = graph.data
+    template = f"{module}/src/main/java/{package.replace('.', '/')}/PackageVersion.java.in"
+    graph.add(
+        ExternalProcessAction(
+            name=f"generate {artifact} PackageVersion",
+            command_line=(
+                "{python} {gen} {template} {out}"
+                f" package={package} projectversion={VERSION}"
+                " projectgroupid=com.fasterxml.jackson.core"
+                f" projectartifactid={artifact}"
+            ),
+            inputs={
+                "python": d.tool(sys.executable),
+                "gen": FileData(GEN_VERSION),
+                "template": d.file(template),
+            },
+            outputs={"out": d.file(output)},
+        )
+    )
 
 
 def create_graph() -> Graph:
@@ -49,80 +64,111 @@ def create_graph() -> Graph:
     d = graph.data
     worker = java.javac_worker(graph)
 
-    # 1. Generate PackageVersion.java from the template (the maven-replacer
-    #    step in jackson's pom). Its output feeds the compile below.
+    annotations_jar = "build/libs/jackson-annotations.jar"
+    core_jar = "build/libs/jackson-core.jar"
+    databind_jar = "build/libs/jackson-databind.jar"
+
     graph.add(
-        ExternalProcessAction(
-            name="generate PackageVersion",
-            command_line=(
-                "{python} {gen} {template} {out}"
-                " package=com.fasterxml.jackson.core.json"
-                f" projectversion={VERSION}"
-                " projectgroupid=com.fasterxml.jackson.core"
-                " projectartifactid=jackson-core"
-            ),
-            inputs={
-                "python": d.tool(sys.executable),
-                "gen": FileData(GEN_VERSION),
-                "template": d.file(PKG_TEMPLATE),
-            },
-            outputs={"out": d.file(PKG_OUTPUT)},
+        java.JarAction(
+            source_files=d.glob(f"{ANNOTATIONS}/src/main/java/{{name}}.java"),
+            output_file=d.file(annotations_jar),
+            classes_dir="build/classes/annotations",
+            resource_dir=f"{ANNOTATIONS}/src/main/resources",
+            javac_worker=worker,
+            options=["--release", "17", "-encoding", "UTF-8"],
         )
     )
 
-    # 2. Compile main sources + the generated one into jackson-core.jar,
-    #    packaging src/main/resources (META-INF/services registrations).
+    core_generated = "build/generated/core/com/fasterxml/jackson/core/json/PackageVersion.java"
+    _generated_version(
+        graph,
+        module=CORE,
+        package="com.fasterxml.jackson.core.json",
+        artifact="jackson-core",
+        output=core_generated,
+    )
     graph.add(
         java.JarAction(
             source_files=(
-                d.glob("src/main/java/{name}.java") + d.glob("build/generated/{name}.java")
+                d.glob(f"{CORE}/src/main/java/{{name}}.java") + d.file(core_generated)
             ),
-            output_file=d.file("build/libs/jackson-core.jar"),
-            classes_dir="build/classes",
-            resource_dir="src/main/resources",
-            classpath=[d.file(FASTDOUBLE)],  # the one compile dep
+            output_file=d.file(core_jar),
+            classes_dir="build/classes/core",
+            resource_dir=f"{CORE}/src/main/resources",
+            classpath=[d.file(FASTDOUBLE)],
             javac_worker=worker,
             options=["--release", "17", "-encoding", "UTF-8"],
         )
     )
 
-    # 3. Compile + run the JUnit 5 suite. classpath = jackson-core.jar + the
-    #    test deps (AssertJ); the console jar supplies Jupiter. Two lenses:
-    #    jvm-abi to compile the tests, bytes to run them.
+    databind_generated = (
+        "build/generated/databind/com/fasterxml/jackson/databind/cfg/PackageVersion.java"
+    )
+    _generated_version(
+        graph,
+        module=DATABIND,
+        package="com.fasterxml.jackson.databind.cfg",
+        artifact="jackson-databind",
+        output=databind_generated,
+    )
     graph.add(
-        java.JUnitTestAction(
-            name="jackson-core tests",
-            test_sources=d.glob("src/test/java/{name}.java"),
-            classpath=(
-                [d.file("build/libs/jackson-core.jar"), d.file(FASTDOUBLE)]
-                + [d.file(j) for j in TEST_DEPS]
+        java.JarAction(
+            source_files=(
+                d.glob(f"{DATABIND}/src/main/java/{{name}}.java")
+                + d.file(databind_generated)
             ),
-            console_jar=CONSOLE,
-            test_resource_dirs=["src/test/resources"],
+            output_file=d.file(databind_jar),
+            classes_dir="build/classes/databind",
+            resource_dir=f"{DATABIND}/src/main/resources",
+            classpath=[d.file(annotations_jar), d.file(core_jar)],
             javac_worker=worker,
             options=["--release", "17", "-encoding", "UTF-8"],
         )
     )
+
+    suites = (
+        ("annotations", "AnnotationsSmokeTest.java", [annotations_jar]),
+        ("core", "CoreSmokeTest.java", [core_jar, FASTDOUBLE]),
+        (
+            "databind",
+            "DatabindSmokeTest.java",
+            [databind_jar, core_jar, annotations_jar, FASTDOUBLE],
+        ),
+    )
+    for name, source, classpath in suites:
+        graph.add(
+            java.JUnitTestAction(
+                name=f"{name} smoke tests",
+                test_sources=d.file(str(HERE / "smoke" / name / source)),
+                classpath=[d.file(path) for path in classpath],
+                console_jar=CONSOLE,
+                test_classes_dir=f"build/test-classes/{name}",
+                javac_worker=worker,
+                options=["--release", "17", "-encoding", "UTF-8"],
+            )
+        )
     return graph
 
 
+def builder():
+    # The JUnit runner reads real jar paths, so outputs are written in place.
+    return CacheBuilder(
+        IncrementalBuilder(create_graph, root=ROOT, metadata_dir="build/.brix"),
+        cache_dir="build/.brix-cache",
+    )
+
+
 if __name__ == "__main__":
-    from brix import CacheBuilder, IncrementalBuilder
-
-    def builder():
-        # No atomic layer: the test runner reads the built jar by its real
-        # path, so outputs go straight to the workspace.
-        return CacheBuilder(
-            IncrementalBuilder(create_graph, root=ROOT, metadata_dir="build/.brix"),
-            cache_dir="build/.brix-cache",
-        )
-
     sys.exit(
         cli.main(
             create_graph,
             root=ROOT,
             metadata_dir="build/.brix",
             builder_factory=builder,
-            aliases={"jar": "build/libs/jackson-core.jar"},
+            aliases={
+                "annotations": "build/libs/jackson-annotations.jar",
+                "core": "build/libs/jackson-core.jar",
+                "databind": "build/libs/jackson-databind.jar",
+            },
         )
     )

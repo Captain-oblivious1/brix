@@ -58,5 +58,6 @@ Rust engine by default, with the warm javac worker persisting between builds.
   has no bundled dependencies; `SpringBootJar` is what makes `java -jar` work.
 - **The executable jar boots slower than a flat classpath** (nested-jar loading
   has overhead). That is inherent to the Spring Boot jar format, not brix.
-- No annotation processors here (petclinic uses none). Lombok/`-processorpath`
-  is the next Java dogfood — see the repo README's dogfooding section.
+- No annotation processors are needed by petclinic. Brix's separate,
+  byte-fingerprinted `processorpath` is exercised by the self-contained
+  [`annotation_processing`](../annotation_processing/) example.

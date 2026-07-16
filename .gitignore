@@ -10,3 +10,5 @@ examples/incremental_demo/src/
 examples/typescript/*/dist/
 examples/typescript/node_modules/
 rust/target/
+src/brix/brix_py*.so
+src/brix/brix_py*.pyd

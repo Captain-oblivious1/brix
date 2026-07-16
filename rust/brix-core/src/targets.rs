@@ -9,6 +9,7 @@ use crate::actions::Action;
 use crate::data::DataAtom;
 use crate::patterns::overlaps;
 use crate::planner::atoms_overlap;
+use crate::spec::ForcedOrder;
 
 const PROBE: &str = "\u{0}target\u{0}";
 
@@ -58,7 +59,11 @@ fn extract_bindings(out_atom: &DataAtom, need_atom: &DataAtom) -> Option<Vec<(St
     }
 }
 
-pub fn select_actions(actions: &[Action], targets: &[String]) -> Result<Vec<Action>, String> {
+pub(crate) fn select_actions_with_origins(
+    actions: &[Action],
+    targets: &[String],
+    forced_orders: &[ForcedOrder],
+) -> Result<Vec<(usize, Action)>, String> {
     let mut queue: VecDeque<DataAtom> = targets
         .iter()
         .map(|t| DataAtom::File { path: t.clone(), content_key: None })
@@ -66,45 +71,78 @@ pub fn select_actions(actions: &[Action], targets: &[String]) -> Result<Vec<Acti
     let mut seen: HashSet<String> = queue.iter().map(|a| a.dedup_key()).collect();
     let mut selected: BTreeMap<(usize, Vec<(String, String)>), Action> = BTreeMap::new();
 
-    while let Some(need) = queue.pop_front() {
-        let mut candidates: Vec<(usize, Vec<(String, String)>)> = Vec::new();
-        for (index, action) in actions.iter().enumerate() {
-            for out_atom in action.output_atoms() {
-                if let Some(bindings) = extract_bindings(&out_atom, &need) {
-                    candidates.push((index, bindings));
+    loop {
+        while let Some(need) = queue.pop_front() {
+            let mut candidates: Vec<(usize, Vec<(String, String)>)> = Vec::new();
+            for (index, action) in actions.iter().enumerate() {
+                for out_atom in action.output_atoms() {
+                    if let Some(bindings) = extract_bindings(&out_atom, &need) {
+                        candidates.push((index, bindings));
+                    }
                 }
             }
-        }
-        if candidates.is_empty() {
-            continue; // a source file, not something an action produces
-        }
-        let best = candidates.iter().map(|(_, b)| specificity(b)).min().unwrap();
-        for (index, bindings) in &candidates {
-            if specificity(bindings) > best {
-                continue; // shortest stem wins
-            }
-            let mut sorted_bindings = bindings.clone();
-            sorted_bindings.sort();
-            let key = (*index, sorted_bindings);
-            if selected.contains_key(&key) {
+            if candidates.is_empty() {
                 continue;
             }
-            let mut constrained = actions[*index].clone();
-            if !bindings.is_empty() && constrained.is_expandable() {
-                constrained = constrained.substitute(bindings);
-            }
-            for atom in constrained.input_atoms() {
-                let k = atom.dedup_key();
-                if seen.insert(k) {
-                    queue.push_back(atom);
+            let best = candidates.iter().map(|(_, b)| specificity(b)).min().unwrap();
+            for (index, bindings) in &candidates {
+                if specificity(bindings) > best {
+                    continue;
                 }
+                let mut sorted_bindings = bindings.clone();
+                sorted_bindings.sort();
+                let key = (*index, sorted_bindings);
+                if selected.contains_key(&key) {
+                    continue;
+                }
+                let mut constrained = actions[*index].clone();
+                if !bindings.is_empty() && constrained.is_expandable() {
+                    constrained = constrained.substitute(bindings);
+                }
+                for atom in constrained.input_atoms() {
+                    let k = atom.dedup_key();
+                    if seen.insert(k) {
+                        queue.push_back(atom);
+                    }
+                }
+                selected.insert(key, constrained);
             }
-            selected.insert(key, constrained);
+        }
+
+        let origins: HashSet<usize> = selected.keys().map(|(index, _)| *index).collect();
+        let mut added = false;
+        for order in forced_orders {
+            if origins.contains(&order.after) && !origins.contains(&order.before) {
+                let action = actions
+                    .get(order.before)
+                    .ok_or_else(|| "forced order action index is out of range".to_string())?
+                    .clone();
+                for atom in action.input_atoms() {
+                    if seen.insert(atom.dedup_key()) {
+                        queue.push_back(atom);
+                    }
+                }
+                selected.insert((order.before, Vec::new()), action);
+                added = true;
+            }
+        }
+        if !added && queue.is_empty() {
+            break;
         }
     }
 
     if selected.is_empty() {
         return Err(format!("no action produces any of: {}", targets.join(", ")));
     }
-    Ok(selected.into_values().collect())
+    Ok(selected
+        .into_iter()
+        .map(|((origin, _), action)| (origin, action))
+        .collect())
+}
+
+pub fn select_actions(actions: &[Action], targets: &[String]) -> Result<Vec<Action>, String> {
+    Ok(select_actions_with_origins(actions, targets, &[])?
+        .into_iter()
+        .map(|(_, action)| action)
+        .collect())
 }

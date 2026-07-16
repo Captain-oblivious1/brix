@@ -4,7 +4,8 @@ import sys
 
 import pytest
 
-from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph, IncrementalBuilder, NodeKind
+from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph, IncrementalBuilder
+from brix.plan import NodeKind
 
 COPY_TOOL = (
     "import sys\n"
@@ -180,8 +181,6 @@ def test_env_is_passed_to_process(tmp_path):
 
 
 def test_env_change_refingerprints(tmp_path):
-    from brix import DataFactory  # noqa: F401  (factory via graph below)
-
     def graph_with_env(value: str):
         def supplier():
             graph = Graph()

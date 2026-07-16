@@ -3,17 +3,17 @@ wiring. The pruning property — impl/comment churn doesn't invalidate consumers
 an API change does — is the ABI multiplier for a Java+TS monorepo's cache."""
 
 from pathlib import Path
+import brix.tsdts as tsdts
 
 from brix import (
     ExternalProcessAction,
     Graph,
     NodeContext,
-    TimeAndHashChangeDetector,
     identity,
-    tsdts,
 )
 from brix.data import FileData
 from brix.incremental import action_fingerprint
+from brix.metadata import TimeAndHashChangeDetector
 
 
 class DtsFile(FileData):

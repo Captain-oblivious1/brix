@@ -11,6 +11,7 @@
 // since brix renders collections space-separated):
 //   --sources   <file>...     source files to compile
 //   --classpath <jar>...       joined with File.pathSeparator onto -classpath
+//   --processorpath <jar>...  joined with File.pathSeparator onto -processorpath
 //   --options   <opt>...       extra javac options, passed through
 //   -d          <dir>          output directory
 // Relative paths are resolved against the request's cwd, so the worker is
@@ -82,6 +83,7 @@ public class JavacWorker {
     static Result compile(List<String> tokens, String cwd) {
         List<String> sources = new ArrayList<>();
         List<String> classpath = new ArrayList<>();
+        List<String> processorpath = new ArrayList<>();
         List<String> options = new ArrayList<>();
         String outDir = null;
         String mode = "sources";
@@ -91,6 +93,8 @@ public class JavacWorker {
                 mode = "sources";
             } else if (t.equals("--classpath")) {
                 mode = "classpath";
+            } else if (t.equals("--processorpath")) {
+                mode = "processorpath";
             } else if (t.equals("--options")) {
                 mode = "options";
             } else if (t.equals("-d")) {
@@ -99,6 +103,8 @@ public class JavacWorker {
                 }
             } else if (mode.equals("classpath")) {
                 classpath.add(resolve(cwd, t));
+            } else if (mode.equals("processorpath")) {
+                processorpath.add(resolve(cwd, t));
             } else if (mode.equals("options")) {
                 options.add(t);
             } else {
@@ -114,6 +120,10 @@ public class JavacWorker {
         if (!classpath.isEmpty()) {
             javacArgs.add("-classpath");
             javacArgs.add(String.join(File.pathSeparator, classpath));
+        }
+        if (!processorpath.isEmpty()) {
+            javacArgs.add("-processorpath");
+            javacArgs.add(String.join(File.pathSeparator, processorpath));
         }
         if (outDir != null) {
             javacArgs.add("-d");

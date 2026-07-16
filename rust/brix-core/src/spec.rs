@@ -4,12 +4,23 @@
 use serde::Deserialize;
 
 use crate::actions::Action;
+use crate::plan::EdgeTrigger;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ForcedOrder {
+    pub before: usize,
+    pub after: usize,
+    #[serde(default)]
+    pub trigger: EdgeTrigger,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GraphSpec {
     #[serde(default)]
     pub version: i64,
     pub actions: Vec<Action>,
+    #[serde(default)]
+    pub forced_orders: Vec<ForcedOrder>,
 }
 
 /// Deserialize a graph spec from JSON.

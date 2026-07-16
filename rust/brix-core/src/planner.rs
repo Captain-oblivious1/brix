@@ -13,7 +13,8 @@ use crate::actions::Action;
 use crate::data::{DataAtom, DataExpr};
 use crate::patterns::overlaps_shared;
 use crate::plan::{ExecutionPlan, NodeKind};
-use crate::targets::select_actions;
+use crate::spec::ForcedOrder;
+use crate::targets::select_actions_with_origins;
 
 /// Decide whether a producer output atom and a consumer input atom can name
 /// the same path. Mirrors `_atoms_overlap`: two regex atoms never compare;
@@ -89,6 +90,46 @@ pub fn infer_dependency(producer: &Action, consumer: &Action) -> Option<String> 
     None
 }
 
+/// Reject actions whose declared output sets can name one path.  Allowing two
+/// owners would make parallel execution's result depend on which writer wins.
+/// Mirrors Python's `validate_output_ownership` including exact regex output
+/// equality (general regex intersection is deliberately not guessed).
+pub fn validate_output_ownership(actions: &[Action]) -> Result<(), String> {
+    for left_index in 0..actions.len() {
+        let left = &actions[left_index];
+        for right in &actions[left_index + 1..] {
+            let shared = shared_bindings(left, right);
+            for left_atom in left.output_atoms() {
+                for right_atom in right.output_atoms() {
+                    let exact_regex = matches!(
+                        (&left_atom, &right_atom),
+                        (
+                            DataAtom::Regex { pattern: left_pattern },
+                            DataAtom::Regex { pattern: right_pattern }
+                        ) if left_pattern == right_pattern
+                    );
+                    if exact_regex || atoms_overlap_shared(&left_atom, &right_atom, &shared) {
+                        let left_text = left_atom.text();
+                        let right_text = right_atom.text();
+                        let overlap = if left_text == right_text {
+                            left_text.to_string()
+                        } else {
+                            format!("{left_text} ~ {right_text}")
+                        };
+                        return Err(format!(
+                            "conflicting outputs: '{}' and '{}' may both write {}; every output path must have exactly one owner",
+                            left.label(),
+                            right.label(),
+                            overlap
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Lower actions (optionally narrowed to `targets`) into a plan with inferred
 /// dependency edges. `root` is stored but does not affect the structure.
 pub fn plan_graph(
@@ -96,10 +137,31 @@ pub fn plan_graph(
     root: &str,
     targets: Option<&[String]>,
 ) -> Result<ExecutionPlan, String> {
-    let actions = match targets {
-        Some(t) if !t.is_empty() => select_actions(&actions, t)?,
-        _ => actions,
+    plan_graph_with_orders(actions, &[], root, targets)
+}
+
+pub fn plan_graph_with_orders(
+    actions: Vec<Action>,
+    forced_orders: &[ForcedOrder],
+    root: &str,
+    targets: Option<&[String]>,
+) -> Result<ExecutionPlan, String> {
+    if forced_orders
+        .iter()
+        .any(|o| o.before >= actions.len() || o.after >= actions.len())
+    {
+        return Err("forced order action index is out of range".to_string());
+    }
+    if forced_orders.iter().any(|o| o.before == o.after) {
+        return Err("forced order requires two different actions".to_string());
+    }
+    let selected = match targets {
+        Some(t) if !t.is_empty() => select_actions_with_origins(&actions, t, forced_orders)?,
+        _ => actions.into_iter().enumerate().collect(),
     };
+    let origins: Vec<usize> = selected.iter().map(|(origin, _)| *origin).collect();
+    let actions: Vec<Action> = selected.into_iter().map(|(_, action)| action).collect();
+    validate_output_ownership(&actions)?;
     let mut plan = ExecutionPlan::new(root);
     for action in &actions {
         let kind = if matches!(action, Action::Expand { .. }) {
@@ -116,6 +178,23 @@ pub fn plan_graph(
             }
             if let Some(reason) = infer_dependency(&actions[pi], &actions[ci]) {
                 plan.add_edge(pi, ci, reason);
+            }
+        }
+    }
+    for order in forced_orders {
+        for (before_id, before_origin) in origins.iter().enumerate() {
+            if *before_origin != order.before {
+                continue;
+            }
+            for (after_id, after_origin) in origins.iter().enumerate() {
+                if *after_origin == order.after {
+                    plan.add_edge_triggered(
+                        before_id,
+                        after_id,
+                        "explicit ordering".to_string(),
+                        order.trigger,
+                    );
+                }
             }
         }
     }
@@ -161,8 +240,65 @@ mod tests {
     // *different* collections the {video}s are independent values, so the
     // conservative overlap (and the cycle it implies) must stay.
     #[test]
-    fn different_collections_keep_the_conservative_edge() {
-        let plan = plan_graph(combine_finalize("other/{video}.toml"), "/root", None).unwrap();
-        assert!(plan.edges.iter().any(|e| e.from_id == 1 && e.to_id == 0));
+    fn different_collections_keep_the_conservative_conflict() {
+        let error = plan_graph(combine_finalize("other/{video}.toml"), "/root", None).unwrap_err();
+        assert!(error.contains("conflicting outputs"));
+    }
+
+    #[test]
+    fn rejects_same_concrete_output() {
+        let actions: Vec<Action> = serde_json::from_str(
+            r#"[
+                {"kind":"process","name":"first","command_line":"write","outputs":{"out":[{"kind":"file","path":"build/result.txt"}]}},
+                {"kind":"process","name":"second","command_line":"write","outputs":{"out":[{"kind":"file","path":"build/result.txt"}]}}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            plan_graph(actions, "/root", None).unwrap_err(),
+            "conflicting outputs: 'first' and 'second' may both write build/result.txt; every output path must have exactly one owner"
+        );
+    }
+
+    #[test]
+    fn allows_non_overlapping_outputs() {
+        let actions: Vec<Action> = serde_json::from_str(
+            r#"[
+                {"kind":"process","name":"text","command_line":"write","outputs":{"out":[{"kind":"glob","template":"build/{name}.txt"}]}},
+                {"kind":"process","name":"objects","command_line":"write","outputs":{"out":[{"kind":"glob","template":"build/{name}.o"}]}}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(plan_graph(actions, "/root", None).unwrap().nodes.len(), 2);
+    }
+
+    #[test]
+    fn forced_order_adds_edge_and_pulls_predecessor_for_target() {
+        let spec = crate::spec::parse(
+            r#"{"version":1,"actions":[
+              {"kind":"process","name":"setup","command_line":"setup","outputs":{"out":[{"kind":"file","path":"setup.done"}]}},
+              {"kind":"process","name":"tests","command_line":"tests","outputs":{"out":[{"kind":"file","path":"tests.done"}]}},
+              {"kind":"process","name":"other","command_line":"other","outputs":{"out":[{"kind":"file","path":"other.done"}]}}
+            ],"forced_orders":[{"before":0,"after":1,"trigger":"on-completion"}]}"#,
+        ).unwrap();
+        let targets = vec!["tests.done".to_string()];
+        let plan = plan_graph_with_orders(
+            spec.actions,
+            &spec.forced_orders,
+            "/root",
+            Some(&targets),
+        )
+        .unwrap();
+        assert_eq!(
+            plan.nodes.iter().map(|n| n.label.as_str()).collect::<Vec<_>>(),
+            vec!["setup", "tests"]
+        );
+        let edge = plan
+            .edges
+            .iter()
+            .find(|e| e.reason == "explicit ordering")
+            .unwrap();
+        assert_eq!((edge.from_id, edge.to_id), (0, 1));
+        assert_eq!(edge.trigger, crate::plan::EdgeTrigger::OnCompletion);
     }
 }

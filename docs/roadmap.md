@@ -1,0 +1,387 @@
+# Roadmap
+
+**Priority:** the Rust engine is written and is the default, so the original
+"lock down behavior in Python before the rewrite" phase is essentially over.
+Remaining work is: finish the Rust track (phase 4c — delete the redundant Python
+engine internals, on hold for soak), keep proving brix on real projects
+(dogfooding), and the self-contained feature/correctness items below. New
+behavior still lands in Python first and is mirrored into the Rust core under the
+byte-identical-fingerprint rule.
+
+**Who does what.** Two AI models share the work. **Opus** is the everyday model:
+it handles self-contained jobs that come with tests and don't need deep judgment.
+**Fable** is the expensive, most-careful model, saved for the few pieces where a
+subtle mistake would break builds in ways ordinary tests might miss — mainly the
+scheduler (the part that decides what runs when) and the build server. Each item
+below is tagged with the model that should do it.
+
+### The three big tracks
+
+1. **Make Java builds fast** — design notes in `docs/java-fast-builds.md`. Mostly
+   done: brix already skips recompiling a Java library's users when only its
+   internals changed (not its public interface), and it keeps compiler processes
+   alive so they don't pay startup cost on every file. **The always-warm
+   build server landed** (see the [development log](development-log.md),
+   cross-build worker daemon): warm
+   compiler processes now survive *between* builds, adopted by the next
+   build through a per-worker holder daemon, with a single
+   `worker_idle_timeout` knob (default 15 min; 0 or `--no-daemon` turns it
+   off). **This track is done, and the "faster than Gradle" claim is
+   confirmed**: benchmarked against Gradle 8.14 on JUnit 5's seven platform
+   modules (`examples/junit5/benchmark.py`), brix wins the edit-compile loop
+   ~5–12× (no-op ~0.09s vs ~1.1s; impl-only change ~0.37s vs ~1.8s) and ties
+   a full API-change cascade (~1.3s vs ~1.6s). Remaining polish, if wanted:
+   class-level incremental compilation within a module is deliberately out of
+   scope (see the design doc).
+2. **Rewrite the engine in Rust** — design notes in `docs/rust-port.md` and
+   `docs/boundary-schema.md`. The goal: one shared engine that can power *both* a
+   Python and a JavaScript/TypeScript way of writing build files, so nobody has
+   to learn a new language. Most of the groundwork is done and proven to match
+   the Python behavior exactly (via tests that cross-check the two): the
+   change-detection math, the planning, the dependency inference, the
+   scheduler core (runs steps in parallel in the right order — clean builds
+   work end-to-end in pure Rust), incremental rebuilds (a Rust build skips
+   everything that hasn't changed, sharing the same metadata file Python
+   writes), the shared result cache (a fresh checkout builds instantly from
+   results any earlier build stored — Rust and Python can even share one
+   cache directory), atomic builds (all-or-nothing commits through
+   a staging area, including the held-for-review flow), the
+   Python↔Rust boundary itself (set `BRIX_ENGINE=rust` and every
+   builder's `build()` runs on the Rust engine — same graph, same
+   progress events, same results), persistent workers (the
+   warm-compiler transport that makes Java builds fast runs in Rust
+   too, so worker-routed builds cross the boundary), and now the
+   built-in content identities (`jvm-abi` and `ts-dts` produce
+   byte-identical digests in Rust, so Java/TS graphs cross the
+   boundary too — only a hand-registered custom identity plugin still
+   falls back to Python). **The Rust engine is now the default**:
+   `BRIX_ENGINE=py` forces the old engine, the animation project
+   builds/replays/cache-restores/targets correctly on both engines,
+   `status` and `clean` call the core (phase 4a), and custom cache
+   stores + custom identity plugins cross as extension-trait callbacks
+   (phase 4b) — nothing falls back to the Python engine anymore.
+   **What's left — phase 4c, ON HOLD for soak (Duane's call,
+   2026-07-09): delete the Python engine internals** after the
+   animation project has run on the Rust default for a real work
+   stretch (days, not hours). Agreed deletion boundary: delete the
+   execution half (`executor.py` scheduler, `process.py`/`render.py`,
+   `workers.py` transport, the incremental/cache/atomic `around_node`
+   machinery, `status.py`'s fallback walk); keep the reference math
+   (`patterns`/`planner`/`targets`, `incremental.py` fingerprints,
+   `metadata.py`, `jvmabi`/`tsdts`/`identity`) because
+   `rust/golden/generate.py` generates the byte-parity fixtures from it
+   and Python stays the reference implementation. Consequences to
+   accept at that point: `BRIX_ENGINE=py` becomes a clear error, and a
+   checkout without the compiled extension cannot build (development checkouts
+   use an editable Maturin install; releases now ship the extension and worker
+   launcher in a self-contained wheel). **[Fable]** — the trickiest part of the whole project; one
+   subtle ordering bug here breaks builds, so it needs the most careful
+   model reviewing it line by line.
+3. **A JavaScript/TypeScript way to write build files** — same features as the
+   Python one, just in their language (`docs/boundary-schema.md` pins the
+   mirror-API contract: same names, camelCase, async `build()`, plain-object
+   reporters — and the wire shapes the binding speaks). **UNBLOCKED** as of
+   the phase-4 flip: the shared Rust engine exists, is the default, and
+   carries build/status/clean plus the extension traits. The binding is
+   `rust/brix-py` transliterated (napi-rs or similar FFI prologue over the
+   same JSON boundary), and the TS API layer is mechanical against the
+   contract — Opus-sized with a Fable review of the FFI threading
+   (callbacks arrive on build worker threads).
+
+### Feature-completeness dogfooding (in progress — prove brix on real projects before starting track 3)
+
+Cloning real projects has been the best gap-finder (each one surfaced a real
+bug or missing feature). Clones live in `~/Projects/brix_test/`; our `brix.py`
+artifacts live in this repo under `examples/`. **Done:** JUnit 5 (Java compile
+graph; found the jvm-abi String-annotation bug; resources), fmt (C++ header-dep
+tracking), jackson-core (selective test running via `java.JUnitTestAction`;
+found generated-sources + shaded-dep needs), leveldb (static-library build
+of 38 TUs via `cpp.CompileSourceAction` + `cpp.ArchiveAction`, linked + run
+against a smoke program — see below), and **spring-petclinic** (a real Spring
+Boot app: 30 sources compiled against a ~90-jar Maven-resolved classpath through
+the warm worker, packaged, and — via the new `brix.springboot.SpringBootJar` —
+repackaged into an executable fat jar that boots with bare `java -jar`; see
+`examples/spring-petclinic/`). petclinic confirmed the design holds end to end
+with **no engine changes**: brix consumes Maven's dependency resolution and owns
+compile + package + incremental rebuild (a comment-only edit recompiles but does
+*not* re-jar, since the class bytes are unchanged). Newest: **the_silver_searcher**
+(`ag`) — a real C tool whose PCRE/zlib/lzma system-library deps resolve via
+`cpp.pkg_config`; brix compiles its 12 TUs (win32 one dropped with glob `-`) and
+links a working `ag 2.2.0` (`examples/the_silver_searcher/`).
+
+Completed: **multi-module cross-suite test selection** — the Jackson dogfood
+now builds real 2.19.4 annotations, core, and databind jars plus one smoke suite
+per module. Its reversible verifier proves that a core implementation change
+reruns core and databind tests without recompiling databind or touching the
+annotations suite. No engine changes were needed.
+
+Also completed: **annotation processors** — `JarAction(processorpath=...)` passes a
+separate processor path through the warm javac worker and fingerprints processor
+jars by their complete bytes, rather than their ABI. The self-contained
+`examples/annotation_processing/` dogfood and a JDK integration test prove that
+an implementation-only processor change recompiles and regenerates the app.
+
+Deferred (need features + dependency resolution — better with the real
+monorepo): **Kotlin modules** — the team plans to adopt Kotlin, and it reuses
+the JVM lane (the `jvm-abi` lens and the warm worker), so it is high-reuse when
+scheduled. (Spring Boot fat-jars: **done** — see spring-petclinic above.)
+
+### Opus queue — ready to do now
+
+These are self-contained and come with tests. No Fable needed.
+
+**Correctness fixes** (holes found in the "what might we be missing?" review):
+
+- **An optional "always re-check file contents" mode.** To go fast, brix assumes a
+  file is unchanged when its size and timestamp both match. In rare cases a file's
+  contents can change while those stay the same; this mode would catch it, at the
+  cost of some speed.
+- **Record the environment a build used.** An environment variable or machine
+  setting that a tool reads, but that the build file didn't declare, can change a
+  build's result without brix noticing — the classic "works on my machine, fails
+  on the server." Recording what was actually used is the first step to catching
+  it.
+
+**Making it easy to start:**
+
+- **`brix.py help` — show the *live* configuration, not just the command list.**
+  Argparse's `-h` lists the built-in subcommands, but everything project-specific
+  lives in the `cli.main(...)` call and is invisible without reading the file:
+  whether the atomic/cache layers are wired (so whether `--stage` / `commit` /
+  `discard` even apply), the target **aliases** (`app → app/dist/main.js`), the
+  custom **`commands=`**, and the metadata / staging / cache paths. `help` should
+  **introspect the builder chain** — walk each builder's `.inner` and name the
+  layers (Atomic → Cache → Incremental) — and print the active stack, the aliases
+  and custom commands (with descriptions), and the paths, so a user knows what
+  `build` will actually do without opening `brix.py`. Self-contained, Opus-sized.
+  Two small enablers fall out: an optional description slot for `aliases` (today
+  bare path mappings), and surfacing each `commands=` callable's `__doc__`. Keeps
+  to running the build file directly (`brix.py help`), not a global launcher.
+- **Draw a picture of the build.** Boxes for steps, arrows for what depends on
+  what, instead of a text list.
+- **Ready-made starter templates** for a Java service and a TypeScript service, so
+  people begin from something that already works.
+
+**Building trust** (also hardens the parity between the two engines):
+
+- **More tests that try to trick brix into skipping a rebuild it shouldn't** — and
+  prove it doesn't. (Largely done — the `test_incremental_equivalence*.py` oracles
+  now cover byte-lens edits bounded-exhaustively plus ABI-lens skips and discovered
+  C headers, each checked against a clean rebuild. Remaining alphabet to add over
+  time: generator-produced *membership* changes, and multi-hop ABI chains.)
+- **Close the last corner of the delete-cleanup fix.** When you delete files, brix
+  cleans up their leftover build outputs; it handles the normal case, but one rare
+  situation (a build that crashed at just the wrong moment) it can't fully clean.
+  Fixing it needs a small change to how brix remembers past builds — worth doing
+  while both engines still exist, so the metadata change lands in the reference
+  (Python) and the Rust core together.
+- **Double-check symbolic links** — that a symlinked source file, or one whose
+  target changes, is noticed.
+
+**Extending brix:**
+
+- **Use git to spot changes instantly.** Today brix checks files directly to see
+  what changed; on a big repo, asking git "what changed since last time?" is much
+  faster.
+- **Write down the official ways to plug in.** There are three: where cached
+  results are stored, how brix judges whether a change actually "matters," and how
+  it detects file changes. Document them so other people can build on brix.
+- **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
+  does this for Java and TypeScript (skip rebuilding users when only internals
+  changed). Add it for Go and Protobuf when those languages show up in a project.
+- **TypeScript: automatic import-dependency tracking** — the remaining half of
+  the TS build story (the helper itself, `brix.ts`, **landed** — see the
+  [development log](development-log.md)).
+  Today a `ts.CompileAction` tracks *cross-module* deps you declare (the built
+  `.d.ts` of another module, ts-dts-lensed). Not yet automatic: reading a
+  module's own `import` graph so editing a deeply-imported *source* rebuilds it —
+  the TS version of the C/C++ header problem. The machinery exists (the `-MMD`
+  depfile path built for C/C++); TS needs a reader for its dependency format
+  (`tsc --listFiles` / a resolver pass) feeding the same depfile channel. Note:
+  this is about *building* TS code — separate from the [Blocked] track-3 item of
+  *writing build files* in TS.
+
+**Bigger, but still Opus** (sketch the design first):
+
+- **"Only build what my change touched."** Given a set of edits, work out which
+  parts of a big project could be affected and build/test only those — not all 50
+  services every time. The biggest time-saver for a company monorepo.
+
+### Fable queue — for the careful model only
+
+The two original Fable items — the Rust scheduler/build layers (track 2) and the
+always-warm Java build server (track 1) — have **both landed** (Rust is the
+default engine; the worker daemon is done and benchmarked). What remains for the
+careful model:
+
+- **Phase 4c — delete the Python engine internals** (track 2 tail), on hold for
+  soak. A line-by-line review that the Rust engine fully covers the execution
+  half before the Python fallback is removed; one subtle ordering gap here breaks
+  builds. Deletion boundary spelled out in track 2 above.
+- **Review pass on the `content_key` relocation** (commit `634c115`) — the
+  fingerprint-byte-identical claim is the thing to scrutinize; the golden diff
+  shows only `spec` strings changed, but a careful read of the trait dispatch and
+  the material-shape invariant is the reserved-Fable check for that change.
+
+### Blocked or not yet decided
+
+- **Fully replacing your Java/TS build tools with brix.** Blocked on two decisions
+  from Duane: (a) wrap the existing builds first and replace piece by piece, or
+  replace everything at once; and (b) whether brix also handles *downloading*
+  third-party dependencies, or leaves that to an existing tool.
+- **Two big future projects.** *Sandboxing*: run each build step so it can only
+  see the files it declared — turning "you forgot to list a dependency" into an
+  immediate error instead of a silent wrong build. This is the safety net that
+  would automatically catch several of the correctness gaps above. **Unify with
+  the staged-overlay design note** (Performance next steps → "Parked design:
+  staged-overlay visibility for foreign resolvers"): imposing a per-step
+  filesystem view is the *same primitive* as exposing staged outputs to a foreign
+  resolver — build them as one mechanism. *Spreading compilation across many
+  machines* (remote execution). Both are large — either Opus as a big effort or
+  Fable to review.
+- **Pending:** Duane will hand over a real C++ project to set up a build file for.
+  Header dependency tracking is already built and ready for it.
+
+**Lower-priority ideas** (from the original spec): loading only part of a huge
+project's build at a time (only needed at hundreds of services), fancier change
+detection (a file-system watcher, or pulling change info from a remote server),
+build inputs that come from memory or a database instead of files, and a C++
+"compile-and-link in one step" helper.
+
+### Performance next steps (from the scaling benchmark)
+
+Client build runtime is the metric that matters (brix's own build/test time is
+irrelevant by comparison). `examples/scaling_benchmark.py` gave the first
+numbers (release engine). One lever falls out, and it is milder than first feared:
+
+- **A resident daemon / warm graph**, eventually, to collapse the cold no-op
+  floor. At ~50-service scale (~10–15k nodes) a cold no-op extrapolates to only
+  **~3–4s** (linear at ~265 µs/node on the release Rust engine), plus a ~0.26s
+  cold-CLI tax. That is a mild annoyance, not a painful one — a **nice-to-have**,
+  not the big scaling win it first looked like. Every `brix build` today
+  re-realizes globs, re-expands, and re-checks freshness cold with no filesystem
+  watch; a daemon would erase that, but it is not urgent.
+
+- **Filesystem-watcher change detection (parked — design captured below).** The
+  concrete form of "collapse the no-op floor": a pluggable `ChangeSource` that,
+  given a build-owned token, reports only the paths changed since the last build,
+  so a no-op becomes **O(changed)** instead of O(all files) — git's `git status`
+  speed, by the same technique git uses.
+  - *Mechanism, not git.* The watching primitive is the OS (inotify /
+    FSEvents / `ReadDirectoryChangesW`); backends are a native watcher (Rust
+    `notify` crate), Watchman, or git's fsmonitor daemon. **No git repo, commit,
+    or staging required** — the token is anchored to the last *build*, not to any
+    VCS state (using `git status`/index-diff would be the wrong tool: it anchors
+    to commits and would report the same dirty set every build). Works on Windows
+    (git's built-in fsmonitor shipped Windows-first; and it matters *more* there,
+    since Windows FS scanning is slow — the exact problem Microsoft's Scalar /
+    VFS-for-Git solve). Rust `#[cfg]` handles the few platform-specific leaf
+    functions (stat-identity fields); `std` + the `notify` crate cover the rest.
+  - *Why parked.* The payoff (~3–4s no-op → instant at 50-service scale) is a
+    real-monorepo-onboarding win, not a today-problem. It is the **correctness-
+    critical invalidation path** — a missed event silently ships a stale build,
+    the exact failure the incremental-≡-clean oracles guard — so the *skipping*
+    logic is Fable-territory. And it only pays off with a **resident** watcher
+    (a persistent daemon holding the watch + token), so it is coupled to the
+    daemon lever above.
+  - *How to build it (when it bites).* Introduce the `ChangeSource` seam **and the
+    first real watcher backend together, in one increment** — not seam-first (the
+    interface must be shaped by a real consumer: tokens, watch descriptors,
+    overflow/resync semantics). Route the equivalence oracles *through* the change
+    source so a dropped event fails a test, and keep a mandatory **full-scan
+    fallback** for the cold start, a watcher crash, or an event-queue overflow.
+    A seam with only the full-scan implementation is speculative abstraction with
+    no payoff — don't land one in isolation.
+
+(An earlier "Rust executor is ~5× slower on clean builds" note was withdrawn — it
+was a *debug*-build artifact; on the release engine Rust matches or beats the
+Python engine on clean builds and is ~10× faster on no-ops. See the development
+entry. Lesson baked into the benchmark: measure the release `.so`.)
+
+### Parked design: staged-overlay visibility for foreign resolvers
+
+**The gap.** The `AtomicLayer` writes a build's outputs to a staging tree
+(`build/staging/add/<logical path>`, deletions under `del/`) and resolves brix's
+*own* data atoms through an overlay that reads "the workspace as it will look
+after commit." A step that reads an input brix handed it (a `FileData`, a
+`{classpath}` substitution) therefore sees the staged version. But a subprocess
+that does its **own** filesystem path resolution does not: `tsc` walking
+`import "../../x/dist/y"`, a C compiler resolving `#include` of a header another
+step generated, Go resolving an import, protobuf resolving an include — all call
+`open()`/`stat()` on the *real* workspace, where this build's staged outputs are
+not. So cross-module builds through a foreign resolver only work on the **plain
+incremental stack** (outputs written in place), not under atomic staging. Java is
+immune only because brix substitutes the overlay-resolved classpath into
+`{classpath}` explicitly; a tool brix can't feed the path to hits the wall.
+"Exposing the overlay to subprocesses" = making the child's own reads see the
+merged (workspace + staging) view, so `stat("x/dist/y.d.ts")` transparently
+returns the staged file.
+
+**The hazard it closes (why this is correctness, not polish).** A *first* atomic
+build of cross-module TS fails **loud** ("cannot find module") — safe. The
+dangerous case is an *incremental rebuild* where a prior committed `y.d.ts`
+already sits at the real path: the foreign resolver reads the **stale committed**
+declaration (staging invisible to it), type-checks against a stale API, can
+**succeed**, and the build commits a silently stale output — the exact
+missed-edge failure the incremental-≡-clean oracles exist to catch. So the
+atomic + cross-module + foreign-resolver combination must be either *fixed* or
+*loudly refused*; it must never be silently allowed.
+
+**Mechanism options (cheapest → airtight).**
+- *Symlink farm / materialized merged root.* Before a step, build a directory
+  mirroring the post-commit workspace (symlink real files, symlink or copy staged
+  ones) and run the subprocess rooted there. Portable, no privileges. Weaknesses:
+  a tool that calls `realpath` sees through the symlink and escapes the illusion
+  to the un-staged path; per-step construction cost.
+- *OS union filesystem.* Linux `overlayfs` (`lowerdir`=workspace, `upperdir`=
+  staging/add, whiteouts for staging/del) mounted inside a per-process
+  mount+user namespace (no root). Airtight, transparent even to `realpath`.
+  Linux-only — macOS (no overlayfs; FUSE/bindfs or copy) and Windows (Projected
+  FS, or a different scheme) need separate backends, a `#[cfg]` multi-backend
+  effort like the filesystem-watcher.
+- *Write-in-place + rollback journal.* Abandon copy-then-commit: write real paths,
+  journal enough to undo on failure. Nothing to expose. **Rejected** — it weakens
+  the atomicity guarantee (a crash mid-build leaves partial real outputs until
+  recovery), which is the entire reason the atomic layer exists.
+
+**Semantics the merged view must nail (the contract, before any code).**
+precedence (staging/add wins over workspace); deletions (staging/del must *hide*
+a workspace file — whiteout, not just "absent from add"); `realpath`/normalization
+(a tool must not be able to resolve back to the un-staged path); symlinked
+workspace packages (pnpm/yarn/npm workspaces symlink `node_modules/@scope/pkg` →
+the real package dir — the view must compose with those); case-sensitivity
+(macOS/Windows); and read-only enforcement of inputs. Route the
+incremental-≡-clean oracles **through** the merged view so a precedence or
+whiteout bug fails a test.
+
+**Converges with Sandboxing — build them once.** The parked *Sandboxing* project
+(run each step so it can see only the files it declared) is the **same primitive
+from the other side**: both are "construct and impose a filesystem view on a
+subprocess." A view containing exactly {this step's declared inputs, staged
+outputs included} *simultaneously* enforces declared-dependency hygiene (the
+sandbox) and exposes staged outputs (the overlay). Do not ship two mechanisms —
+the overlay-visibility fix and sandboxing are one piece of infrastructure, and
+that is the strongest reason to do it once, foundationally, rather than bolt a
+TS-only workaround onto the atomic layer.
+
+**Why parked / when it bites.** Correctness-critical foundation under *every*
+atomic build (Fable-territory: a wrong merged view is a silent wrong build);
+platform-specific plumbing for the airtight version; and no real driver yet to
+pin the semantics — real TS services, not the `examples/typescript` toy, reveal
+the `node_modules`/symlink/`realpath` requirements the view must satisfy. The
+plain incremental stack builds cross-module TS *correctly* today; only atomic
+crash-safety is lost, so the practical cost of waiting is low.
+
+**Cheap interim guard (optional, do-now).** Independent of the full fix: a
+targeted loud refusal/warning when a foreign-resolver action with cross-module
+`dependencies=` (today `ts.CompileAction`) runs *under a staging layer*, turning
+the silent-stale-on-rebuild path into an explicit "use the plain stack here"
+error. Small, local, no merged-view machinery — closes the hazard while the
+overlay stays parked.
+
+**How to build it (when it bites).** Design note first (this). Then the
+merged-view **semantics contract above + one backend together** (start with the
+symlink farm for portability, or commit to overlayfs if Linux-only is acceptable
+near-term), with the **sandbox as co-consumer shaping the interface** so the two
+land as one mechanism — not a seam plus a TS-only path. Route the equivalence
+oracles through the view; keep the plain stack as the always-available fallback.

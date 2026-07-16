@@ -9,18 +9,17 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import brix.jvmabi as jvmabi
 
 from brix import (
-    BuildMetadata,
     ExternalProcessAction,
     Graph,
     NodeContext,
-    TimeAndHashChangeDetector,
     identity,
-    jvmabi,
 )
 from brix.data import FileData
 from brix.incremental import action_fingerprint
+from brix.metadata import BuildMetadata, TimeAndHashChangeDetector
 from brix.java import AbiFile
 
 FIX = Path(__file__).parent / "fixtures" / "jvmabi"

@@ -56,7 +56,9 @@ def _specificity(bindings: dict[str, str]) -> float:
     return float(sum(len(v) for v in bindings.values()))
 
 
-def select_actions(actions: list[Action], targets: list[str]) -> list[Action]:
+def select_actions_with_origins(
+    actions: list[Action], targets: list[str], forced_orders=()
+) -> list[tuple[int, Action]]:
     """The subset (possibly binding-constrained) of ``actions`` needed to
     produce ``targets``, in original graph order."""
     from .planner import input_atoms, output_atoms
@@ -64,6 +66,24 @@ def select_actions(actions: list[Action], targets: list[str]) -> list[Action]:
     queue: list = [FileData(t) for t in targets]
     seen_needs = {repr(n) for n in queue}
     selected: dict[tuple[int, tuple], Action] = {}
+
+    def select(index: int, bindings: dict[str, str]) -> None:
+        key = (index, tuple(sorted(bindings.items())))
+        if key in selected:
+            return
+        constrained = actions[index]
+        if bindings and isinstance(constrained, Expandable):
+            constrained = constrained.substitute(bindings)
+        selected[key] = constrained
+        for atom in input_atoms(constrained):
+            if isinstance(atom, (FileData, GlobData, RegexData)):
+                marker = repr(atom)
+                if marker not in seen_needs:
+                    seen_needs.add(marker)
+                    queue.append(atom)
+        for before, after, _trigger in forced_orders:
+            if after == index:
+                select(before, {})
 
     while queue:
         need = queue.pop(0)
@@ -79,20 +99,12 @@ def select_actions(actions: list[Action], targets: list[str]) -> list[Action]:
         for index, bindings in candidates:
             if _specificity(bindings) > best:
                 continue  # shortest stem wins
-            key = (index, tuple(sorted(bindings.items())))
-            if key in selected:
-                continue
-            constrained = actions[index]
-            if bindings and isinstance(constrained, Expandable):
-                constrained = constrained.substitute(bindings)
-            selected[key] = constrained
-            for atom in input_atoms(constrained):
-                if isinstance(atom, (FileData, GlobData, RegexData)):
-                    marker = repr(atom)
-                    if marker not in seen_needs:
-                        seen_needs.add(marker)
-                        queue.append(atom)
+            select(index, bindings)
 
     if not selected:
         raise ValueError(f"no action produces any of: {', '.join(targets)}")
-    return [selected[key] for key in sorted(selected)]
+    return [(key[0], selected[key]) for key in sorted(selected)]
+
+
+def select_actions(actions: list[Action], targets: list[str]) -> list[Action]:
+    return [action for _, action in select_actions_with_origins(actions, targets)]

@@ -107,6 +107,40 @@ def infer_dependency(producer: Action, consumer: Action) -> str | None:
     return None
 
 
+def validate_output_ownership(actions: list[Action]) -> None:
+    """Reject two actions whose declared output sets can name one path.
+
+    Output ownership must be unique: otherwise parallel execution makes the
+    final contents depend on which writer finishes last.  Use the same
+    conservative overlap relation as dependency inference, including its
+    same-collection binding refinement.
+    """
+    for left_index, left in enumerate(actions):
+        for right in actions[left_index + 1 :]:
+            shared = shared_bindings(left, right)
+            for left_atom in output_atoms(left):
+                for right_atom in output_atoms(right):
+                    exact_regex = (
+                        isinstance(left_atom, RegexData)
+                        and isinstance(right_atom, RegexData)
+                        and left_atom.regex.pattern == right_atom.regex.pattern
+                    )
+                    if exact_regex or _atoms_overlap(left_atom, right_atom, shared):
+                        left_text = _atom_text(left_atom)
+                        right_text = _atom_text(right_atom)
+                        overlap = (
+                            left_text
+                            if left_text == right_text
+                            else f"{left_text} ~ {right_text}"
+                        )
+                        raise ValueError(
+                            "conflicting outputs: "
+                            f"{_node_label(left)!r} and {_node_label(right)!r} "
+                            f"may both write {overlap}; every output path must "
+                            "have exactly one owner"
+                        )
+
+
 def _atom_text(atom: PathAtom) -> str:
     if isinstance(atom, RegexData):
         return atom.regex.pattern
@@ -120,10 +154,14 @@ def _node_label(action: Action) -> str:
 
 def plan_graph(graph: Graph, root: Path, targets: list[str] | None = None) -> ExecutionPlan:
     actions = graph.actions
+    origins = list(range(len(actions)))
     if targets:
-        from .targets import select_actions
+        from .targets import select_actions_with_origins
 
-        actions = select_actions(actions, targets)
+        selected = select_actions_with_origins(actions, targets, graph.forced_orders)
+        origins = [origin for origin, _ in selected]
+        actions = [action for _, action in selected]
+    validate_output_ownership(actions)
     plan = ExecutionPlan(root=root)
     for action in actions:
         kind = NodeKind.EXPAND if isinstance(action, ExpandAll) else NodeKind.PROCESS
@@ -135,4 +173,13 @@ def plan_graph(graph: Graph, root: Path, targets: list[str] | None = None) -> Ex
             reason = infer_dependency(producer.action, consumer.action)
             if reason is not None:
                 plan.add_edge(producer.id, consumer.id, reason)
+    for before, after, trigger in graph.forced_orders:
+        for before_id, before_origin in enumerate(origins):
+            if before_origin != before:
+                continue
+            for after_id, after_origin in enumerate(origins):
+                if after_origin == after:
+                    plan.add_edge(
+                        before_id, after_id, "explicit ordering", trigger=trigger
+                    )
     return plan

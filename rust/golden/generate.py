@@ -373,7 +373,9 @@ def graph_videos():
 PLAN_CASES = [
     ("upper", graph_upper, [None, ["build/all.txt"], ["build/upper/foo.txt"]]),
     ("cpp", graph_cpp, [None, ["build/bin/app"]]),
-    ("stem", graph_stem, [None, ["wealth.mpg"]]),
+    # The unconstrained graph intentionally has overlapping output patterns;
+    # shortest-stem target selection narrows them before ownership validation.
+    ("stem", graph_stem, [["wealth.mpg"]]),
     ("regex", graph_regex, [None]),
     ("videos", graph_videos, [None, ["out/videos/wealth.mpg"]]),
 ]

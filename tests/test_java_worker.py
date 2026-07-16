@@ -109,3 +109,92 @@ def test_api_change_recompiles_dependent(tmp_path):
     assert IncrementalBuilder(make_graph, root=tmp_path).build(reporter=started).success
 
     assert compiled(started.labels, "app")  # the dependent recompiled
+
+
+def test_annotation_processor_implementation_change_recompiles(tmp_path):
+    """A processor is build-time executable code, so its bytes—not its ABI—
+    invalidate compilation and regenerate the application output."""
+    processor_src = tmp_path / "processor-src"
+    processor_classes = tmp_path / "processor-classes"
+    app_src = tmp_path / "app"
+    processor_src.mkdir()
+    processor_classes.mkdir()
+    app_src.mkdir()
+    (processor_src / "Marker.java").write_text(
+        "import java.lang.annotation.*;"
+        "@Target(ElementType.TYPE) public @interface Marker {}\n"
+    )
+    (app_src / "App.java").write_text(
+        "@Marker public class App { public static void main(String[] args) {"
+        " System.out.println(Generated.message()); } }\n"
+    )
+
+    processor_jar = tmp_path / "processor.jar"
+
+    def build_processor(message: str) -> None:
+        (processor_src / "GeneratingProcessor.java").write_text(
+            "import java.io.*; import java.util.*; import javax.annotation.processing.*;"
+            "import javax.lang.model.*; import javax.lang.model.element.*;"
+            '@SupportedAnnotationTypes("Marker") '
+            "@SupportedSourceVersion(SourceVersion.RELEASE_17) "
+            "public class GeneratingProcessor extends AbstractProcessor {"
+            " private boolean generated;"
+            " public boolean process(Set<? extends TypeElement> a, RoundEnvironment r) {"
+            "  if (!generated && !r.processingOver()) { generated = true; try {"
+            '   Writer w = processingEnv.getFiler().createSourceFile("Generated").openWriter();'
+            '   w.write("public class Generated { public static String message() {'
+            f' return \\\"{message}\\\"; }} }}\\n");'
+            "   w.close(); } catch (IOException e) { throw new RuntimeException(e); } }"
+            "  return true; } }\n"
+        )
+        subprocess.run(
+            [
+                "javac", "-d", str(processor_classes),
+                str(processor_src / "Marker.java"),
+                str(processor_src / "GeneratingProcessor.java"),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["jar", "cf", str(processor_jar), "-C", str(processor_classes), "."],
+            check=True,
+        )
+
+    def graph():
+        g = Graph()
+        d = g.data
+        worker = java.javac_worker(g)
+        g.add(
+            java.JarAction(
+                source_files=d.glob("app/{name}.java"),
+                output_file=d.file("build/app.jar"),
+                classes_dir="build/app-classes",
+                classpath=[d.file("processor.jar")],
+                processorpath=[d.file("processor.jar")],
+                options=["-processor", "GeneratingProcessor"],
+                javac_worker=worker,
+                entry_point="App",
+            )
+        )
+        return g
+
+    def output() -> str:
+        return subprocess.run(
+            ["java", "-jar", "build/app.jar"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    build_processor("one")
+    assert IncrementalBuilder(graph, root=tmp_path).build().success
+    assert output() == "one"
+
+    # Public types and signatures stay the same; only processor behavior changes.
+    build_processor("two")
+    started = Started()
+    result = IncrementalBuilder(graph, root=tmp_path).build(reporter=started)
+    assert result.success, result.errors
+    assert compiled(started.labels, "app")
+    assert output() == "two"

@@ -4,18 +4,21 @@ from __future__ import annotations
 
 from .actions import Action
 from .data import DataFactory
+from .plan import EdgeTrigger
 
 
 class Graph:
     """A logical build graph.
 
-    Holds action declarations. Dependency relationships are not declared;
-    the engine infers them from data-set intersections during planning.
+    Holds action declarations. The engine normally infers dependencies from
+    data-set intersections; ``force_order`` covers the exceptional case where
+    actions must be ordered without sharing data.
     """
 
     def __init__(self) -> None:
         self.data = DataFactory()
         self.actions: list[Action] = []
+        self.forced_orders: list[tuple[int, int, EdgeTrigger]] = []
 
     def add(self, *actions: Action) -> Graph:
         stack = list(reversed(actions))
@@ -30,4 +33,35 @@ class Graph:
                 stack.extend(reversed(lower()))
             else:
                 self.actions.append(action)
+        return self
+
+    def force_order(
+        self,
+        before: Action,
+        after: Action,
+        *,
+        trigger: EdgeTrigger = EdgeTrigger.ON_SUCCESS,
+    ) -> Graph:
+        """Require ``before`` to finish before ``after`` may run.
+
+        This is for ordering with no data relationship; ordinary file/data
+        dependencies should remain implicit. Both actions must already have
+        been added to this graph exactly once.
+        """
+        if not isinstance(trigger, EdgeTrigger):
+            raise TypeError("trigger must be an EdgeTrigger")
+        positions = []
+        for action in (before, after):
+            found = [i for i, candidate in enumerate(self.actions) if candidate is action]
+            if len(found) != 1:
+                raise ValueError("force_order actions must each be added to this graph exactly once")
+            positions.append(found[0])
+        if positions[0] == positions[1]:
+            raise ValueError("force_order requires two different actions")
+        order = (positions[0], positions[1], trigger)
+        existing = [o for o in self.forced_orders if o[:2] == order[:2]]
+        if existing and existing[0][2] is not trigger:
+            raise ValueError("force_order already exists with a different trigger")
+        if not existing:
+            self.forced_orders.append(order)
         return self

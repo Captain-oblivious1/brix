@@ -16,7 +16,7 @@ filesystem edge inside the core.
 ## Graph spec (skin → core, one-way, at plan/build time)
 
 ```json
-{ "version": 1, "actions": [ <Action>... ] }
+{ "version": 1, "actions": [ <Action>... ], "forced_orders": [ <ForcedOrder>... ] }
 ```
 
 ```
@@ -31,6 +31,8 @@ WorkerSpec    = { "name": str, "command_line": str,
 Expand        = { "kind": "expand", "element": str,
                   "collection": DataExpr, "child": Action }   // child may be Expand
 Delete        = { "kind": "delete", "paths": [str] }
+ForcedOrder   = { "before": int, "after": int,
+                  "trigger": "on-success" | "on-completion" }
 DataExpr      = [ Atom... ]                            // a union is just the list
 Atom          = { "kind": "file",  "path": str,     "content_key": str? }
               | { "kind": "glob",  "template": str, "content_key": str?,
@@ -82,6 +84,13 @@ joins fingerprints and identities only when non-empty, so pre-exclude
 graphs hash byte-identically — optional and additive, still version 1
 (`docs/content-key.md` has the design). The typed helpers (`cpp`, `java`)
 lower **before** this boundary and never appear in it.
+
+`forced_orders` is optional and additive (absent means `[]`, so this remains
+version 1). Its integer fields are indices into `actions`. It represents the
+exceptional case where two actions must be ordered without sharing data;
+ordinary dependencies continue to be inferred from data overlap. Targeting an
+`after` action also selects its `before` action. `on-success` is the default;
+`on-completion` allows the later action to run after either success or failure.
 
 ## Build config (skin → core)
 

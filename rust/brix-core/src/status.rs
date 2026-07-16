@@ -159,8 +159,28 @@ pub fn compute_status(
     targets: Option<&[String]>,
     custom_identities: Option<std::sync::Arc<dyn crate::content_key::CustomIdentities>>,
 ) -> Result<StatusReport, String> {
+    compute_status_with_orders(
+        actions,
+        &[],
+        root,
+        metadata_dir,
+        staging_dir,
+        targets,
+        custom_identities,
+    )
+}
+
+pub fn compute_status_with_orders(
+    actions: Vec<Action>,
+    forced_orders: &[crate::spec::ForcedOrder],
+    root: &Path,
+    metadata_dir: &str,
+    staging_dir: &str,
+    targets: Option<&[String]>,
+    custom_identities: Option<std::sync::Arc<dyn crate::content_key::CustomIdentities>>,
+) -> Result<StatusReport, String> {
     let root_str = root.to_string_lossy().to_string();
-    let plan = plan_graph(actions, &root_str, targets)?;
+    let plan = crate::planner::plan_graph_with_orders(actions, forced_orders, &root_str, targets)?;
     let metadata = BuildMetadata::with_directory(root, metadata_dir);
     metadata.load();
     let det = TimeAndHashChangeDetector::with_metadata(std::sync::Arc::new(metadata))
