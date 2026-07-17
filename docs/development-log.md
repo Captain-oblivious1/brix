@@ -1,5 +1,28 @@
 # Development log
 
+- **Deleted-source cleanup after a failed build.** brix cleans up a deleted
+  source's leftover outputs by remembering, between builds, which collection
+  members existed. That record was committed only on *success*, so a member
+  *added by a build that ultimately failed* — its output already on disk — was
+  forgotten; if its source then vanished, the output leaked from incremental
+  cleanup (only a full `clean` reclaimed it). The leak is real only for unstaged
+  builds: atomic mode wipes a failed build's staging before it reaches the
+  workspace, so any output that reaches the workspace got there through a
+  success that also committed the membership. The fix collapsed to one
+  write-policy change rather than a new metadata structure: on a failed build,
+  the membership record becomes the *union* of what the last build knew and what
+  this build realized (never a replace). The union carries both invariants — an
+  added-then-deleted member is remembered and therefore cleaned, and a member
+  pending deletion is retained until a *successful* build settles it (the retry
+  invariant, which the old success-gating provided and the union preserves
+  because it only ever adds). Mirrored in both engines' incremental
+  `on_build_end` (Python reference + Rust core; no schema change, so nothing to
+  migrate), and it also closes the nested case the reaping code's own docstring
+  had flagged as "the one unrecoverable case" — a subtree realized only by a
+  failed build is now enumerable, because its inner membership was recorded by
+  that failed build's union write. `tests/test_delete_cleanup.py` covers both
+  engines: the unstaged leak, the retry invariant, an atomic-mode regression
+  (already protected, unperturbed), and the nested video/scene case.
 - **`env_used=` — environment as fingerprint material (phase 2: the guard).**
   Phase 1 records the environment; phase 2 makes a declared subset a real
   dependency. `env_used=["JAVA_HOME", …]` on an `ExternalProcessAction`

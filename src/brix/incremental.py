@@ -346,13 +346,16 @@ class IncrementalLayer(BuildLayer):
         this member (e.g. a deleted video's scene list).
 
         Reads, but never *mutates*, membership records. A failed build must
-        re-detect this deletion next time via the outer membership (which is
-        only committed on success), and that re-detection walks back in here and
-        needs the inner lists intact. ``forget_action`` is idempotent, so
-        re-forgetting on a later retry is harmless. If an inner membership was
-        never recorded (a prior failure, or nesting added since), that subtree
-        can't be enumerated and is left for a future build — the one
-        unrecoverable case, degrading to the old skip rather than guessing."""
+        re-detect this deletion next time via the outer membership, and that
+        re-detection walks back in here and needs the inner lists intact.
+        ``forget_action`` is idempotent, so re-forgetting on a later retry is
+        harmless. Inner membership survives a failed build because on_build_end
+        records the *union* of the last-known and this-build's realized members
+        (not only on success) — so a subtree realized by a build that then
+        failed is still enumerable here. The one case that still can't be
+        enumerated is an inner membership never recorded at all (nesting added
+        since the member last built), which is left for a future build rather
+        than guessed at."""
         if isinstance(action, ExternalProcessAction):
             self.metadata.forget_action(action_key(action))
             return [
@@ -370,9 +373,22 @@ class IncrementalLayer(BuildLayer):
         return []  # DeleteFilesAction or other: nothing to reap
 
     def on_build_end(self, result, ctx):
-        if result.success:
-            for key, members in self._pending_memberships.items():
+        for key, members in self._pending_memberships.items():
+            if result.success:
+                # Settle: the realized set becomes the record, dropping members
+                # whose deletions this build successfully applied.
                 self.metadata.set_membership(key, members)
+            else:
+                # A failed build still remembers every member it realized,
+                # UNIONED with what the last build knew. Two things ride on the
+                # union: a member *added* by this failed build (whose output is
+                # now on disk) is not forgotten — so if its source later
+                # disappears the output is still cleaned, not leaked (an
+                # unstaged build has no staging-wipe to reclaim it); and a
+                # member *pending deletion* is retained until a *successful*
+                # build settles it (the retry invariant). Union, never replace.
+                previous = self.metadata.membership(key) or []
+                self.metadata.set_membership(key, sorted(set(previous) | set(members)))
         self._pending_memberships.clear()
         self.metadata.save()
 

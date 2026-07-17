@@ -184,7 +184,10 @@ impl IncrementalLayer {
     /// collection, so it matches what the previous build recorded for this
     /// member. Reads, but never *mutates*, membership records (a failed
     /// build must re-detect this deletion next time, and that re-detection
-    /// walks back in here and needs the inner lists intact). Mirrors
+    /// walks back in here and needs the inner lists intact). Inner membership
+    /// survives a failed build because `on_build_end` records the *union* of
+    /// last-known and this-build's realized members, so a subtree realized by
+    /// a build that then failed is still enumerable here. Mirrors
     /// `_reap_vanished`.
     fn reap_vanished(&self, action: &Action) -> Vec<String> {
         match action {
@@ -342,13 +345,30 @@ impl BuildLayer for IncrementalLayer {
     }
 
     fn on_build_end(&self, result: &BuildResult, _ctx: &NodeContext) {
-        if result.success {
-            let pending = std::mem::take(&mut *self.pending_memberships.lock().unwrap());
-            for (key, members) in pending {
+        let pending = std::mem::take(&mut *self.pending_memberships.lock().unwrap());
+        for (key, members) in pending {
+            if result.success {
+                // Settle: the realized set becomes the record, dropping members
+                // whose deletions this build successfully applied.
                 self.metadata.set_membership(&key, members);
+            } else {
+                // A failed build still remembers every member it realized,
+                // UNIONED with what the last build knew. Two things ride on the
+                // union: a member *added* by this failed build (whose output is
+                // now on disk) is not forgotten — so if its source later
+                // disappears the output is still cleaned, not leaked (an
+                // unstaged build has no staging-wipe to reclaim it); and a
+                // member *pending deletion* is retained until a *successful*
+                // build settles it (the retry invariant). Union, never replace.
+                let mut union = self.metadata.membership(&key).unwrap_or_default();
+                for member in members {
+                    if !union.contains(&member) {
+                        union.push(member);
+                    }
+                }
+                union.sort();
+                self.metadata.set_membership(&key, union);
             }
-        } else {
-            self.pending_memberships.lock().unwrap().clear();
         }
         // Python's save() raises on an IO error and the build dies loudly;
         // a silent failure here would quietly disable incrementality.

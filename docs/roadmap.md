@@ -258,12 +258,22 @@ These are self-contained and come with tests. No Fable needed.
   now cover byte-lens edits bounded-exhaustively plus ABI-lens skips and discovered
   C headers, each checked against a clean rebuild. Remaining alphabet to add over
   time: generator-produced *membership* changes, and multi-hop ABI chains.)
-- **Close the last corner of the delete-cleanup fix.** When you delete files, brix
-  cleans up their leftover build outputs; it handles the normal case, but one rare
-  situation (a build that crashed at just the wrong moment) it can't fully clean.
-  Fixing it needs a small change to how brix remembers past builds — worth doing
-  while both engines still exist, so the metadata change lands in the reference
-  (Python) and the Rust core together.
+- **Close the last corner of the delete-cleanup fix.** **Done (2026-07-17,
+  Opus).** When you delete files, brix cleans up their leftover build outputs;
+  it handled the normal case but leaked in one: a collection member *added by a
+  build that then failed* (its output already on disk) was forgotten, because
+  membership was committed only on success — so if that member's source later
+  disappeared, its output was never cleaned incrementally (only a full `clean`
+  caught it). Real only for unstaged builds; atomic mode wipes a failed build's
+  staging before it reaches the workspace. The fix turned out smaller than a new
+  metadata slot: on a failed build the membership record becomes the *union* of
+  the last-known and this-build's realized members (never a replace), so an
+  added-then-deleted member is still cleaned while a member pending deletion is
+  retained until a successful build settles it (the retry invariant). One
+  write-policy change in each engine's incremental `on_build_end`; no schema
+  change. `tests/test_delete_cleanup.py` (both engines, unstaged fix + retry +
+  atomic regression + the nested case the code's own docstring had called
+  "unrecoverable").
 - **Double-check symbolic links** — that a symlinked source file, or one whose
   target changes, is noticed.
 
