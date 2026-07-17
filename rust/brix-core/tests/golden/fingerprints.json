@@ -38,5 +38,9 @@
   {
     "spec": "{\"kind\": \"process\", \"command_line\": \"tsc -p .\", \"inputs\": {\"api\": [{\"kind\": \"file\", \"path\": \"lib/api.d.ts\", \"content_key\": \"ts-dts\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/consumer.js\"}]}, \"name\": \"ts-dts\"}",
     "fingerprint": "25d2c30aab4c7727b1fed3fa3417848d120304fa8648d25bf20d8228a591be05"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"kotlinc -classpath {cp} main.kt\", \"inputs\": {\"cp\": [{\"kind\": \"file\", \"path\": \"ktlib/kotlin-dep.jar\", \"content_key\": \"kotlin-abi\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/app.jar\"}]}, \"name\": \"kotlin-abi jar\"}",
+    "fingerprint": "65326fb24d8401ee8e16757247093575ebc26d1e9d10925986b360c99b94bf77"
   }
 ]

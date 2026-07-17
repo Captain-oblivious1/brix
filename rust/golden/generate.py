@@ -492,6 +492,7 @@ TREE = {
 }
 
 JVMABI_FIXTURE = ROOT / "tests" / "fixtures" / "jvmabi" / "base.class"
+KOTLINABI_FIXTURES = ROOT / "tests" / "fixtures" / "kotlinabi"
 
 
 def write_tree():
@@ -508,6 +509,20 @@ def write_tree():
     with zipfile.ZipFile(TREE_ROOT / "lib" / "util.jar", "w") as z:
         info = zipfile.ZipInfo("abidemo/Lib.class", date_time=(1980, 1, 1, 0, 0, 0))
         z.writestr(info, class_bytes)
+    # kotlin-abi (own dir: lib/{n}.jar globs must not see this jar): one
+    # inline-free class (jvm-abi counting) and one inline
+    # carrier (whole-class byte counting) in one jar, so the fingerprint
+    # pins both modes AND the `kotlin-abi@1` tag across engines. The .class
+    # bytes are the committed kotlinc fixtures (kotlinc output is not
+    # byte-deterministic, so they are checked in, never rebuilt here).
+    (TREE_ROOT / "ktlib").mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(TREE_ROOT / "ktlib" / "kotlin-dep.jar", "w") as z:
+        for entry, fixture in [
+            ("abidemo/Greeter.class", "plain_base"),
+            ("abidemo/InlineKt.class", "inline_base"),
+        ]:
+            info = zipfile.ZipInfo(entry, date_time=(1980, 1, 1, 0, 0, 0))
+            z.writestr(info, (KOTLINABI_FIXTURES / f"{fixture}.class").read_bytes())
 
 
 FIND_TEMPLATES = [
@@ -561,6 +576,7 @@ def gen_fingerprints():
     from brix.data import FileData
     from brix.incremental import action_fingerprint
     from brix.java import AbiFile, AbiGlob
+    from brix.kotlin import KotlinAbiFile
     from brix.layers import NodeContext
     from brix.metadata import TimeAndHashChangeDetector
 
@@ -642,6 +658,12 @@ def gen_fingerprints():
             command_line="tsc -p .",
             inputs={"api": DtsFile("lib/api.d.ts")},
             outputs={"out": d.file("build/consumer.js")},
+        ),
+        ExternalProcessAction(
+            name="kotlin-abi jar",
+            command_line="kotlinc -classpath {cp} main.kt",
+            inputs={"cp": KotlinAbiFile("ktlib/kotlin-dep.jar")},
+            outputs={"out": d.file("build/app.jar")},
         ),
     ]
     return [

@@ -16,18 +16,18 @@
   },
   {
     "kind": "membership_key",
-    "spec": "{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.cpp\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{compiler} {options} -MMD -MF {depfile} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}], \"depfile\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o.d\"}]}, \"name\": \"compile {name}\", \"depfile\": \"build/obj/{name}.o.d\"}}",
+    "spec": "{\"kind\": \"expand\", \"element\": \"name\", \"collection\": [{\"kind\": \"glob\", \"template\": \"src/{name}.cpp\"}], \"child\": {\"kind\": \"process\", \"command_line\": \"{compiler} {options} {dep_cflags} -MMD -MF {depfile} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"dep_cflags\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}], \"depfile\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o.d\"}]}, \"name\": \"compile {name}\", \"depfile\": \"build/obj/{name}.o.d\"}}",
     "key": "749474d082025bff9d724fafd08c6284f4698c60c175f9c6725ee324a6a0794d"
   },
   {
     "kind": "action_key",
-    "spec": "{\"kind\": \"process\", \"command_line\": \"{compiler} {options} -MMD -MF {depfile} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}], \"depfile\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o.d\"}]}, \"name\": \"compile {name}\", \"depfile\": \"build/obj/{name}.o.d\"}",
-    "key": "606c07f2cc0b0526f7c418721bb55ef500fc04df47bfb77b8e991f8598d53db1"
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{compiler} {options} {dep_cflags} -MMD -MF {depfile} -c {source} -o {object}\", \"inputs\": {\"compiler\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"dep_cflags\": [{\"kind\": \"value\", \"text\": \"\"}], \"source\": [{\"kind\": \"file\", \"path\": \"src/{name}.cpp\"}]}, \"outputs\": {\"object\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o\"}], \"depfile\": [{\"kind\": \"file\", \"path\": \"build/obj/{name}.o.d\"}]}, \"name\": \"compile {name}\", \"depfile\": \"build/obj/{name}.o.d\"}",
+    "key": "38134aafec09bc57f7073844582ad3100564b5e680995f3643a53efddcd15a61"
   },
   {
     "kind": "action_key",
-    "spec": "{\"kind\": \"process\", \"command_line\": \"{linker} {options} {objects} -o {output}\", \"inputs\": {\"linker\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"objects\": [{\"kind\": \"glob\", \"template\": \"build/obj/{name}.o\"}]}, \"outputs\": {\"output\": [{\"kind\": \"file\", \"path\": \"build/bin/app\"}]}, \"name\": \"link build/bin/app\"}",
-    "key": "5ab7db352b46eade69f86c500f18b2e575f6a5c6143a9a167e1d655226c54c08"
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{linker} {options} {objects} {dep_libs} {dep_lflags} -o {output}\", \"inputs\": {\"linker\": [{\"kind\": \"tool\", \"name\": \"c++\"}], \"options\": [{\"kind\": \"value\", \"text\": \"\"}], \"objects\": [{\"kind\": \"glob\", \"template\": \"build/obj/{name}.o\"}], \"dep_libs\": [], \"dep_lflags\": [{\"kind\": \"value\", \"text\": \"\"}]}, \"outputs\": {\"output\": [{\"kind\": \"file\", \"path\": \"build/bin/app\"}]}, \"name\": \"link build/bin/app\"}",
+    "key": "d6b8eda65cd3da8ec115e6cdb0da0e0484b3d09501ca0b524ad7c7b8333f14bf"
   },
   {
     "kind": "action_key",
