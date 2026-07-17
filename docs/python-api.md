@@ -20,6 +20,12 @@ expressions. The concrete data classes and `DataFactory` remain in `brix.data`
 for Brix's implementation and focused testing; they are not separate authoring
 entry points.
 
+`cli.main(create_graph, ...)` is the command-line entry point a build file ends
+with; its `aliases=` and `commands=` add target shorthands and build-then-act
+subcommands. An alias may be a bare path (or list of paths) or a
+`cli.Alias(target, description)` when a one-line explanation is worth surfacing
+in `brix.py help`, which prints the live builder stack, aliases, and commands.
+
 ## Results and reporting
 
 - `BuildResult` and `ProcessResult`

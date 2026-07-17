@@ -1,5 +1,21 @@
 # Development log
 
+- **`brix.py help` — the build file's live configuration.** `-h` only ever
+  listed the built-in subcommands; everything project-specific lived inside
+  the `cli.main(...)` call and was invisible without opening the file. `help`
+  introspects the builder chain — it walks each wrapper's `.inner` reading
+  plain attributes (never instantiating a layer or touching disk) — and prints
+  the active stack outermost-first with each layer's path (Atomic → Cache →
+  Incremental), the target aliases, and the project's build-then-act
+  `commands=`. Whether staging is wired shows up twice: a summary line and a
+  per-command flag, so `commit`/`discard` are marked unavailable when no
+  `AtomicBuilder` is present. Two small authoring enablers came with it: an
+  optional description for an alias via `cli.Alias(target, description)` — a
+  drop-in for a bare `str`/`list[str]` value, so existing build files are
+  untouched — and each `commands=` callable's first docstring line as its
+  one-line summary. It is a pure client printout (the engine never prints), so
+  it is engine-agnostic — identical output under `BRIX_ENGINE=rust`.
+  `tests/test_cli_help.py`; dogfooded in `examples/leveldb/brix.py`.
 - **Fable review of the `content_key` relocation (`634c115`): verdict
   positive; one golden gap closed.** The reserved-Fable check on the
   fingerprint-byte-identical claim. Every load-bearing piece verified: the

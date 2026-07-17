@@ -15,8 +15,12 @@ Commands (default: build):
     brix.py discard     throw held/failed staging away
     brix.py clean       delete built outputs and metadata
     brix.py graph       print the execution plan's structure
+    brix.py help        show this build file's live configuration
 
-`build --stage` builds fully but holds outputs in staging for review —
+`help` introspects the builder chain (which layers are wired, so whether
+`--stage` / `commit` / `discard` apply), the target aliases, and the
+project's `commands=`, so the effect of `build` is visible without reading
+the file. `build --stage` builds fully but holds outputs in staging for review —
 the workspace changes only at `commit`. Requires an atomic builder.
 
 Projects can add build-then-act subcommands via ``commands=`` — each
@@ -33,6 +37,7 @@ import argparse
 import shutil
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .builders import AtomicBuilder, IncrementalBuilder
@@ -42,6 +47,21 @@ from .plan import NodeKind
 from .planner import plan_graph
 from .report import ConsoleReporter
 from .status import compute_status
+
+
+@dataclass(frozen=True)
+class Alias:
+    """A target shorthand that also carries a description for ``help``.
+
+    Aliases may be given as plain values (``{"app": "app/dist/main.js"}``)
+    or, when a one-line explanation is worth surfacing, as
+    ``{"app": cli.Alias("app/dist/main.js", "the bundled web app")}``. The
+    ``target`` is a single output path or a list of them, exactly as a bare
+    alias value; only ``help`` reads ``description``.
+    """
+
+    target: str | list[str]
+    description: str = ""
 
 
 def main(
@@ -100,6 +120,7 @@ def main(
     subparsers.add_parser("discard", help="throw held/failed staging away")
     subparsers.add_parser("clean", help="delete built outputs and metadata")
     subparsers.add_parser("graph", help="print the execution plan structure")
+    subparsers.add_parser("help", help="show this build file's live configuration")
     for name in commands or {}:
         add_build_options(
             subparsers.add_parser(name, help=f"build target(s), then {name} them"), "+"
@@ -116,6 +137,8 @@ def main(
         resolved: list[str] = []
         for target in getattr(args, "targets", []):
             expansion = (aliases or {}).get(target, target)
+            if isinstance(expansion, Alias):
+                expansion = expansion.target
             resolved.extend([expansion] if isinstance(expansion, str) else expansion)
         return resolved or None
 
@@ -209,8 +232,127 @@ def main(
         print(plan_graph(graph, root).describe())
         return 0
 
+    if command == "help":
+        if builder_factory is not None:
+            builder = builder_factory()
+        else:
+            builder = IncrementalBuilder(graph_supplier, root=root, metadata_dir=metadata_dir)
+        print(_render_help(builder, aliases, commands))
+        return 0
+
     parser.error(f"unknown command {command!r}")
     return 2
+
+
+def _describe_stack(builder) -> list[tuple[str, str]]:
+    """The active builder chain as ``(layer, detail)`` rows, outermost
+    first. Reads wrapper attributes only — it never instantiates the layers
+    or touches disk, so it is safe to call for a pure printout."""
+    rows: list[tuple[str, str]] = []
+    current = builder
+    for _ in range(16):  # guard a malformed/cyclic chain
+        if current is None:
+            break
+        cls = type(current).__name__
+        if cls == "AtomicBuilder":
+            rows.append(("Atomic", f"all-or-nothing; staging → {current.staging_dir}"))
+        elif cls == "CacheBuilder":
+            where = (
+                "custom store"
+                if getattr(current, "_store", None) is not None
+                else f"cache → {current.cache_dir}"
+            )
+            rows.append(("Cache", f"reuse across checkouts; {where}"))
+        elif cls == "IncrementalBuilder":
+            rows.append(("Incremental", f"skip unchanged work; metadata → {current.metadata_dir}"))
+        elif cls == "CleanBuilder":
+            rows.append(("Clean", "rebuild everything; no change detection"))
+        else:
+            rows.append((cls, ""))
+        current = getattr(current, "inner", None)
+    return rows
+
+
+def _alias_rows(aliases) -> list[tuple[str, str, str]]:
+    """``(name, target, description)`` for each alias; a list target is
+    space-joined, and a bare (non-:class:`Alias`) value has no description."""
+    rows: list[tuple[str, str, str]] = []
+    for name, value in (aliases or {}).items():
+        if isinstance(value, Alias):
+            target, description = value.target, value.description
+        else:
+            target, description = value, ""
+        if not isinstance(target, str):
+            target = " ".join(target)
+        rows.append((name, target, description))
+    return rows
+
+
+def _doc_first_line(fn) -> str:
+    for line in (fn.__doc__ or "").strip().splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _render_help(builder, aliases, commands) -> str:
+    """The ``help`` printout: the live builder stack, the project's target
+    aliases and build-then-act commands, and what `build` will therefore do
+    — everything that lives in the ``cli.main(...)`` call and is otherwise
+    invisible without reading ``brix.py``."""
+    stack = _describe_stack(builder)
+    has_atomic = any(name == "Atomic" for name, _ in stack)
+    lines: list[str] = []
+
+    lines.append("Build stack (outermost first):")
+    width = max((len(name) for name, _ in stack), default=0)
+    for name, detail in stack:
+        lines.append(f"  {name.ljust(width)}  {detail}".rstrip())
+
+    lines.append("")
+    lines.append("Commands:")
+    fixed = [
+        ("build [targets]", "build the requested targets, or everything (the default)"),
+        ("status [targets]", "what would build, and why; exit 1 if work is pending"),
+        ("errors", "replay the last recorded failures"),
+        ("commit", "apply staging held by `build --stage`"),
+        ("discard", "throw held or failed staging away"),
+        ("clean", "delete built outputs and metadata"),
+        ("graph", "print the execution plan structure"),
+        ("help", "show this configuration"),
+    ]
+    command_rows = list(fixed)
+    for name in commands or {}:
+        doc = _doc_first_line(commands[name])
+        summary = doc or f"build target(s), then {name} them"
+        command_rows.append((f"{name} <targets>", summary))
+    width = max(len(name) for name, _ in command_rows)
+    staging_only = {"commit", "discard"}
+    for name, summary in command_rows:
+        note = ""
+        if name in staging_only and not has_atomic:
+            note = "  (needs an AtomicBuilder — not wired here)"
+        lines.append(f"  {name.ljust(width)}  {summary}{note}")
+
+    stage_note = (
+        "`build --stage` and `commit`/`discard` are available (staging is wired)."
+        if has_atomic
+        else "`build --stage`, `commit`, and `discard` need an AtomicBuilder (not wired here)."
+    )
+    lines.append("")
+    lines.append(stage_note)
+
+    alias_rows = _alias_rows(aliases)
+    if alias_rows:
+        lines.append("")
+        lines.append("Targets (aliases):")
+        width = max(len(name) for name, _, _ in alias_rows)
+        for name, target, description in alias_rows:
+            suffix = f"   {description}" if description else ""
+            lines.append(f"  {name.ljust(width)}  → {target}{suffix}")
+
+    return "\n".join(lines)
 
 
 def _clean(graph_supplier, root: Path, metadata_dir: str | Path) -> int:

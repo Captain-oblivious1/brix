@@ -21,6 +21,7 @@ python3 examples/raw_cpp/brix.py         # compile+link demo (needs c++)
 python3 examples/layers_demo/brix.py     # watch the BuildLayer stack work
 python3 examples/incremental_demo/brix.py  # build/rebuild/edit/delete-a-source
 python3 examples/cli_demo/brix.py status   # project CLI: status/errors/build/clean
+python3 examples/cli_demo/brix.py help     # the build file's live configuration
 python3 examples/cpp_app/brix.py           # real C++, typed actions, all layers
 python3 examples/cache_store_demo/brix.py  # pluggable/two-tier team cache across machines
 ```

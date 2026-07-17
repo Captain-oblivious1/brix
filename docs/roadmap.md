@@ -190,18 +190,21 @@ These are self-contained and come with tests. No Fable needed.
 **Making it easy to start:**
 
 - **`brix.py help` — show the *live* configuration, not just the command list.**
-  Argparse's `-h` lists the built-in subcommands, but everything project-specific
-  lives in the `cli.main(...)` call and is invisible without reading the file:
-  whether the atomic/cache layers are wired (so whether `--stage` / `commit` /
-  `discard` even apply), the target **aliases** (`app → app/dist/main.js`), the
-  custom **`commands=`**, and the metadata / staging / cache paths. `help` should
-  **introspect the builder chain** — walk each builder's `.inner` and name the
-  layers (Atomic → Cache → Incremental) — and print the active stack, the aliases
-  and custom commands (with descriptions), and the paths, so a user knows what
-  `build` will actually do without opening `brix.py`. Self-contained, Opus-sized.
-  Two small enablers fall out: an optional description slot for `aliases` (today
-  bare path mappings), and surfacing each `commands=` callable's `__doc__`. Keeps
-  to running the build file directly (`brix.py help`), not a global launcher.
+  **Done (2026-07-17, Opus).** Argparse's `-h` lists the built-in subcommands,
+  but everything project-specific lived in the `cli.main(...)` call and was
+  invisible without reading the file. `help` now introspects the builder chain
+  (walks each builder's `.inner`, reading wrapper attributes only — it never
+  instantiates the layers or touches disk) and prints the active stack
+  outermost-first with each layer's path (Atomic → Cache → Incremental), the
+  target aliases, and the project's `commands=`. Whether staging is wired is
+  reported both as a summary line and per-command (`commit`/`discard` are
+  individually flagged when no `AtomicBuilder` is present). Both enablers
+  landed: an optional description slot for aliases via `cli.Alias(target,
+  description)` — a drop-in for a bare alias value, so existing
+  `str`/`list[str]` mappings are untouched — and each `commands=` callable's
+  first docstring line as its summary. Engine-agnostic (a pure client
+  printout; identical under `BRIX_ENGINE=rust`). `tests/test_cli_help.py`;
+  demonstrated in `examples/leveldb/brix.py`.
 - **Draw a picture of the build.** Boxes for steps, arrows for what depends on
   what, instead of a text list.
 - **Ready-made starter templates** for a Java service and a TypeScript service, so

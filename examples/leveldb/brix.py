@@ -132,7 +132,10 @@ if __name__ == "__main__":
             metadata_dir="build/.brix",
             staging_dir="build/.brix-staging",
             builder_factory=builder,
-            aliases={"lib": "build/lib/libleveldb.a", "smoke": "build/smoke_test"},
+            aliases={
+                "lib": cli.Alias("build/lib/libleveldb.a", "the static library"),
+                "smoke": cli.Alias("build/smoke_test", "the smoke-test binary"),
+            },
             commands={"run": run_targets},
         )
     )
