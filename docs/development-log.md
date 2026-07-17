@@ -1,5 +1,29 @@
 # Development log
 
+- **`env_used=` — environment as fingerprint material (phase 2: the guard).**
+  Phase 1 records the environment; phase 2 makes a declared subset a real
+  dependency. `env_used=["JAVA_HOME", …]` on an `ExternalProcessAction`
+  snapshots those variables so a change re-stales the action — proven
+  end-to-end on both engines (a tracked variable changing re-runs a step no
+  file touched; unchanged replays). The design keeps it **off the Rust neutral
+  path**: each named variable is read from `os.environ` on the Python side and
+  materialized into a single fingerprint-only input (`_brix_env_used`, a
+  `ValueData`) — the same `classpath_track` trick of an unreferenced input that
+  is hashed but never rendered. Because both engines already fingerprint a
+  `ValueData` input identically, only the resolved *value* crosses the boundary
+  as ordinary data, Rust needs no change, and a golden fingerprint case
+  (`env_used tracked variable`) pins the parity mechanically — the Rust golden
+  test re-derives the identical digest from the stored spec. Load-bearing
+  distinctions from `env=`: the snapshot is **never set** in the process
+  environment (it tracks, it does not inject) and **never** substituted into
+  the command; an **unset** variable is JSON `null`, distinct from set-to-empty;
+  and it is copied **verbatim** through `substitute`, so an env value holding a
+  `{binding}`-shaped substring survives expansion unrewritten. Resolved once at
+  construction, which — since `graph_supplier` runs per build — is per build.
+  Because it touches the fingerprint path, it is queued for a Fable review (the
+  reserved role, as with `content_key`), with the scope spelled out in the
+  roadmap. `src/brix/actions.py`, `tests/test_env_used.py`,
+  `rust/golden/generate.py`, `docs/environment-recording.md`.
 - **Recording the build environment (phase 1: the "works on my machine"
   detective).** brix fingerprints what a build *declares* and is blind to what
   a tool reads from the *inherited* environment without anyone declaring it —

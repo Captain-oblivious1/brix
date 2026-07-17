@@ -1,10 +1,13 @@
 # Recording the build environment
 
-Status: **phase 1 implemented (2026-07-17, Opus)** — diagnostic capture +
-`brix.py env` shipped (`src/brix/environment.py`, wired in `src/brix/cli.py`,
-`tests/test_environment.py`); phases 2–3 deferred with their boundaries drawn
-below. Companion to `docs/content-key.md` (the state-vs-semantics rule this
-obeys) and `docs/roadmap.md` (the "record the environment a build used" item).
+Status: **phases 1–2 implemented (2026-07-17, Opus)** — phase 1 diagnostic
+capture + `brix.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
+and phase 2 the `env_used=` guard (`src/brix/actions.py`,
+`tests/test_env_used.py`, golden-pinned cross-engine); phase 3 deferred with its
+boundary drawn below. **Phase 2 crosses the fingerprint path and is queued for a
+Fable review** (the reserved role, as with the `content_key` relocation).
+Companion to `docs/content-key.md` (the state-vs-semantics rule this obeys) and
+`docs/roadmap.md` (the "record the environment a build used" item).
 
 ## The gap
 
@@ -32,12 +35,27 @@ step to catching it."* That word — *first* — sets the order:
    A *detective, not a guard*: it makes a silent difference **visible**, but
    does not itself rebuild. Cannot bust a cache, slow a build, or cause a
    spurious rebuild — it only records.
-2. **Declared promotion (deferred).** `env_used=["JAVA_HOME", ...]` on an
-   action promotes named variables to fingerprint material, so changing one
-   re-stales that action. This is the *guard*, opt-in, and it crosses the
-   fingerprint path (both engines, byte-identical rule). The variables worth
-   naming are usually **discovered** by phase 1's diff — you promote from
-   evidence, not from a guess.
+2. **Declared promotion (implemented).** `env_used=["JAVA_HOME", ...]` on an
+   `ExternalProcessAction` promotes named variables to fingerprint material, so
+   changing one re-stales that action. This is the *guard*, opt-in; the
+   variables worth naming are usually **discovered** by phase 1's diff — you
+   promote from evidence, not a guess. **How it stays off the Rust neutral
+   path:** each named variable is read from `os.environ` on the Python side and
+   snapshotted into a single fingerprint-only input (`_brix_env_used`, a
+   `ValueData`) — the `classpath_track` pattern. Both engines already
+   fingerprint a `ValueData` input identically, so only the resolved *value*
+   crosses the boundary as ordinary data; Rust needs no change, and a golden
+   fingerprint case (`env_used tracked variable` in `rust/golden/generate.py`)
+   pins the parity mechanically. Load-bearing distinctions from `env=`: the
+   snapshot is **never set** in the process environment (it tracks, it does not
+   inject) and **never** substituted into the command; an **unset** variable is
+   recorded as JSON `null`, kept distinct from set-to-empty; and the snapshot is
+   copied **verbatim** through `substitute`, so an env value containing a
+   `{binding}`-shaped substring cannot be rewritten during expansion. Resolved
+   once, at action construction — which, since `graph_supplier` is called per
+   build, is per build (a graph object constructed once and reused across env
+   changes would hold a stale snapshot; the standard callable pattern does
+   not).
 3. **Automatic detection (deferred, heavy).** Observe which variables the
    process actually read (`getenv` via `ptrace`/`strace`, or a shim
    environment) and fold them in like depfile-discovered headers

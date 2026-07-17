@@ -7,12 +7,37 @@ are applied by planning layers, never declared here.
 
 from __future__ import annotations
 
+import json
+import os
 from typing import TYPE_CHECKING
 
 from .data import DataAtom, DataExpr, DataUnion
 
 if TYPE_CHECKING:
     from .workers import WorkerSpec
+
+# The input key under which `env_used=` is materialized. Reserved (leading
+# underscore, brix-namespaced) so it cannot collide with an author's input key
+# and is never referenced by a command template. See `_resolve_env_used`.
+_ENV_USED_KEY = "_brix_env_used"
+
+
+def _resolve_env_used(names) -> "DataExpr":
+    """Snapshot the named environment variables into one fingerprint-only
+    `ValueData` — the phase-2 *guard* of docs/environment-recording.md.
+
+    Each declared name is read from `os.environ` (``None`` when unset, which is
+    kept distinct from set-to-empty) and encoded as sorted canonical JSON. The
+    result rides as an **unreferenced** input (the `classpath_track` pattern):
+    it is hashed into the action's fingerprint by both engines — so changing a
+    named variable re-stales the action — but it is never substituted into the
+    command and never set in the process environment. Resolving here, on the
+    Python side, keeps this off the Rust neutral path entirely: only the
+    resolved *value* crosses the boundary, as ordinary `ValueData`."""
+    from .data import ValueData
+
+    snapshot = {name: os.environ.get(name) for name in sorted(set(names))}
+    return ValueData(json.dumps(snapshot, sort_keys=True, ensure_ascii=False))
 
 
 class Action:
@@ -65,6 +90,7 @@ class ExternalProcessAction(Expandable):
         inputs: dict[str, DataExpr] | None = None,
         outputs: dict[str, DataExpr] | None = None,
         env: dict[str, DataExpr | str] | None = None,
+        env_used: tuple[str, ...] | list[str] | None = None,
         worker: "WorkerSpec | None" = None,
         depfile: str | None = None,
         self_resolved_inputs: tuple[str, ...] = (),
@@ -79,6 +105,15 @@ class ExternalProcessAction(Expandable):
             k: v if isinstance(v, DataExpr) else ValueData(v)
             for k, v in (env or {}).items()
         }
+        # `env_used` names ambient environment variables this action's output
+        # depends on but does not *set* (unlike `env=`). They are snapshotted
+        # into a single fingerprint-only input so a change re-stales the action
+        # — the guard, not a declaration of process env. Materialized once here;
+        # idempotent under `substitute` (the reserved key survives the copy, so
+        # the snapshot is never re-read). See `_resolve_env_used`.
+        self.env_used: tuple[str, ...] = tuple(env_used or ())
+        if self.env_used and _ENV_USED_KEY not in self.inputs:
+            self.inputs[_ENV_USED_KEY] = _resolve_env_used(self.env_used)
         # A worker executes this action as a request instead of spawning it;
         # None spawns a process. Purely an execution transport (see workers.py).
         self.worker = worker
@@ -112,12 +147,22 @@ class ExternalProcessAction(Expandable):
         if depfile is not None:
             for key, value in bindings.items():
                 depfile = depfile.replace("{" + key + "}", value)
+        # The materialized _brix_env_used snapshot is immutable — copy it
+        # verbatim rather than through placeholder substitution, so an env value
+        # that happens to contain a `{binding}`-shaped substring cannot be
+        # rewritten during expansion. Its key's presence also makes __init__
+        # skip re-resolving (the snapshot is taken once, at construction).
+        inputs = {
+            k: (v if k == _ENV_USED_KEY else _substitute_expr(v, bindings))
+            for k, v in self.inputs.items()
+        }
         return ExternalProcessAction(
             name=name,
             command_line=self.command_line,
-            inputs={k: _substitute_expr(v, bindings) for k, v in self.inputs.items()},
+            inputs=inputs,
             outputs={k: _substitute_expr(v, bindings) for k, v in self.outputs.items()},
             env={k: _substitute_expr(v, bindings) for k, v in self.env.items()},
+            env_used=self.env_used,
             worker=self.worker,
             depfile=depfile,
             self_resolved_inputs=self.self_resolved_inputs,

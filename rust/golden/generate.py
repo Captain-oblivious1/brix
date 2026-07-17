@@ -13,6 +13,7 @@ fingerprint/pattern/shlex semantics change (and then re-run `cargo test`).
 """
 
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -590,6 +591,10 @@ def gen_fingerprints():
     ctx = NodeContext.for_root(TREE_ROOT)
     det = TimeAndHashChangeDetector(TREE_ROOT)  # metadata is never saved to disk
 
+    # Fix the env_used case's variable to a stable value so its snapshot (and
+    # thus the golden fingerprint) is deterministic across machines.
+    os.environ["BRIX_GOLDEN_ENV"] = "golden-value"
+
     actions = [
         ExternalProcessAction(
             name="one file",
@@ -664,6 +669,18 @@ def gen_fingerprints():
             command_line="kotlinc -classpath {cp} main.kt",
             inputs={"cp": KotlinAbiFile("ktlib/kotlin-dep.jar")},
             outputs={"out": d.file("build/app.jar")},
+        ),
+        # env_used (phase 2): the named ambient variable is snapshotted into a
+        # fingerprint-only `_brix_env_used` ValueData input (resolved on the
+        # Python side to a fixed value here for a deterministic golden). Rust
+        # fingerprints it through the ordinary inputs path — this case pins that
+        # cross-engine parity mechanically. See docs/environment-recording.md.
+        ExternalProcessAction(
+            name="env_used tracked variable",
+            command_line="cc {src} {out}",
+            inputs={"src": d.file("src/a.txt")},
+            outputs={"out": d.file("build/a.o")},
+            env_used=["BRIX_GOLDEN_ENV"],
         ),
     ]
     return [
