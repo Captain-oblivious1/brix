@@ -1,5 +1,30 @@
 # Development log
 
+- **Fable review of the `content_key` relocation (`634c115`): verdict
+  positive; one golden gap closed.** The reserved-Fable check on the
+  fingerprint-byte-identical claim. Every load-bearing piece verified: the
+  golden diff proves digests unchanged across the `identity`→`content_key`
+  wire rename (the field *name* never enters fingerprint material — only the
+  versioned lens tag does, so no cache split); byte hashing's 3-element
+  material shape vs a lens's 4-element `[..., tag, digest]` shape cannot
+  collide (length plus tag prefix); the `:raw` fallback stays inside the
+  lens's tag namespace; digest caching keys on the versioned tag plus the
+  same stat signature in both engines, with a missing file encoding
+  identically as `[tag, Null]`; substitution reconstructs via `type(self)` /
+  preserves the lens on the Rust side too; and the golden cross-check is
+  non-circular (Python generates, Rust re-derives every entry). The one
+  actionable finding was a same-day gap: no fingerprint golden pinned
+  `kotlin-abi@1` tag parity across engines. Closed in `b58dd6a` — a
+  `kotlin-abi jar` case built from committed fixture bytes
+  (`rust/golden/tree/ktlib/`, fixed zip timestamps, own directory so the
+  historic `lib/{n}.jar` glob case keeps its pinned digest) — along with a
+  deliberate refresh of the cpp golden specs that had drifted after the
+  `deps=` feature (golden.rs replays stored specs, so parity never actually
+  broke). Non-blocking, miss-only notes for the record: a lens parse that
+  fails is re-attempted each build (perf, not correctness); Python
+  `identity.register()` silently replaces a builtin where Rust has no such
+  hook; a version bump applied to one engine but not the other diverges them
+  toward rebuilds, never staleness.
 - **The `kotlin-abi` lens: cross-module Kotlin skipping, soundly.** Recovers
   the skip that byte-tracking the Kotlin classpath gave up (previous entry).
   Ground-truth experiments shaped it: an inline-body edit changes consumers'

@@ -263,10 +263,20 @@ careful model:
   soak. A line-by-line review that the Rust engine fully covers the execution
   half before the Python fallback is removed; one subtle ordering gap here breaks
   builds. Deletion boundary spelled out in track 2 above.
-- **Review pass on the `content_key` relocation** (commit `634c115`) — the
-  fingerprint-byte-identical claim is the thing to scrutinize; the golden diff
-  shows only `spec` strings changed, but a careful read of the trait dispatch and
-  the material-shape invariant is the reserved-Fable check for that change.
+- **Review pass on the `content_key` relocation** (commit `634c115`) — **done
+  (2026-07-17, Fable), verdict positive.** The byte-identity claim holds: the
+  golden diff proves digests unchanged across the `identity`→`content_key`
+  rename (the wire field name is not fingerprint material — only the versioned
+  tag is), the 3-element byte-hash vs 4-element lens material shapes cannot
+  collide, digest caching keys on the versioned tag plus the shared stat
+  signature, and substitution preserves the lens in both engines. One gap
+  found and closed (commit `b58dd6a`): no fingerprint golden pinned the
+  `kotlin-abi@1` tag across engines — added, plus a refresh of cpp golden
+  specs that had gone stale after the `deps=` feature (parity never broke;
+  golden.rs replays stored specs). Miss-only, non-blocking notes: failing
+  lens parses are not cached (perf only); Python `identity.register()` can
+  silently replace a builtin; a one-sided lens version bump diverges the
+  engines toward rebuilds, never staleness.
 
 ### Blocked or not yet decided
 
