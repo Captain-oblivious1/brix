@@ -184,8 +184,19 @@ These are self-contained and come with tests. No Fable needed.
 - **Record the environment a build used.** An environment variable or machine
   setting that a tool reads, but that the build file didn't declare, can change a
   build's result without brix noticing — the classic "works on my machine, fails
-  on the server." Recording what was actually used is the first step to catching
-  it.
+  on the server." **Phase 1 done (2026-07-17, Opus):** a build now captures its
+  filtered environment to `build/.brix/environment.json`, and `brix.py env`
+  diffs the current environment against the last recorded build (exit 1 on a
+  difference), with a one-line note folded into `status`. A *detective, not a
+  guard* — it records and shows, never rebuilds or fingerprints, so it can't
+  bust a cache or slow a build; being Python-owned diagnostic state it needs no
+  Rust/graph/wire change. A conservative ignore-list drops session noise
+  (`PWD`, `SHLVL`, `SSH_*`, …) and keeps the signal (`PATH`, `JAVA_HOME`,
+  `*FLAGS*`, …); `cli.main(..., env_ignore=[...])` extends it. **Deferred:**
+  phase 2 promotes a declared subset (`env_used=[...]`) to fingerprint material
+  (the *guard*, crosses the byte-identical fingerprint path), and phase 3
+  auto-detects which variables a tool read (`getenv` tracing, folded in like
+  depfile headers). See `docs/environment-recording.md`.
 
 **Making Kotlin builds fast:**
 

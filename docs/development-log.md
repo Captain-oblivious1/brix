@@ -1,5 +1,31 @@
 # Development log
 
+- **Recording the build environment (phase 1: the "works on my machine"
+  detective).** brix fingerprints what a build *declares* and is blind to what
+  a tool reads from the *inherited* environment without anyone declaring it —
+  `JAVA_HOME`, `CC`, a locale — which can change output while brix, seeing no
+  declared change, serves the result as fresh. A build now captures its
+  filtered environment to `build/.brix/environment.json`, and `brix.py env`
+  prints the last recorded build environment plus a diff against the current
+  one (exit 1 when they differ, like `status`); a one-line note also folds into
+  `status`. It is a *detective, not a guard*: it records and shows, and
+  deliberately does **not** rebuild, fingerprint, or split a cache — so it
+  cannot slow a build or cause a spurious rebuild. That framing keeps it pure
+  diagnostic *state* (docs/content-key.md's state-vs-semantics rule), which is
+  why it lives beside the metadata, is Python-owned at the CLI boundary (the
+  Python process *is* the build's environment, on either engine), and needs no
+  Rust/graph/wire change at all. The noise filter is a conservative
+  ignore-list (completeness beats quiet for a diagnostic): it drops session
+  volatiles (`PWD`, `SHLVL`, `TERM`, `SSH_*`, `XDG_SESSION*`, …) and keeps
+  everything else, with `cli.main(..., env_ignore=[...])` extending it per
+  project. Capture is per-build (the environment is uniform across a build) and
+  runs even on failure (a failed build's environment is equally worth
+  diffing). `clean` removes the record with the rest of the metadata directory
+  on both engines. Deferred and bounded in the design note: phase 2 (`env_used=`
+  promotes a declared subset to fingerprint material — the guard, crossing the
+  byte-identical path) and phase 3 (auto-detect read variables via `getenv`
+  tracing, folded in like depfile headers). `src/brix/environment.py`,
+  `tests/test_environment.py`, `docs/environment-recording.md`.
 - **The warm kotlinc worker.** A cold `kotlinc` pays JVM startup *and* reloads
   and re-JITs the entire Kotlin compiler on every call — a far heavier tax
   than `javac` — so keeping it warm is the Kotlin edit-loop win.

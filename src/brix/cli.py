@@ -16,7 +16,11 @@ Commands (default: build):
     brix.py clean       delete built outputs and metadata
     brix.py graph       print the execution plan's structure
     brix.py help        show this build file's live configuration
+    brix.py env         show the last build's environment and what changed
 
+`env` reports the environment the most recent build ran under and diffs it
+against the current one (exit 1 if it differs) — the "works on my machine"
+detective; a build captures it as a side effect (docs/environment-recording.md).
 `help` introspects the builder chain (which layers are wired, so whether
 `--stage` / `commit` / `discard` apply), the target aliases, and the
 project's `commands=`, so the effect of `build` is visible without reading
@@ -40,6 +44,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import environment
 from .builders import AtomicBuilder, IncrementalBuilder
 from .data import FileData, GlobData
 from .metadata import BuildMetadata
@@ -73,6 +78,7 @@ def main(
     builder_factory=None,
     aliases: dict[str, str | list[str]] | None = None,
     commands: dict[str, Callable[[list[Path]], int | None]] | None = None,
+    env_ignore: list[str] | None = None,
 ) -> int:
     """``builder_factory`` (optional): zero-argument callable returning the
     builder to use for ``build`` — e.g. the full
@@ -85,7 +91,11 @@ def main(
     ``commands`` (optional): build-then-act subcommands — ``{"view": fn}``
     adds ``brix.py view <target>...``, which builds the targets (aliases
     apply) and, on success, calls ``fn(paths)`` with their absolute
-    ``Path``s. ``fn`` may return an exit code."""
+    ``Path``s. ``fn`` may return an exit code.
+
+    ``env_ignore`` (optional): extra environment-variable names/globs to drop
+    from the recorded build environment, on top of the built-in ignore-list of
+    session noise (see ``brix.environment`` and ``brix.py env``)."""
     parser = argparse.ArgumentParser(prog="brix.py")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -121,6 +131,9 @@ def main(
     subparsers.add_parser("clean", help="delete built outputs and metadata")
     subparsers.add_parser("graph", help="print the execution plan structure")
     subparsers.add_parser("help", help="show this build file's live configuration")
+    subparsers.add_parser(
+        "env", help="show the last build's environment and what changed since"
+    )
     for name in commands or {}:
         add_build_options(
             subparsers.add_parser(name, help=f"build target(s), then {name} them"), "+"
@@ -167,6 +180,14 @@ def main(
         except ValueError as exc:
             print(f"brix: {exc}", file=sys.stderr)
             return 2
+        # Record the environment this build ran under (success or failure — a
+        # failed build's environment is equally worth diffing). Diagnostic
+        # state only: it never rebuilds, fingerprints, or splits a cache.
+        environment.write_record(
+            root / metadata_dir,
+            command=command,
+            variables=environment.capture(ignore=env_ignore),
+        )
         if not result.success:
             return 1
         if command == "build":
@@ -187,6 +208,14 @@ def main(
             print(f"brix: {exc}", file=sys.stderr)
             return 2
         print(report.render())
+        # A build-wide heads-up, independent of the graph's freshness: the
+        # environment differs from the last recorded build. Diagnostic only —
+        # it does not change status's clean/pending exit code.
+        note = environment.summary_line(
+            root / metadata_dir, environment.capture(ignore=env_ignore)
+        )
+        if note is not None:
+            print(note)
         return 0 if report.is_clean else 1
 
     if command == "errors":
@@ -239,6 +268,13 @@ def main(
             builder = IncrementalBuilder(graph_supplier, root=root, metadata_dir=metadata_dir)
         print(_render_help(builder, aliases, commands))
         return 0
+
+    if command == "env":
+        text, changed = environment.render(
+            root / metadata_dir, environment.capture(ignore=env_ignore)
+        )
+        print(text)
+        return 1 if changed else 0
 
     parser.error(f"unknown command {command!r}")
     return 2
@@ -321,6 +357,7 @@ def _render_help(builder, aliases, commands) -> str:
         ("clean", "delete built outputs and metadata"),
         ("graph", "print the execution plan structure"),
         ("help", "show this configuration"),
+        ("env", "show the last build's environment and what changed"),
     ]
     command_rows = list(fixed)
     for name in commands or {}:
