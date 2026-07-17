@@ -168,8 +168,8 @@ rebuild byte-for-byte; inline edit and line-shift → dependent recompiles and
 equals clean. Residual assumption for the air-gapped trial: inline is
 kotlinc's only body-leak channel (reified requires inline; `const` is
 ConstantValue) — a surprise there points here. Warm-worker reuse for kotlinc
-is a separate optimization. (Spring Boot fat-jars: **done** — see
-spring-petclinic.)
+is **done** (2026-07-17, Opus; see the Opus-queue entry below). (Spring Boot
+fat-jars: **done** — see spring-petclinic.)
 
 ### Opus queue — ready to do now
 
@@ -186,6 +186,28 @@ These are self-contained and come with tests. No Fable needed.
   build's result without brix noticing — the classic "works on my machine, fails
   on the server." Recording what was actually used is the first step to catching
   it.
+
+**Making Kotlin builds fast:**
+
+- **Warm kotlinc worker.** **Done (2026-07-17, Opus).** A cold `kotlinc`
+  reloads and re-JITs the entire Kotlin compiler on every call — a far bigger
+  tax than `javac` — so `kotlin.kotlinc_worker(graph, kotlin_compiler=...)`
+  keeps one alive and compiles in-process, the Kotlin analogue of
+  `java.javac_worker`. The worker (`src/brix/_java/KotlincWorker.java`) is
+  plain Java that reflects into `org.jetbrains.kotlin.cli.jvm.K2JVMCompiler`
+  (so it bootstrap-compiles with plain `javac`, no Kotlin on the compile
+  classpath; the compiler arrives on the launch classpath as
+  `lib/kotlin-compiler.jar`), and its `exec(PrintStream, String…)` returns an
+  `ExitCode` without `System.exit`, so it is safe to call in a loop.
+  `JarAction(kotlinc_worker=…)` routes the compile through it; the classpath
+  stays kotlin-abi-lensed, identical to the spawn path, because the worker is
+  pure transport. It rides the same cross-build daemon as `javac` (crosses the
+  Python↔Rust boundary; measured warm across builds), and the all-open
+  plugin loads in-process. Note the compile-vs-launch JDK split: the worker is
+  built with `--release 17` so it runs on whatever `java` launches it, which
+  must be a JDK the Kotlin compiler supports. `tests/test_kotlin_worker.py`
+  (unit + kotlinc-gated e2e, both engines); demonstrated in
+  `examples/kotlin_multimodule/brix.py`.
 
 **Making it easy to start:**
 

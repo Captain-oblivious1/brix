@@ -39,6 +39,7 @@ changes always do.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .actions import Action, ExternalProcessAction
@@ -51,6 +52,13 @@ from .java import (
 
 if TYPE_CHECKING:
     from .deps import DepSet
+    from .graph import Graph
+    from .workers import WorkerSpec
+
+# The kotlinc worker bootstrap source (a small in-process K2JVMCompiler
+# wrapper, reflection-only so it compiles with plain javac); see
+# `kotlinc_worker` and src/brix/workers.py.
+_WORKER_SOURCE = Path(__file__).parent / "_java" / "KotlincWorker.java"
 
 # The all-open plugin's built-in preset that mirrors Gradle's
 # kotlin("plugin.spring"): open every class annotated (directly or through a
@@ -100,6 +108,88 @@ def _classpath_union(classpath: list[DataExpr]) -> DataExpr:
     return abi(DataUnion(*classpath))
 
 
+def kotlinc_worker(
+    graph: "Graph",
+    *,
+    kotlin_compiler: str | FileData | ToolData,
+    java: ToolData | None = None,
+    javac: ToolData | None = None,
+    jar_tool: ToolData | None = None,
+    work_dir: str = "build/.brix-kotlin",
+) -> "WorkerSpec":
+    """Add the kotlinc worker bootstrap to ``graph`` and return its `WorkerSpec`.
+
+    A cold ``kotlinc`` pays JVM startup *and* loads/JIT-warms the whole Kotlin
+    compiler on every call, so keeping it warm between compilations is the big
+    edit-loop win — the Kotlin analogue of ``java.javac_worker``. Pass the
+    returned spec to ``JarAction(kotlinc_worker=...)`` to route module
+    compilation through the warm worker instead of spawning ``kotlinc``.
+
+    ``kotlin_compiler`` is the distribution's ``lib/kotlin-compiler.jar`` (the
+    self-contained compiler the worker instantiates in-process by reflection);
+    the worker itself is plain Java, so it compiles with ``javac`` alone. Note
+    the compile-vs-launch JDK split: the worker is compiled with ``--release
+    17`` so it runs on whatever ``java`` launches it, which must be a JDK the
+    Kotlin compiler supports (its version, not the worker's, is what compiles
+    your sources).
+
+    Idempotent: called more than once on a graph, it adds the bootstrap only
+    once and returns the same spec, so many `JarAction`s share one worker jar.
+    """
+    from .workers import WorkerSpec
+
+    cached = getattr(graph, "_brix_kotlinc_worker", None)
+    if cached is not None:
+        return cached
+
+    java = java if java is not None else ToolData("java")
+    javac = javac if javac is not None else ToolData("javac")
+    jar_tool = jar_tool if jar_tool is not None else ToolData("jar")
+    classes_dir = f"{work_dir}/worker-classes"
+    worker_jar = f"{work_dir}/kotlinc-worker.jar"
+    classes = GlobData(f"{classes_dir}/{{name}}.class")
+
+    graph.add(
+        ExternalProcessAction(
+            name="kotlinc-worker: compile",
+            # --release 17 decouples the compile JDK from the (Kotlin-compatible)
+            # launch JDK: the worker class then runs on any java >= 17.
+            command_line="{javac} --release 17 -d {classes_dir} {source}",
+            inputs={"javac": javac, "source": FileData(str(_WORKER_SOURCE.resolve()))},
+            outputs={"classes_dir": FileData(classes_dir), "classes": classes},
+        ),
+        ExternalProcessAction(
+            name="kotlinc-worker: jar",
+            command_line="{jar} cfe {out} KotlincWorker -C {classes_dir} .",
+            inputs={
+                "jar": jar_tool,
+                "classes_dir": FileData(classes_dir),
+                "classes": GlobData(f"{classes_dir}/{{name}}.class"),
+            },
+            outputs={"out": FileData(worker_jar)},
+        ),
+    )
+    if isinstance(kotlin_compiler, DataExpr):
+        compiler_expr: DataExpr = kotlin_compiler
+    else:
+        compiler_expr = FileData(str(kotlin_compiler))
+    spec = WorkerSpec(
+        name="kotlinc",
+        # -cp joins the worker jar and the compiler jar in one token: the
+        # placeholders are adjacent (no whitespace), so {sep} renders the
+        # platform path separator between the two overlay-resolved paths.
+        command_line="{java} -cp {worker_jar}{sep}{kotlin_compiler} KotlincWorker",
+        inputs={
+            "java": java,
+            "worker_jar": FileData(worker_jar),
+            "sep": ValueData(os.pathsep),
+            "kotlin_compiler": compiler_expr,
+        },
+    )
+    graph._brix_kotlinc_worker = spec  # type: ignore[attr-defined]
+    return spec
+
+
 class JarAction(Action):
     """Compile a whole Kotlin module with ``kotlinc`` and package it into a jar.
 
@@ -123,6 +213,7 @@ class JarAction(Action):
         options: list[str] | DataExpr | None = None,
         entry_point: str | None = None,
         resource_dir: str | None = None,
+        kotlinc_worker: "WorkerSpec | None" = None,
     ) -> None:
         self.source_files = source_files
         self.output_file = output_file
@@ -135,10 +226,44 @@ class JarAction(Action):
         self.options = options
         self.entry_point = entry_point
         self.resource_dir = resource_dir
+        # When set, the compile step routes through the warm kotlinc worker
+        # (see kotlin.kotlinc_worker); otherwise it spawns kotlinc. Both paths
+        # lens the classpath through kotlin-abi identically — the worker is
+        # pure transport, so what recompiles a dependent does not change.
+        self.kotlinc_worker = kotlinc_worker
 
     def lower(self) -> list[Action]:
         classes = GlobData(f"{self.classes_dir}/{{name}}.class")
 
+        if self.kotlinc_worker is not None:
+            compile_kotlin = self._compile_via_worker(classes)
+        else:
+            compile_kotlin = self._compile_via_spawn(classes)
+
+        if self.entry_point:
+            jar_command = "{jar} cfe {output} {entry_point} -C {classes_dir} ."
+            jar_inputs: dict[str, DataExpr] = {"entry_point": ValueData(self.entry_point)}
+        else:
+            jar_command = "{jar} cf {output} -C {classes_dir} ."
+            jar_inputs = {}
+        if self.resource_dir is not None:
+            jar_command += " -C {resource_dir} ."
+            jar_inputs["resource_dir"] = FileData(self.resource_dir)
+            jar_inputs["resources"] = GlobData(f"{self.resource_dir}/{{name}}")
+        package = ExternalProcessAction(
+            name=f"jar {self.output_file.path}",
+            command_line=jar_command,
+            inputs={
+                "jar": self.jar_tool,
+                "classes_dir": FileData(self.classes_dir),
+                "classes": classes,
+                **jar_inputs,
+            },
+            outputs={"output": self.output_file},
+        )
+        return [compile_kotlin, package]
+
+    def _compile_via_spawn(self, classes: GlobData) -> ExternalProcessAction:
         parts = ["{kotlinc}", "-jvm-target {jvm_target}"]
         inputs: dict[str, DataExpr] = {
             "kotlinc": self.kotlinc,
@@ -171,32 +296,40 @@ class JarAction(Action):
             parts.append("-Xplugin={allopen} -P {preset}")
         parts += ["{options}", "-d {classes_dir}", "{sources}"]
         inputs["sources"] = self.source_files
-        compile_kotlin = ExternalProcessAction(
+        return ExternalProcessAction(
             name=f"kotlinc -> {self.classes_dir}",
             command_line=" ".join(parts),
             inputs=inputs,
             outputs={"classes_dir": FileData(self.classes_dir), "classes": classes},
         )
 
-        if self.entry_point:
-            jar_command = "{jar} cfe {output} {entry_point} -C {classes_dir} ."
-            jar_inputs: dict[str, DataExpr] = {"entry_point": ValueData(self.entry_point)}
-        else:
-            jar_command = "{jar} cf {output} -C {classes_dir} ."
-            jar_inputs = {}
-        if self.resource_dir is not None:
-            jar_command += " -C {resource_dir} ."
-            jar_inputs["resource_dir"] = FileData(self.resource_dir)
-            jar_inputs["resources"] = GlobData(f"{self.resource_dir}/{{name}}")
-        package = ExternalProcessAction(
-            name=f"jar {self.output_file.path}",
-            command_line=jar_command,
-            inputs={
-                "jar": self.jar_tool,
-                "classes_dir": FileData(self.classes_dir),
-                "classes": classes,
-                **jar_inputs,
-            },
-            outputs={"output": self.output_file},
+    def _compile_via_worker(self, classes: GlobData) -> ExternalProcessAction:
+        # The warm worker joins the classpath itself and resolves the plugin
+        # path, so — unlike the spawn path — the classpath is a plain
+        # kotlin-abi-lensed input referenced by the template (no baked value),
+        # and the plugin jar travels as an explicit path arg. jvm-target and
+        # user options ride --options; the worker passes them through verbatim.
+        # The classpath lens is identical to the spawn path: the worker is pure
+        # transport, so what recompiles a dependent is unchanged (see
+        # _compile_via_spawn for the kotlin-abi rationale).
+        inputs: dict[str, DataExpr] = {
+            "jvm_target": ValueData(self.jvm_target),
+            "options": _options_expr(self.options),
+            "sources": self.source_files,
+        }
+        parts = ["--options -jvm-target {jvm_target} {options}"]
+        if self.classpath:
+            inputs["classpath"] = _classpath_union(self.classpath)
+            parts.append("--classpath {classpath}")
+        if self.spring_allopen is not None:
+            inputs["allopen"] = FileData(self.spring_allopen)
+            inputs["preset"] = ValueData(_SPRING_PRESET)
+            parts.append("--plugin {allopen} --plugin-option {preset}")
+        parts += ["-d {classes_dir}", "--sources {sources}"]
+        return ExternalProcessAction(
+            name=f"kotlinc(worker) -> {self.classes_dir}",
+            worker=self.kotlinc_worker,
+            command_line=" ".join(parts),
+            inputs=inputs,
+            outputs={"classes_dir": FileData(self.classes_dir), "classes": classes},
         )
-        return [compile_kotlin, package]

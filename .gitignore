@@ -12,3 +12,5 @@ examples/typescript/node_modules/
 rust/target/
 src/brix/brix_py*.so
 src/brix/brix_py*.pyd
+src/brix/brix-workerd
+src/brix/brix-workerd.exe

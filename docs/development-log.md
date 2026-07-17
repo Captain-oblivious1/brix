@@ -1,5 +1,38 @@
 # Development log
 
+- **The warm kotlinc worker.** A cold `kotlinc` pays JVM startup *and* reloads
+  and re-JITs the entire Kotlin compiler on every call — a far heavier tax
+  than `javac` — so keeping it warm is the Kotlin edit-loop win.
+  `kotlin.kotlinc_worker(graph, kotlin_compiler=…)` mirrors `java.javac_worker`:
+  it bootstrap-compiles a small worker and returns a `WorkerSpec` that
+  `JarAction(kotlinc_worker=…)` routes the compile through. The worker
+  (`src/brix/_java/KotlincWorker.java`) is plain Java that invokes the Kotlin
+  compiler in-process by reflection into
+  `org.jetbrains.kotlin.cli.jvm.K2JVMCompiler` — so it compiles with plain
+  `javac` (no Kotlin classes on the compile classpath, exactly like
+  `JavacWorker`); the compiler is supplied on the *launch* classpath as
+  `lib/kotlin-compiler.jar`. `K2JVMCompiler.exec(PrintStream, String…)`
+  returns an `ExitCode` without calling `System.exit`, which is what makes
+  repeated in-process compilation safe; the worker also redirects
+  `System.out`/`System.err` for the duration of each `exec` so stray compiler
+  output can't corrupt the line protocol. The worker protocol gained
+  `--plugin`/`--plugin-option` (path-resolved plugin jar → `-Xplugin=`, preset
+  → `-P`) on top of the javac worker's `--sources`/`--classpath`/`--options`,
+  and path-bearing args are absolutized against the request cwd so the worker
+  stays stateless. Because the worker is pure transport, the classpath stays
+  kotlin-abi-lensed identically to the spawn path — verified end-to-end: an
+  inline-free implementation edit still skips the dependent, an inline-body
+  edit still recompiles it, over the worker, under both engines. It rides the
+  existing cross-build daemon (`brix-workerd`, crossing the Python↔Rust
+  boundary), so the warm compiler survives *between* builds — measured on
+  `examples/kotlin_multimodule` at ~0.3 s for the second edit-rebuild versus
+  ~2.1 s cold. One JDK subtlety: the worker is built with `--release 17` to
+  decouple the compile JDK from the (Kotlin-compatible) JDK that launches it.
+  Known parity note, shared with the javac worker: the worker path does not
+  fold the compiler tool identity into the compile fingerprint (spawn does via
+  the `{kotlinc}` tool), so a compiler upgrade is not tracked on the worker
+  path — a cross-cutting item for both workers, not specific to Kotlin.
+  `tests/test_kotlin_worker.py`; `examples/kotlin_multimodule/brix.py`.
 - **`brix.py help` — the build file's live configuration.** `-h` only ever
   listed the built-in subcommands; everything project-specific lived inside
   the `cli.main(...)` call and was invisible without opening the file. `help`

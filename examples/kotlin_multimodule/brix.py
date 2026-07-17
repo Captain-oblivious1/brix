@@ -26,8 +26,18 @@ would hide `core`'s freshly built jar under a staging directory kotlinc can't
 see. That is the parked "staged-overlay visibility for foreign resolvers"
 limitation (docs/roadmap.md), which cross-module compilers trip.
 
+It also compiles through a **warm kotlinc worker** (`kotlin.kotlinc_worker`): a
+cold kotlinc reloads and re-JITs the entire Kotlin compiler on every call, so a
+long-lived worker that compiles in-process is the Kotlin edit-loop win. The
+worker is pure transport — it changes only speed, not what recompiles — so the
+kotlin-abi skip above is unaffected. With the cross-build daemon (the default
+under the Rust engine) the warm compiler even survives *between* `build`
+invocations, so the second edit-rebuild pays no compiler-startup cost at all.
+
 Setup: a `kotlinc` on PATH (or `BRIX_KOTLINC=/path/to/kotlinc`). kotlinc bundles
-the Kotlin stdlib, so there are no external dependencies to resolve.
+the Kotlin stdlib, so there are no external dependencies to resolve. The worker
+finds `lib/kotlin-compiler.jar` beside the launcher (override with
+`BRIX_KOTLIN_COMPILER`) and launches it with the `java` on PATH.
 
 Run (from anywhere):
     python examples/kotlin_multimodule/brix.py build
@@ -36,6 +46,7 @@ Run (from anywhere):
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -50,25 +61,42 @@ from brix import Graph, cli, kotlin  # noqa: E402
 KOTLINC = os.environ.get("BRIX_KOTLINC", "kotlinc")
 
 
+def _kotlin_compiler() -> str:
+    """The dist's lib/kotlin-compiler.jar, which the warm worker instantiates
+    in-process. Derived from the kotlinc launcher (dist layout: bin/kotlinc ->
+    lib/kotlin-compiler.jar); override with BRIX_KOTLIN_COMPILER."""
+    override = os.environ.get("BRIX_KOTLIN_COMPILER")
+    if override:
+        return override
+    launcher = shutil.which(KOTLINC) or KOTLINC
+    return str(Path(launcher).resolve().parent.parent / "lib" / "kotlin-compiler.jar")
+
+
 def create_graph() -> Graph:
     graph = Graph()
     data = graph.data
+    # A warm kotlinc worker: kotlinc reloads and re-JITs the whole compiler on
+    # every cold call, so keeping it alive between compilations is the big
+    # edit-loop win (the Kotlin analogue of java.javac_worker). Both modules
+    # route through the one worker; it is pure transport, so the kotlin-abi
+    # skip below is unchanged.
+    worker = kotlin.kotlinc_worker(graph, kotlin_compiler=_kotlin_compiler())
     graph.add(
         kotlin.JarAction(
             source_files=data.glob("core/src/{name}.kt"),
             output_file=data.file("build/core.jar"),
-            kotlinc=data.tool(KOTLINC),
             classes_dir="build/core-classes",
             jvm_target="17",
+            kotlinc_worker=worker,
         ),
         kotlin.JarAction(
             source_files=data.glob("app/src/{name}.kt"),
             output_file=data.file("build/app.jar"),
-            kotlinc=data.tool(KOTLINC),
             classes_dir="build/app-classes",
             jvm_target="17",
             classpath=[data.file("build/core.jar")],  # kotlin-abi-lensed; see module docstring
             entry_point="demo.app.MainKt",
+            kotlinc_worker=worker,
         ),
     )
     return graph
