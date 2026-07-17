@@ -1,5 +1,27 @@
 # Development log
 
+- **Guard: AtomicBuilder must be the outermost builder.** The staging overlay
+  and the P0 staging-hazard guard both hang off `AtomicBuilder`, so burying it
+  inside another builder — `CacheBuilder(AtomicBuilder(...))` — silently
+  bypasses the hazard guard (a hazardous foreign-resolver graph that the correct
+  nesting *refuses* would build anyway) and puts commit/discard out of reach,
+  even though the layer specs self-order so the build superficially works. Both
+  facts were reproduced before fixing. Two guards now prevent it, in the spirit
+  of "typed language would make it a compile error, Python should at least raise
+  and hint": (1) a nominal type hierarchy — a `NestableBuilder` marker base that
+  `CleanBuilder`/`IncrementalBuilder`/`CacheBuilder` inherit and `AtomicBuilder`
+  deliberately does **not**, so the wrapping builders' `inner: NestableBuilder`
+  annotation makes a type checker (and any IDE) flag a buried stack as it's
+  typed, backed by a runtime `TypeError`; (2) the language-neutral form of the
+  rule in the Rust core — `build_layers` rejects an `atomic` spec entry that
+  isn't outermost (last). The core check is the piece that keeps the polyglot
+  future uncornered: the rule is stated once in the shared core and documented
+  in `docs/boundary-schema.md`, so a future JS/TS frontend inherits it (and adds
+  its own branded-type ergonomics) instead of reimplementing it. Interesting
+  wrinkle: Python needs *nominal* typing here (a structural `Protocol` wouldn't
+  exclude `AtomicBuilder`, whose shape matches the others) — the same reason a TS
+  frontend would need branded types rather than a plain interface.
+  `tests/test_builder_ordering.py`, Rust unit tests in `brix-py`.
 - **Deleted-source cleanup after a failed build.** brix cleans up a deleted
   source's leftover outputs by remembering, between builds, which collection
   members existed. That record was committed only on *success*, so a member

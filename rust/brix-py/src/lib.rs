@@ -267,6 +267,27 @@ fn custom_identities(
     })
 }
 
+/// The atomic layer must be outermost — the last entry, since `config.layers`
+/// is innermost-first. This is the language-neutral form of "AtomicBuilder must
+/// be the outermost builder" (docs/boundary-schema.md): validating it in the
+/// shared core means every frontend inherits the rule instead of reimplementing
+/// it. (The Python builder types also express it, so an IDE flags a bad stack
+/// before the spec is ever built.)
+fn validate_atomic_outermost(configs: &[Value]) -> Result<(), String> {
+    for (index, entry) in configs.iter().enumerate() {
+        if entry.get("kind").and_then(|k| k.as_str()) == Some("atomic")
+            && index != configs.len() - 1
+        {
+            return Err(
+                "the atomic layer must be outermost (the last entry in \
+                 config.layers); it was wrapped by another layer"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// The layer stack from the config's `layers` list (innermost-first, like
 /// Python's `layers()`). The cache layer shares the incremental layer's
 /// detector when one is configured — the same wiring as `CacheBuilder`.
@@ -285,6 +306,7 @@ fn build_layers(
         Some(Value::Array(list)) => list,
         Some(other) => return Err(format!("config.layers must be a list, got {other}")),
     };
+    validate_atomic_outermost(configs)?;
     // The incremental layer first (whatever its position), so the cache
     // layer can share its detector.
     let mut incremental: Option<IncrementalLayer> = None;
@@ -559,4 +581,39 @@ fn brix_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(workerd_main, m)?)?;
     m.add("__engine__", "rust")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_atomic_outermost;
+    use serde_json::json;
+
+    #[test]
+    fn atomic_last_is_accepted() {
+        let configs = vec![
+            json!({"kind": "cache"}),
+            json!({"kind": "incremental"}),
+            json!({"kind": "atomic"}),
+        ];
+        assert!(validate_atomic_outermost(&configs).is_ok());
+    }
+
+    #[test]
+    fn no_atomic_is_accepted() {
+        let configs = vec![json!({"kind": "cache"}), json!({"kind": "incremental"})];
+        assert!(validate_atomic_outermost(&configs).is_ok());
+    }
+
+    #[test]
+    fn atomic_not_last_is_rejected() {
+        // atomic buried before cache: the malformed spec a hand-built or future
+        // frontend might emit. The Python builders can't produce this, but the
+        // core is the shared backstop for every frontend.
+        let configs = vec![
+            json!({"kind": "atomic"}),
+            json!({"kind": "incremental"}),
+        ];
+        let err = validate_atomic_outermost(&configs).unwrap_err();
+        assert!(err.contains("outermost"), "{err}");
+    }
 }

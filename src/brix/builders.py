@@ -44,7 +44,33 @@ class BuildResult:
         return f"{status} ({', '.join(parts)})"
 
 
-class CleanBuilder:
+class NestableBuilder:
+    """Marker for a builder another layer may legally wrap.
+
+    ``AtomicBuilder`` is deliberately **not** a ``NestableBuilder``: its layer
+    establishes the staging overlay and its ``build()`` carries the P0 staging
+    hazard guard and the ``commit``/``discard`` workflow, so it must be the
+    *outermost* builder. Because the wrapping builders type their ``inner`` as
+    ``NestableBuilder``, a type checker (mypy/pyright, and so any IDE) flags
+    ``CacheBuilder(AtomicBuilder(...))`` as it is typed; ``__init__`` also
+    raises at runtime, since Python type hints are not enforced. The
+    language-neutral form of this rule — atomic is the outermost layer in the
+    wire spec — is validated in the Rust core, so every future frontend
+    inherits it (see docs/boundary-schema.md)."""
+
+
+def _reject_wrapped_atomic(inner: object) -> None:
+    """Guard for a wrapping builder's ``inner``: an ``AtomicBuilder`` may never
+    be wrapped (it must be outermost). Raises with a fix-it message."""
+    if isinstance(inner, AtomicBuilder):
+        raise TypeError(
+            "AtomicBuilder must be the outermost builder — write "
+            "AtomicBuilder(CacheBuilder(...)), not the reverse. Wrapping it "
+            "buries its staging-hazard guard and commit/discard workflow."
+        )
+
+
+class CleanBuilder(NestableBuilder):
     """Builds everything the graph declares; no change detection."""
 
     def __init__(self, graph: Graph, root: str | Path = ".") -> None:
@@ -81,7 +107,7 @@ class CleanBuilder:
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
-class IncrementalBuilder:
+class IncrementalBuilder(NestableBuilder):
     """Skips work whose fingerprints prove it up to date.
 
     ``graph_supplier`` is a callable so the builder decides when and how
@@ -133,7 +159,7 @@ class IncrementalBuilder:
         return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
 
 
-class CacheBuilder:
+class CacheBuilder(NestableBuilder):
     """Reuse results across workspaces and clean checkouts.
 
     Wraps another builder; the cache layer sits innermost, keyed by the
@@ -155,12 +181,13 @@ class CacheBuilder:
 
     def __init__(
         self,
-        inner,
+        inner: NestableBuilder,
         cache_dir: str | Path | None = None,
         store: CacheStoreProtocol | None = None,
     ) -> None:
         if store is not None and cache_dir is not None:
             raise ValueError("CacheBuilder takes cache_dir or store, not both")
+        _reject_wrapped_atomic(inner)
         self.inner = inner
         self._store = store
         self.cache_dir = (
@@ -223,10 +250,13 @@ class AtomicBuilder:
     """Either the whole build lands, or nothing on disk changes.
 
     Wraps another builder; its layer sits outermost, so process outputs
-    and (later) cache-restored outputs all pass through staging.
+    and (later) cache-restored outputs all pass through staging. It is
+    intentionally not a `NestableBuilder` — nothing may wrap it (see that
+    class), so it is always the outermost builder.
     """
 
-    def __init__(self, inner, staging_dir: str | Path = "build/staging") -> None:
+    def __init__(self, inner: NestableBuilder, staging_dir: str | Path = "build/staging") -> None:
+        _reject_wrapped_atomic(inner)  # AtomicBuilder(AtomicBuilder(...)) is nonsense
         self.inner = inner
         self.staging_dir = staging_dir
         self.root: Path = inner.root

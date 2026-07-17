@@ -111,6 +111,17 @@ ordinary dependencies continue to be inferred from data overlap. Targeting an
 recommended order is the one shown. `targets` is a list of output paths
 (alias resolution is a skin concern and stays out of the core).
 
+**Ordering rule — the atomic layer must be outermost.** If a `{ "kind":
+"atomic" }` entry is present it must be the **last** entry (outermost, since the
+list is innermost-first); the core rejects any other position. The atomic layer
+establishes the staging overlay and its build carries the P0 staging-hazard
+guard and the commit/discard workflow, so nothing may sit outside it. This rule
+lives in the core so **every frontend inherits it** rather than reimplementing
+it — a frontend should *also* express it in its own type system for early
+feedback (the Python skin makes `AtomicBuilder` non-nestable so a type checker
+flags a buried stack; a TS skin would use a branded type), but the core is the
+authoritative backstop.
+
 ## Event stream (core → skin, one callback)
 
 Every event is one object with `"event"` plus fields. `Node` refs are
