@@ -1,22 +1,29 @@
-"""Multi-module Kotlin soundness: the dual of the ts-dts/jvm-abi skip.
+"""Multi-module Kotlin: the kotlin-abi lens's end-to-end equivalence oracle.
 
-A Kotlin `inline fun` copies its body into consumers' bytecode at compile time,
-so a dependent's output genuinely depends on the *body* of an inline function in
-a module it imports — not just that function's signature. `kotlin.JarAction`
-therefore byte-tracks its classpath instead of ABI-lensing it (which
-`java.JarAction` can safely do, because javac does not inline across methods).
+A Kotlin `inline fun` copies its body into consumers' bytecode at compile time
+— line-number tables included (SMAP) — so a dependent's output genuinely
+depends on the *implementation* of inline functions in modules it imports.
+Plain jvm-abi lensing is therefore unsound here (it once let brix serve a
+stale dependent — commit 3746bd1), and plain byte-tracking is sound but
+recompiles dependents on every implementation edit. `kotlin.JarAction` tracks
+its classpath through the **kotlin-abi** lens (brix/kotlinabi.py): jvm-abi
+counting for inline-free classes, whole-class byte counting exactly where
+inline is involved.
 
-These tests pin the property that a wrong lens would violate — serving a stale
-dependent — using two knobs in the `core` module:
+These tests pin both directions of that contract with three knobs in `core`:
 
-  * a *normal* function body (`greet`): changing it does not change the
-    dependent's bytecode, so recompiling the dependent is conservative but sound;
-  * an *inline* function body (`combine`): changing it DOES change the
-    dependent's bytecode, so the dependent MUST recompile or it ships stale.
+  * a *normal* function body (`greet`, in the inline-free class `Greeter`):
+    changing it leaves the dependent's bytecode invariant, and the lens now
+    proves it — the dependent REPLAYS (the recovered cross-module skip);
+  * an *inline* function body (`combine`): changing it changes the dependent's
+    bytecode, so the dependent MUST recompile or it ships stale;
+  * *padding lines* above the inline fun: nothing changes but line numbers —
+    which the inlined copy carries — so the dependent must still recompile.
 
-Both cases assert the dependent recompiles and its emitted classes equal a clean
-rebuild of the same state. The inline case additionally asserts the dependent's
-bytes actually changed — otherwise the test would prove nothing.
+Every case asserts the incrementally-built dependent's classes equal a clean
+rebuild of the same state: the anti-stale equivalence oracle. The inline and
+line-shift cases additionally assert the dependent's bytes actually changed —
+otherwise they would prove nothing.
 
 kotlinc-gated: point at a compiler with `BRIX_KOTLINC=/path/to/kotlinc` (falls
 back to a `kotlinc` on PATH); skips when neither is present.
@@ -36,9 +43,12 @@ needs_kotlinc = pytest.mark.skipif(
     KOTLINC is None, reason="no kotlinc (set BRIX_KOTLINC to a kotlinc binary)"
 )
 
-# core exports a normal function (impl knob) and an inline function (body knob).
-LIB = 'package demo.core\n'
+# core exports a normal function in an inline-free class (impl knob), padding
+# lines (shift knob), and an inline function (body knob). Greeter sits ABOVE
+# the padding so only the inline fun moves when the shift knob turns.
+LIB = "package demo.core\n"
 LIB += 'class Greeter {{ fun greet(name: String): String = "hi-{impl}-$name" }}\n'
+LIB += "{padding}"
 LIB += "inline fun combine(block: () -> String): String = {inline_body}\n"
 
 # app calls both; combine() is inlined, so app's bytecode embeds combine's body.
@@ -48,7 +58,7 @@ APP += 'fun main() { val g = Greeter(); println(combine { g.greet("brix") }) }\n
 
 
 def initial_state() -> dict:
-    return {"impl": 1, "inline": 2}
+    return {"impl": 1, "inline": 2, "shift": 0}
 
 
 def _inline_body(reps: int) -> str:
@@ -59,7 +69,11 @@ def materialize(root, state) -> None:
     (root / "core").mkdir(parents=True, exist_ok=True)
     (root / "app").mkdir(parents=True, exist_ok=True)
     (root / "core/lib.kt").write_text(
-        LIB.format(impl=state["impl"], inline_body=_inline_body(state["inline"]))
+        LIB.format(
+            impl=state["impl"],
+            padding="// pad\n" * state["shift"],
+            inline_body=_inline_body(state["inline"]),
+        )
     )
     (root / "app/main.kt").write_text(APP)
 
@@ -69,6 +83,8 @@ def apply_op(root, state, op) -> None:
         state["impl"] += 1        # new normal-fun body, dependent bytecode invariant
     elif op == "inline":
         state["inline"] += 1      # new inline-fun body, copied into the dependent
+    elif op == "shift":
+        state["shift"] += 1       # inline fun moves down one line; SMAP leaks it
     else:
         raise AssertionError(op)
     materialize(root, state)
@@ -148,22 +164,51 @@ def test_inline_change_recompiles_dependent_and_matches_clean(tmp_path):
     # The change really propagated (otherwise this test proves nothing)...
     assert after != before
     # ...and the incrementally-built dependent equals a clean rebuild — the
-    # anti-stale property a wrong (ABI) lens would break.
+    # anti-stale property a wrong (jvm-abi) lens historically broke.
     assert after == _clean_app_classes(tmp_path, state)
 
 
 @needs_kotlinc
-def test_normal_change_recompiles_and_matches_clean(tmp_path):
+def test_line_shift_above_inline_recompiles_dependent_and_matches_clean(tmp_path):
     root = tmp_path / "inc"
     state = initial_state()
     materialize(root, state)
     builder = _builder(root)
     assert builder.build().success
+    before = _app_classes(root)
+
+    apply_op(root, state, "shift")
+    result = builder.build()
+    assert result.success
+    # Nothing changed but the inline fun's line numbers — which the inlined
+    # copy in app carries (SMAP). The dependent must recompile.
+    assert _source(result, "kotlinc -> build/app-classes") == "process"
+    after = _app_classes(root)
+    assert after != before  # the line numbers really do reach app's bytes
+    assert after == _clean_app_classes(tmp_path, state)
+
+
+@needs_kotlinc
+def test_normal_change_skips_dependent_and_matches_clean(tmp_path):
+    root = tmp_path / "inc"
+    state = initial_state()
+    materialize(root, state)
+    builder = _builder(root)
+    assert builder.build().success
+    before = _app_classes(root)
 
     apply_op(root, state, "impl")
     result = builder.build()
     assert result.success
-    # Conservative but sound: byte-tracking recompiles the dependent even though
-    # a normal-body change leaves its bytecode invariant. It still matches clean.
-    assert _source(result, "kotlinc -> build/app-classes") == "process"
-    assert _app_classes(root) == _clean_app_classes(tmp_path, state)
+    # core recompiles (its source changed)...
+    assert _source(result, "kotlinc -> build/core-classes") == "process"
+    # ...but the dependent REPLAYS: Greeter carries no inline members, so its
+    # body change is invisible through the kotlin-abi lens. This is the
+    # cross-module skip that byte-tracking gave up and the lens recovers.
+    assert _source(result, "kotlinc -> build/app-classes") == "replayed"
+    after = _app_classes(root)
+    assert after == before
+    # The skip is SOUND: the replayed dependent equals a clean rebuild of the
+    # new state, byte for byte. This assertion is the equivalence oracle — if
+    # the lens ever wrongly skips a change that matters, it fails here.
+    assert after == _clean_app_classes(tmp_path, state)

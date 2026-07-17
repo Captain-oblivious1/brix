@@ -200,8 +200,14 @@ unregistered lens). Full suite green under both engines.
 - `brix-core::content_key` — the `ContentKey` trait (`tag`, `digest`), a
   name-keyed registry of built-in lenses, and the `CustomIdentities` skin-callback
   escape hatch (reserved, unused by default).
-- `brix-core::lenses` — the built-in `impl ContentKey`s (`JvmAbi`, `TsDts`) and
-  the `jvmabi`/`tsdts` digest code, **outside** the neutral fingerprint path. The
+- `brix-core::lenses` — the built-in `impl ContentKey`s (`JvmAbi`, `KotlinAbi`,
+  `TsDts`) and the `jvmabi`/`kotlinabi`/`tsdts` digest code, **outside** the
+  neutral fingerprint path. (`kotlin-abi` — added 2026-07-16 — is jvm-abi
+  semantics except classes whose Kotlin `@Metadata` declares inline members
+  count by whole-class bytes, since kotlinc copies inline implementation into
+  consumers; see `src/brix/kotlinabi.py` for the leak channels and the
+  fail-closed rules, and `tests/test_kotlin_multimodule.py` for the
+  equivalence oracle.) The
   detector/`content` dispatch through the trait and name no language. Byte hashing
   stays a distinct 3-element material shape (`["file", path, hash]`) vs a lens's
   4-element `["file", path, tag, digest]` — the shape difference is load-bearing

@@ -31,11 +31,13 @@ with brix. This is the dogfood that drove `brix.kotlin`.
   when a recompile emits byte-identical classes — e.g. a comment-only edit
   recompiles but does not re-jar.
 
-Cross-module Kotlin is deliberately *not* skipped through an ABI lens: a Kotlin
-`inline fun` copies its body into other modules' call sites, so the `jvm-abi`
+Cross-module Kotlin is skipped through the **kotlin-abi** lens, not `jvm-abi`:
+a Kotlin `inline fun` copies its body into other modules' call sites, so the
 "body is not the interface" assumption is unsound for a *consumed* Kotlin
-module. This app is single-module, so the question does not arise; a
-soundness-checked Kotlin ABI lens is future work (see `docs/roadmap.md`).
+module — the lens counts inline-carrying classes by bytes and everything else
+by ABI. This app is single-module, so the question barely arises here; see
+`examples/kotlin_multimodule/` for the lens in action and
+`src/brix/kotlinabi.py` for the design.
 
 ## Setup
 

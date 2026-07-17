@@ -39,10 +39,10 @@ pub mod status;
 pub mod targets;
 pub mod workers;
 
-// The built-in lenses live under `lenses`; re-export the two modules so the
+// The built-in lenses live under `lenses`; re-export the modules so the
 // cross-engine test/`content_identity` call sites keep their short paths
 // (`brix_core::jvmabi`, `crate::tsdts`).
-pub use lenses::{jvmabi, tsdts};
+pub use lenses::{jvmabi, kotlinabi, tsdts};
 
 pub use actions::{Action, WorkerSpec};
 pub use atomic::{commit_staging, discard_staging, AtomicLayer};

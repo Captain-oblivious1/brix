@@ -201,7 +201,7 @@ def test_builtins_are_the_core_native_set_and_not_polluted_by_custom():
     """`identity.builtins()` is the single source of truth for which content
     keys the core builds in — derived from the import-time registrations, so a
     custom plugin registered later must never join the built-in snapshot."""
-    assert identity.builtins() == frozenset({"jvm-abi", "ts-dts"})
+    assert identity.builtins() == frozenset({"jvm-abi", "kotlin-abi", "ts-dts"})
 
     class _Custom:
         name = "custom-lens-xyz"
@@ -214,7 +214,7 @@ def test_builtins_are_the_core_native_set_and_not_polluted_by_custom():
     try:
         # The derived snapshot stays put — a skin plugin is not "core-native".
         assert "custom-lens-xyz" not in identity.builtins()
-        assert identity.builtins() == frozenset({"jvm-abi", "ts-dts"})
+        assert identity.builtins() == frozenset({"jvm-abi", "kotlin-abi", "ts-dts"})
     finally:
         identity._REGISTRY.pop("custom-lens-xyz", None)
 

@@ -1,5 +1,38 @@
 # Development log
 
+- **The `kotlin-abi` lens: cross-module Kotlin skipping, soundly.** Recovers
+  the skip that byte-tracking the Kotlin classpath gave up (previous entry).
+  Ground-truth experiments shaped it: an inline-body edit changes consumers'
+  bytecode, and so does a *line shift alone* — three comment lines added above
+  an `inline fun` changed the consumer's output, because inlined copies carry
+  the declaration's line-number tables (SMAP) — while the byte changes stay
+  confined to the class that declares the inline member. So the lens works per
+  class: jvm-abi counting (already sound for `const val` via `ConstantValue`,
+  and declaration-sensitive because it hashes `@Metadata`) unless the class's
+  Kotlin metadata declares an inline function or inline property accessor —
+  then the whole class counts by bytes. Classes nested under a flagged name
+  (`$` prefix: the lambdas/anonymous objects kotlinc regenerates into
+  consumers when inlining) and any metadata the parser will not vouch for
+  (unknown kind or major version, legacy 8-to-7 string packing, pre-1.0
+  `old_flags`) also count by bytes — **fail closed: wrong in the slow
+  direction, never stale.** The metadata facts (BitEncoding UTF-8 mode; the
+  varint-delimited string table before the `Class`/`Package` protobuf;
+  `Function.flags = 9` with IS_INLINE at bit 10; `Property.getter_flags =
+  7`/`setter_flags = 8` with IS_INLINE_ACCESSOR at bit 8) are pinned from the
+  Kotlin compiler's own sources and verified against kotlinc 2.4 fixtures.
+  Implemented twice — `src/brix/kotlinabi.py` (reference) and
+  `rust/brix-core/src/lenses/kotlinabi.rs` — with 14 golden digests identical
+  across engines (`tests/fixtures/kotlinabi/`, `tests/test_kotlinabi.py`,
+  `rust/brix-core/tests/identity.rs`). `kotlin.JarAction`'s `classpath_track`
+  flipped from the byte union to `kotlin.abi(...)` — zero user-API change.
+  The end-to-end equivalence oracle (`tests/test_kotlin_multimodule.py`, both
+  engines) pins all three directions: a normal-body edit in an inline-free
+  class now **replays** the dependent and its output equals a clean rebuild
+  byte-for-byte (the recovered skip, proven sound); an inline-body edit and a
+  line-shift-only edit both recompile the dependent and match clean. A
+  fourteenth fixture byte-patches the metadata version to a future major and
+  must fail closed — the forward-compatibility contract: a new Kotlin release
+  can only make builds slower, never stale.
 - **Multi-module Kotlin composition, and a stale-result bug it caught.** A
   two-module Kotlin build (`app` depends on `core`) exposed that
   `kotlin.JarAction` was tracking its classpath through the `jvm-abi` lens —

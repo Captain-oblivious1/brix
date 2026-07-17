@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use brix_core::{
-    action_fingerprint, jvmabi, tsdts, Action, BuildMetadata, NodeContext,
+    action_fingerprint, jvmabi, kotlinabi, tsdts, Action, BuildMetadata, NodeContext,
     TimeAndHashChangeDetector,
 };
 
@@ -194,6 +194,134 @@ fn identity_digest_cached_by_signature() {
     .unwrap()
     .unwrap();
     assert_eq!(real, jvmabi::digest_jar(&j).unwrap());
+}
+
+// -- kotlin-abi (test_kotlinabi.py) --------------------------------------------
+
+// The golden contract, identical to EXPECTED in test_kotlinabi.py: both
+// engines must produce these digests for the committed kotlinc fixtures.
+const KOTLIN_EXPECTED: [(&str, &str); 14] = [
+    ("plain_base", "976787a605e8b3562939ef662e1719b19b61d104e19043a7b1644f16e5e1ea04"),
+    ("plain_impl", "976787a605e8b3562939ef662e1719b19b61d104e19043a7b1644f16e5e1ea04"),
+    ("facade_base", "f4a70838ca81f2736ee9fde8eb862f0f17f7d71977ff27dd63569b3b38277592"),
+    ("facade_impl", "f4a70838ca81f2736ee9fde8eb862f0f17f7d71977ff27dd63569b3b38277592"),
+    ("inline_base", "19b02b5477b49a08c1608a3910965b5a483273e69aff1e41199ea6c4071fd12c"),
+    ("inline_lineshift", "89c1d52a7630211c51456a383aa3d72faabce1a348aa2b8ebf0e3edfa659300a"),
+    ("inline_bodychange", "386013fab5298b8670b7d87892cca0875e731c505b8a992bd01d9874bb507bc3"),
+    ("accessor", "5c55f8043971f42dbb00933ba7a25ee8bce203e2be7398962508e19a6da1a53e"),
+    ("nested_owner", "91fca98211b1c3c2c58bd76644c1ab581440e823aaed05f1f5d69d129d483e79"),
+    ("nested_synthetic", "279c4a06cc844e7a2ce0231e155d80172dcdbd2369c36162ebfd1c6d96a6ca81"),
+    ("nested_synthetic_impl", "79be08de901b7ddabc113d5e5dcc032508c7aecb44b5c312601c39d874095503"),
+    ("multifile_facade", "900866a1ca5d1165e531762c30c54c6952be128ad3dfcd69dbdef4ec1f6a30c2"),
+    ("multifile_part", "ee9fd3d9aaa8e43b700ae9ec36b38449d24121dd55e567515753adac17b5e769"),
+    ("futuremv", "ddb25d3e8c228dff72e6e1868742cea1cab072470a57c2f2dbd4ab876a29141d"),
+];
+
+fn kcls(name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/kotlinabi")
+        .join(format!("{name}.class"));
+    std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+}
+
+fn kjar(dir: &Path, entries: &[(&str, &[u8])], name: &str) -> PathBuf {
+    let path = dir.join(name);
+    let file = std::fs::File::create(&path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    for (entry, data) in entries {
+        zip.start_file(*entry, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(data).unwrap();
+    }
+    zip.finish().unwrap();
+    path
+}
+
+#[test]
+fn kotlin_pinned_class_digests() {
+    for (name, digest) in KOTLIN_EXPECTED {
+        assert_eq!(kotlinabi::digest_class(&kcls(name)).unwrap(), digest, "{name}");
+    }
+}
+
+#[test]
+fn kotlin_no_inline_implementation_change_hashes_equal() {
+    assert_eq!(
+        kotlinabi::digest_class(&kcls("plain_base")),
+        kotlinabi::digest_class(&kcls("plain_impl"))
+    );
+    assert_eq!(
+        kotlinabi::digest_class(&kcls("facade_base")),
+        kotlinabi::digest_class(&kcls("facade_impl"))
+    );
+}
+
+#[test]
+fn kotlin_inline_body_and_line_shift_hash_differently() {
+    let base = kotlinabi::digest_class(&kcls("inline_base")).unwrap();
+    assert_ne!(base, kotlinabi::digest_class(&kcls("inline_bodychange")).unwrap());
+    // Only line numbers changed — but inlined code carries them into
+    // consumers (SMAP). jvm-abi cannot see it; kotlin-abi must.
+    assert_ne!(base, kotlinabi::digest_class(&kcls("inline_lineshift")).unwrap());
+    assert_eq!(
+        jvmabi::digest_class(&kcls("inline_base")),
+        jvmabi::digest_class(&kcls("inline_lineshift"))
+    );
+}
+
+#[test]
+fn kotlin_enclosure_rule_byte_counts_synthetics_under_inline() {
+    // The synthetics differ only in the anonymous object's body (equal
+    // jvm-abi — the guard); the enclosure rule alone makes the jars differ.
+    assert_eq!(
+        jvmabi::digest_class(&kcls("nested_synthetic")),
+        jvmabi::digest_class(&kcls("nested_synthetic_impl"))
+    );
+    let dir = scratch("kabi-enclosure");
+    let owner = kcls("nested_owner");
+    let (s1, s2) = (kcls("nested_synthetic"), kcls("nested_synthetic_impl"));
+    let a = kjar(&dir, &[
+        ("abidemo/NestedKt.class", owner.as_slice()),
+        ("abidemo/NestedKt$runner$1.class", s1.as_slice()),
+    ], "a.jar");
+    let b = kjar(&dir, &[
+        ("abidemo/NestedKt.class", owner.as_slice()),
+        ("abidemo/NestedKt$runner$1.class", s2.as_slice()),
+    ], "b.jar");
+    assert_ne!(kotlinabi::digest_jar(&a).unwrap(), kotlinabi::digest_jar(&b).unwrap());
+    // Without the inline-flagged owner, nothing flags the $-ancestor: the
+    // synthetics count by ABI and the body-only difference stays invisible.
+    let c = kjar(&dir, &[("abidemo/NestedKt$runner$1.class", s1.as_slice())], "c.jar");
+    let d = kjar(&dir, &[("abidemo/NestedKt$runner$1.class", s2.as_slice())], "d.jar");
+    assert_eq!(kotlinabi::digest_jar(&c).unwrap(), kotlinabi::digest_jar(&d).unwrap());
+}
+
+#[test]
+fn kotlin_module_entries_count_by_bytes_and_resources_are_ignored() {
+    let dir = scratch("kabi-module");
+    let plain_cls = kcls("plain_base");
+    let base: &[(&str, &[u8])] = &[("abidemo/Greeter.class", plain_cls.as_slice())];
+    let plain = kjar(&dir, base, "plain.jar");
+    let m1 = kjar(&dir, &[
+        ("abidemo/Greeter.class", plain_cls.as_slice()),
+        ("META-INF/app.kotlin_module", b"v1".as_slice()),
+    ], "m1.jar");
+    let m2 = kjar(&dir, &[
+        ("abidemo/Greeter.class", plain_cls.as_slice()),
+        ("META-INF/app.kotlin_module", b"v2".as_slice()),
+    ], "m2.jar");
+    let noise = kjar(&dir, &[
+        ("abidemo/Greeter.class", plain_cls.as_slice()),
+        ("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\n".as_slice()),
+        ("banner.txt", b"hello".as_slice()),
+    ], "noise.jar");
+    assert_ne!(kotlinabi::digest_jar(&plain).unwrap(), kotlinabi::digest_jar(&m1).unwrap());
+    assert_ne!(kotlinabi::digest_jar(&m1).unwrap(), kotlinabi::digest_jar(&m2).unwrap());
+    assert_eq!(kotlinabi::digest_jar(&plain).unwrap(), kotlinabi::digest_jar(&noise).unwrap());
+}
+
+#[test]
+fn kotlin_malformed_class_raises() {
+    assert!(kotlinabi::digest_class(b"\xde\xad\xbe\xef not a class file").is_err());
 }
 
 // -- ts-dts (test_ts_dts_identity.py) ------------------------------------------

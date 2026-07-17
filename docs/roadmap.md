@@ -142,12 +142,34 @@ recompiles on any dependency change). `tests/test_kotlin_multimodule.py`
 (kotlinc-gated) pins the property; the example uses the plain incremental stack
 because kotlinc self-resolves `-classpath` (the parked staged-overlay limitation).
 
-Still deferred (needs the real monorepo to pin semantics): **multi-module
-Kotlin ABI skipping** — recovering the skip that byte-tracking gives up. A
-Kotlin ABI lens must treat `inline` (and `const`, `@JvmStatic`, reified) bodies
-as interface; the gate is an equivalence oracle covering the inline case
-(Fable-territory). Warm-worker reuse for kotlinc is a separate optimization.
-(Spring Boot fat-jars: **done** — see spring-petclinic.)
+**Multi-module Kotlin ABI skipping — done (2026-07-16, Fable): the
+`kotlin-abi` lens.** Recovers the cross-module skip byte-tracking gave up.
+Ground truth first: an inline-body edit changes consumers' bytecode, and so
+does a *line shift alone* (three comment lines above an `inline fun` changed
+the consumer — inlined copies carry their line-number tables for SMAP), while
+the byte changes stay confined to the inline-carrying class. The lens follows
+exactly: per class, jvm-abi counting (which already covers `const val` via
+`ConstantValue` and hashes `@Metadata`, so declaration changes are seen)
+unless the class's Kotlin metadata declares an inline function or inline
+property accessor — then whole-class bytes; classes nested under a flagged
+name (`$` prefix — lambdas/objects that inlining regenerates into consumers)
+and anything the parser will not vouch for (unknown metadata kind/version,
+legacy encodings, pre-1.0 fields) also count by bytes. **Fail closed: wrong
+in the slow direction, never stale.** Metadata facts pinned from the Kotlin
+compiler's own sources (BitEncoding UTF-8 mode; `Function.flags=9`/IS_INLINE
+bit 10; `Property.getter_flags=7`/`setter_flags=8`/IS_INLINE_ACCESSOR bit 8).
+Implemented in both engines (`src/brix/kotlinabi.py` reference,
+`rust/brix-core/src/lenses/kotlinabi.rs`), golden-pinned on kotlinc-compiled
+fixtures (`tests/fixtures/kotlinabi/`, 14 digests identical across engines);
+`kotlin.JarAction`'s classpath flipped from byte union to the lens (zero
+user-API change). The equivalence oracle (`tests/test_kotlin_multimodule.py`,
+both engines): normal-body edit → dependent **replays** and equals a clean
+rebuild byte-for-byte; inline edit and line-shift → dependent recompiles and
+equals clean. Residual assumption for the air-gapped trial: inline is
+kotlinc's only body-leak channel (reified requires inline; `const` is
+ConstantValue) — a surprise there points here. Warm-worker reuse for kotlinc
+is a separate optimization. (Spring Boot fat-jars: **done** — see
+spring-petclinic.)
 
 ### Opus queue — ready to do now
 

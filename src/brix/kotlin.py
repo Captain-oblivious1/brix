@@ -20,19 +20,20 @@ Classpath handling follows the ``brix.java`` precedent for a JVM tool that is
 *not* the warm worker (``JUnitTestAction``'s run step): kotlinc's ``-classpath``
 takes a single ``File.pathSeparator``-joined token, so the resolved jar paths
 are joined into one value for the command line, while the same jars are
-declared as byte-lensed fingerprint inputs so any change to a dependency
-recompiles the module.
+declared as **kotlin-abi**-lensed fingerprint inputs so a dependency change
+recompiles the module exactly when it can matter.
 
-The classpath is byte-lensed, **not** ABI-lensed the way ``java.JarAction`` is:
-a Kotlin ``inline fun`` (and ``const val``, reified type parameters) copies its
-body into consumers' bytecode at compile time, so the "body is not part of the
-interface" assumption behind ``jvm-abi`` is unsound for a *consumed* Kotlin
-module — ABI-lensing it would let brix skip recompiling after an inline-body
-change that actually altered the dependent's output. Byte tracking is the
-sound, conservative choice (it recompiles on any dependency change, gaining no
-cross-module skip); a soundness-checked Kotlin ABI lens that treats inline
-bodies as interface is future work (see docs/roadmap.md). External fixed jars
-never change mid-build, so byte-tracking them is free.
+The classpath is lensed through ``kotlin-abi``, **not** the ``jvm-abi`` lens
+``java.JarAction`` uses: a Kotlin ``inline fun`` copies its body — line-number
+tables and nested synthetic classes included — into consumers' bytecode at
+compile time, so the "body is not part of the interface" assumption behind
+``jvm-abi`` is unsound for a consumed Kotlin module (it once let brix skip a
+recompile whose output had actually changed — a stale result, the worst build
+failure). ``kotlin-abi`` (brix/kotlinabi.py) keeps jvm-abi's skip for classes
+without inline members and counts inline-carrying classes by whole-class
+bytes, failing closed on anything it will not vouch for: implementation-only
+edits in inline-free classes no longer recompile dependents, and inline
+changes always do.
 """
 
 from __future__ import annotations
@@ -41,12 +42,11 @@ import os
 from typing import TYPE_CHECKING
 
 from .actions import Action, ExternalProcessAction
-from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .data import DataAtom, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
 from .java import (
     _as_classpath_list,
     _classpath_paths,
     _options_expr,
-    _runtime_union,
 )
 
 if TYPE_CHECKING:
@@ -57,6 +57,47 @@ if TYPE_CHECKING:
 # meta-annotation) with @Component, @Async, @Transactional, @Cacheable, or
 # @SpringBootTest.
 _SPRING_PRESET = "plugin:org.jetbrains.kotlin.allopen:preset=spring"
+
+
+class KotlinAbiFile(FileData):
+    """A jar/class compared through the Kotlin ABI lens: jvm-abi semantics,
+    except classes whose Kotlin metadata declares inline members (whose
+    implementation compiles into consumers) count by whole-class bytes.
+    ``brix.kotlin`` owns this lens — the core dispatches the ``kotlin-abi``
+    name through its content-key registry (docs/content-key.md)."""
+
+    content_key = "kotlin-abi"
+
+
+class KotlinAbiGlob(GlobData):
+    """The glob counterpart of `KotlinAbiFile`: the Kotlin ABI lens applied to
+    every matched jar/class."""
+
+    content_key = "kotlin-abi"
+
+
+def abi(expr: DataExpr) -> DataExpr:
+    """View a data expression through the Kotlin ABI lens: every plain
+    file/glob atom becomes its `KotlinAbiFile`/`KotlinAbiGlob` counterpart.
+    Non-file atoms (tools, values) and atoms that already carry a lens pass
+    through unchanged. Safe on mixed classpaths: a plain Java jar has no
+    Kotlin metadata, so the lens degrades to exactly jvm-abi for it."""
+    lensed: list[DataAtom] = []
+    for atom in expr.atoms():
+        if type(atom) is FileData:
+            lensed.append(KotlinAbiFile(atom.path))
+        elif type(atom) is GlobData:
+            lensed.append(KotlinAbiGlob(atom.pattern.template, atom.exclude))
+        else:
+            lensed.append(atom)
+    return lensed[0] if len(lensed) == 1 else DataUnion(*lensed)
+
+
+def _classpath_union(classpath: list[DataExpr]) -> DataExpr:
+    """Flatten classpath entries into one kotlin-abi-lensed expression: a
+    dependent recompiles when a dependency's Kotlin ABI — API surface plus
+    every inline-carrying class — changes, and skips otherwise."""
+    return abi(DataUnion(*classpath))
 
 
 class JarAction(Action):
@@ -107,21 +148,20 @@ class JarAction(Action):
         if self.classpath:
             # kotlinc wants one pathsep-joined -classpath token, so the resolved
             # jar paths are baked into a value; the same jars ride along as a
-            # byte-lensed fingerprint input (unreferenced by the template but
-            # still hashed and dependency-inferred, like JUnitTestAction's run).
+            # kotlin-abi-lensed fingerprint input (unreferenced by the template
+            # but still hashed and dependency-inferred, like JUnitTestAction's
+            # run step).
             #
-            # Byte lens, NOT the jvm-abi lens java.JarAction uses: a Kotlin
-            # `inline fun` (and `const val`, reified type params) copies its body
-            # into this module's bytecode at compile time, so an ABI-lensed
-            # dependency would let brix skip recompiling after an inline-body
-            # change that DID alter our output — a stale-result bug. Byte
-            # tracking recompiles on any dependency change: sound, but no
-            # cross-module skip until a soundness-checked Kotlin ABI lens exists
-            # (docs/roadmap.md). External fixed jars don't change mid-build, so
-            # byte-tracking them costs nothing.
+            # kotlin-abi, NOT the jvm-abi lens java.JarAction uses: a Kotlin
+            # `inline fun` copies its body into this module's bytecode at
+            # compile time, so jvm-abi's "body is not interface" assumption
+            # would let brix skip recompiling after an inline change that DID
+            # alter our output — a stale-result bug caught live (3746bd1).
+            # kotlin-abi byte-counts exactly the inline-carrying classes and
+            # keeps the ABI skip for the rest (see brix/kotlinabi.py).
             joined = os.pathsep.join(_classpath_paths(self.classpath))
             inputs["classpath"] = ValueData(joined)
-            inputs["classpath_track"] = _runtime_union(self.classpath)
+            inputs["classpath_track"] = _classpath_union(self.classpath)
             parts.append("-classpath {classpath}")
         if self.spring_allopen is not None:
             # -Xplugin=<jar> glues the path onto the flag (one token); the preset

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Two-module Kotlin build: why a Kotlin dependency is byte-tracked, not
-ABI-tracked.
+"""Two-module Kotlin build: the kotlin-abi lens, live.
 
 A self-contained teaching example (sources live here; no clone needed). Module
 `app` depends on module `core`. brix infers the order from data overlap — app's
@@ -9,17 +8,16 @@ classpath input is core's output jar — and builds core, then app.
 The point it teaches: `core` exports a *normal* function (`Greeter.greet`) and
 an *inline* function (`repeated`). kotlinc copies an inline function's body into
 its call sites, so editing `repeated`'s body in `core` changes `app`'s compiled
-bytecode, while editing `greet`'s body does not. That is why `brix.kotlin`
-byte-tracks Kotlin classpath entries instead of ABI-lensing them the way
-`brix.java` safely can: an ABI lens would skip recompiling `app` after an
-inline-body change that actually altered its output — a stale-result bug. The
-automated proof of this soundness property is `tests/test_kotlin_multimodule.py`.
-
-Whole-module kotlinc semantics mean any edit in a module recompiles that whole
-module; a change in `core` then recompiles `app` too (byte-tracked). This is
-conservative — `app` recompiles even after a normal-body change it did not need
-— but always sound. A soundness-checked Kotlin ABI lens (treating inline bodies
-as interface) that would recover the skip is future work; see docs/roadmap.md.
+bytecode, while editing `greet`'s body does not. Plain jvm-abi lensing (what
+`brix.java` uses) is therefore unsound for a Kotlin dependency — it would skip
+recompiling `app` after an inline change that altered its output, a
+stale-result bug. `brix.kotlin` tracks classpath entries through the
+**kotlin-abi** lens instead: classes with inline members count by bytes, the
+rest by ABI. Edit `greet`'s body and rebuild — core recompiles, `app` replays
+(the recovered cross-module skip). Edit `repeated`'s body — or even just add a
+comment line above it, which shifts the line numbers its inlined copies carry —
+and `app` recompiles. The automated proof of both directions is
+`tests/test_kotlin_multimodule.py`; the lens itself is `brix/kotlinabi.py`.
 
 Like the TypeScript example, this build uses the plain `IncrementalBuilder`
 stack (outputs written in place), not the atomic builder: kotlinc resolves
@@ -69,7 +67,7 @@ def create_graph() -> Graph:
             kotlinc=data.tool(KOTLINC),
             classes_dir="build/app-classes",
             jvm_target="17",
-            classpath=[data.file("build/core.jar")],  # byte-tracked; see module docstring
+            classpath=[data.file("build/core.jar")],  # kotlin-abi-lensed; see module docstring
             entry_point="demo.app.MainKt",
         ),
     )

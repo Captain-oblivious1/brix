@@ -15,7 +15,7 @@ proven (each one has found a real bug or missing feature).
 | `cpp_app/` | a lifelike C++ project: typed `brix.cpp` actions, the full layer stack + CLI |
 | `cpp_to_java/` | composability: C++, generic, and Java actions in one graph |
 | `typescript/` | two-module TypeScript with `brix.ts`: `ts.CompileAction` per module + the **ts-dts** lens — an impl-only edit to the greeter replays the app; an exported-signature change rebuilds it (needs a local `tsc`: `npm install typescript@5`) |
-| `kotlin_multimodule/` | two-module Kotlin with `brix.kotlin`: `app` depends on `core`. Shows why a Kotlin dependency is **byte-tracked, not ABI-tracked** — `core` exports an `inline fun` whose body kotlinc copies into `app`, so an ABI lens would skip recompiling `app` after a change that altered its output. Uses the plain incremental stack (kotlinc self-resolves `-classpath`). Needs a local `kotlinc` (`BRIX_KOTLINC=…`) |
+| `kotlin_multimodule/` | two-module Kotlin with `brix.kotlin` and the **kotlin-abi** lens: `app` depends on `core`, which exports an `inline fun` whose body (line numbers included) kotlinc copies into `app`. Edit a normal function's body → `app` replays (the cross-module skip); edit the inline body — or just add a comment above it — → `app` recompiles. Uses the plain incremental stack (kotlinc self-resolves `-classpath`). Needs a local `kotlinc` (`BRIX_KOTLINC=…`) |
 | `annotation_processing/` | a processor jar generates application source; processor implementation changes recompile the app even when its Java ABI stays unchanged |
 | `incremental_demo/` | build, rebuild, change a file, delete a source — watch what re-runs |
 | `layers_demo/` | the middleware layer stack (incremental / cache / atomic) on a live build |

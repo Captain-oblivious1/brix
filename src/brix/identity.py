@@ -87,6 +87,25 @@ class JvmAbiIdentity:
 register(JvmAbiIdentity())
 
 
+class KotlinAbiIdentity:
+    """Kotlin ABI hashing: jvm-abi semantics, except classes whose Kotlin
+    metadata declares inline functions/accessors (whose implementation —
+    bodies, line tables, nested synthetics — compiles into consumers) count
+    by whole-class bytes. Delegates to the pure-Python parser in
+    `brix.kotlinabi`."""
+
+    name = "kotlin-abi"
+    version = "1"
+
+    def digest(self, path: Path) -> str:
+        from . import kotlinabi
+
+        return kotlinabi.digest(path)
+
+
+register(KotlinAbiIdentity())
+
+
 class TsDtsIdentity:
     """TypeScript declaration (`.d.ts`) hashing: a consumer recompiles on an
     API-surface change, not on an implementation-only change or a doc-comment
