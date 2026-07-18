@@ -82,12 +82,14 @@ See the [roadmap](docs/roadmap.md) for the full prioritized list.
 ## Documentation
 
 The user-facing **HTML site** (purpose, tenets, and an API reference generated
-from the source docstrings — public authoring API only) builds from `mkdocs.yml`:
+from the source docstrings — public authoring API only). A prebuilt copy is
+committed under `site/` — open `site/index.html` in a browser. To rebuild it
+from `mkdocs.yml` (all offline, no network):
 
 ```
 python -m venv .venv-docs && .venv-docs/bin/pip install -r docs/requirements.txt
 .venv-docs/bin/mkdocs serve     # live preview at http://127.0.0.1:8000
-.venv-docs/bin/mkdocs build     # static HTML into ./site
+.venv-docs/bin/mkdocs build     # regenerate ./site
 ```
 
 The design notes below are the internal contracts (engine, wire schema, design

@@ -1,6 +1,6 @@
 """Internal path-pattern representation.
 
-User-facing ``file``/``glob`` declarations lower into :class:`PathPattern`.
+User-facing ``file``/``glob`` declarations lower into `PathPattern`.
 A pattern is a workspace-relative path template with ``{name}`` placeholders.
 A bare ``{name}`` is **recursive** — it matches across ``/`` (like make's ``%``
 in ``obj/%.o: src/%.cpp``), so ``build/{rel}.class`` matches both

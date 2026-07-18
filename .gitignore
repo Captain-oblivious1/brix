@@ -10,7 +10,6 @@ examples/incremental_demo/src/
 examples/typescript/*/dist/
 examples/typescript/node_modules/
 rust/target/
-/site/
 src/brix/brix_py*.so
 src/brix/brix_py*.pyd
 src/brix/brix-workerd

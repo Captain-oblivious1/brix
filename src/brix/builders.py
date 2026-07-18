@@ -302,7 +302,7 @@ class AtomicBuilder:
               targets: list[str] | None = None, hold: bool = False,
               worker_idle_timeout: int | None = None) -> BuildResult:
         """``hold=True``: build fully but keep outputs in staging for
-        review — the workspace changes only at :meth:`commit`.
+        review — the workspace changes only at `commit`.
         ``worker_idle_timeout``: see `IncrementalBuilder.build`."""
         from . import engine
         from .atomic import staging_hazards

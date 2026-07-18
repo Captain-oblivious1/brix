@@ -327,14 +327,16 @@ These are self-contained and come with tests. No Fable needed.
   curated `__all__` on each public module is the boundary, so the generator
   renders exactly the user-facing surface and none of the engine internals or
   private helpers. Builds fully offline (`docs/requirements.txt`; no CDN), so it
-  works on the air-gapped machine; output `site/` is gitignored (build on
-  demand). **Follow-ups / advice-and-consent:** (a) the docstrings use a mixed
-  RST-ish style (``double backticks``, `:class:` refs) that Material renders
-  readably but not perfectly — a future pass could normalize them to Markdown or
-  configure a docstring style for cleaner cross-references; (b) the conceptual
-  layer is currently one tenets page — it could grow guides (the graph/action
-  model, incrementality, lenses, hierarchical/lazy loading) if wanted; (c) the
-  same **TypeDoc** treatment for the TS authoring API once that API exists.
+  works on the air-gapped machine. A prebuilt copy is committed under `site/`
+  for review (open `site/index.html`); can revert to build-on-demand once the
+  shape is settled. **Follow-ups / advice-and-consent:** (a) *done* — the three
+  RST role refs (`:class:`/`:meth:`) that rendered literally are normalized to
+  Markdown; the remaining ``double-backtick`` markup renders correctly as code
+  spans, so no further pass is needed unless we want richer cross-references;
+  (b) the conceptual layer is deliberately one tenets page for now — it could
+  grow guides (the graph/action model, incrementality, lenses, hierarchical/lazy
+  loading) if wanted; (c) the same **TypeDoc** treatment for the TS authoring
+  API once that API exists.
 - **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
   does this for Java and TypeScript (skip rebuilding users when only internals
   changed). Add it for Go and Protobuf when those languages show up in a project.

@@ -315,7 +315,7 @@ def _describe_stack(builder) -> list[tuple[str, str]]:
 
 def _alias_rows(aliases) -> list[tuple[str, str, str]]:
     """``(name, target, description)`` for each alias; a list target is
-    space-joined, and a bare (non-:class:`Alias`) value has no description."""
+    space-joined, and a bare (non-`Alias`) value has no description."""
     rows: list[tuple[str, str, str]] = []
     for name, value in (aliases or {}).items():
         if isinstance(value, Alias):
