@@ -87,6 +87,36 @@ class BuildMetadata:
             return entry.get(tag)
         return None
 
+    # Signature-free lookups: the *last-build* digest for a path regardless of
+    # its current stat signature. Only sound when a caller has independently
+    # established the file is unchanged since that build — the git detector,
+    # which vouches a tracked+unmodified file without stat-ing it.
+
+    def hash_by_path(self, path_key: str) -> str | None:
+        entry = self._data["files"].get(path_key)
+        return entry.get("sha256") if entry else None
+
+    def identity_by_path(self, path_key: str, tag: str) -> str | None:
+        entry = self._data["files"].get(path_key)
+        return entry.get(tag) if entry else None
+
+    # -- git change-detection baseline -------------------------------------
+    #
+    # The HEAD commit sha as of the last build, so the git detector can ask
+    # "what changed since then" (working tree + commits). Absent until a
+    # git-accelerated build records it; a missing baseline means "vouch
+    # nothing", degrading safely to the stat scan.
+
+    def git_baseline(self) -> str | None:
+        return self._data.get("git_baseline")
+
+    def set_git_baseline(self, sha: str | None) -> None:
+        with self._lock:
+            if sha is None:
+                self._data.pop("git_baseline", None)
+            else:
+                self._data["git_baseline"] = sha
+
     def store_identity(
         self, path_key: str, signature: list[int], tag: str, digest: str
     ) -> None:

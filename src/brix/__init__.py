@@ -18,6 +18,7 @@ from .cache import CacheStore, CacheStoreProtocol, TwoTierCacheStore
 from .cache_http import HttpCacheStore
 from .data import DataExpr
 from .deps import DepSet
+from .gitdetect import GitChangeDetector
 from .graph import Graph
 from .layers import BuildLayer, NodeContext, NodeProposal
 from .plan import EdgeTrigger
@@ -44,6 +45,7 @@ __all__ = [
     "ExpandAll",
     "Expandable",
     "ExternalProcessAction",
+    "GitChangeDetector",
     "Graph",
     "HttpCacheStore",
     "IncrementalBuilder",

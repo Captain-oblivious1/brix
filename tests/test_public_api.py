@@ -20,6 +20,7 @@ EXPECTED = {
     "ExpandAll",
     "Expandable",
     "ExternalProcessAction",
+    "GitChangeDetector",
     "Graph",
     "HttpCacheStore",
     "IncrementalBuilder",

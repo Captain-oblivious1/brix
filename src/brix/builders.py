@@ -121,10 +121,20 @@ class IncrementalBuilder(NestableBuilder):
         graph_supplier,
         root: str | Path = ".",
         metadata_dir: str | Path = "build/.brix",
+        detector=None,
     ) -> None:
         self._supplier = graph_supplier if callable(graph_supplier) else lambda: graph_supplier
         self.root = Path(root).resolve()
         self.metadata_dir = metadata_dir
+        # The change detector is an injected seam (one of brix's three: cache
+        # store, content lens, change detector). Pass a factory `(root,
+        # metadata) -> detector`; the builder owns the metadata lifecycle and
+        # hands it in. `None` uses the default stat detector. `GitChangeDetector`
+        # (brix.gitdetect) is a drop-in that accelerates via git — both existing
+        # detectors already have the `(root, metadata)` shape, so you pass the
+        # class. (The Rust engine runs its own detector, so a Python-side
+        # detector only affects BRIX_ENGINE=py builds until mirrored.)
+        self._detector = detector
 
     def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
         return plan_graph(self._supplier(), self.root, targets)
@@ -135,7 +145,8 @@ class IncrementalBuilder(NestableBuilder):
 
         metadata = BuildMetadata(self.root, self.metadata_dir)
         metadata.load()
-        detector = TimeAndHashChangeDetector(self.root, metadata)
+        factory = self._detector if self._detector is not None else TimeAndHashChangeDetector
+        detector = factory(self.root, metadata)
         return [IncrementalLayer(metadata, detector)]
 
     def source_graph(self) -> Graph:
@@ -338,6 +349,7 @@ def build_stack(
     cache_dir: str | Path | None = "build/.brix-cache",
     store: "CacheStoreProtocol | None" = None,
     staging_dir: str | Path | None = "build/staging",
+    detector=None,
 ) -> "AtomicBuilder | NestableBuilder":
     """Assemble the standard builder stack in the correct order —
     ``AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))`` — so the ordering
@@ -346,8 +358,10 @@ def build_stack(
     Layers toggle by argument: pass ``cache_dir=None`` (and no ``store``) to
     drop the cache, ``staging_dir=None`` to drop atomic staging (e.g. a
     cross-module compiler that self-resolves its classpath, which atomic
-    staging can't support — see `examples/kotlin_multimodule`). Defaults give
-    the full recommended stack.
+    staging can't support — see `examples/kotlin_multimodule`). ``detector`` is
+    the change-detector factory threaded to the `IncrementalBuilder` (e.g.
+    ``GitChangeDetector``); ``None`` uses the default stat detector. Defaults
+    give the full recommended stack.
 
     Returns a builder; for `cli.main`'s ``builder_factory`` (called fresh per
     invocation, so ``commit``/``discard`` rebuild cleanly), pass a thunk::
@@ -355,7 +369,7 @@ def build_stack(
         cli.main(create_graph, builder_factory=lambda: build_stack(create_graph, root=ROOT))
     """
     inner: NestableBuilder = IncrementalBuilder(
-        graph_supplier, root=root, metadata_dir=metadata_dir
+        graph_supplier, root=root, metadata_dir=metadata_dir, detector=detector
     )
     if store is not None:
         inner = CacheBuilder(inner, store=store)

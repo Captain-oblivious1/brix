@@ -279,9 +279,28 @@ These are self-contained and come with tests. No Fable needed.
 
 **Extending brix:**
 
-- **Use git to spot changes instantly.** Today brix checks files directly to see
-  what changed; on a big repo, asking git "what changed since last time?" is much
-  faster.
+- **Use git to spot changes instantly.** **Reference done (2026-07-17, Opus);
+  opt-in, Python-engine only for now.** The change detector is an injected seam:
+  `IncrementalBuilder(..., detector=GitChangeDetector)` (or the same through
+  `build_stack(detector=...)`) swaps the default stat detector for
+  `brix.gitdetect.GitChangeDetector`, which wraps it — for a
+  *tracked* file git reports unmodified since the last build, it trusts the
+  stored hash without stat-ing it; untracked, ignored (the build's own
+  intermediates), and out-of-repo inputs fall through to the stat/hash path. It
+  is a pure performance layer — never changes a fingerprint — proven by an
+  equivalence oracle (`tests/test_git_detect.py`) that replays an edit sequence
+  under both detectors and asserts byte-identical rebuild decisions. Key design
+  choices, all settled in discussion: git is the authority (tracked set via
+  `git ls-files`, never a reimplemented `.gitignore`); "since last build" unions
+  the working-tree diff with `git diff <baseline>..HEAD` (baseline = the
+  recorded last-build HEAD), so commits between builds are caught and the user
+  never has to commit; degrades to the stat scan when not a git repo / no
+  baseline / any git call fails. Inherits git's fsmonitor speedup for free when
+  the user has it enabled (no sudo, no Watchman dependency). **Follow-ups:**
+  mirror into the Rust core (today it only accelerates `BRIX_ENGINE=py`); then,
+  once soak-proven against real repos, consider defaulting it on for git
+  workspaces — but *not before the air-gapped trial* (the boring stat detector
+  is the safe floor there).
 - **Write down the official ways to plug in.** There are three: where cached
   results are stored, how brix judges whether a change actually "matters," and how
   it detects file changes. Document them so other people can build on brix.

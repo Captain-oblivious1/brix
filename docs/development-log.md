@@ -1,5 +1,37 @@
 # Development log
 
+- **Git-accelerated change detection (opt-in reference path).** brix finds what
+  changed by stat-ing every declared input; on a large working tree those stats
+  become the floor. The change detector is an injected seam —
+  `IncrementalBuilder(..., detector=GitChangeDetector)`, threaded through
+  `build_stack(detector=...)` too — and `brix.gitdetect.GitChangeDetector`
+  wraps the default stat detector, trusting a *tracked*,
+  git-unmodified file's stored hash without stat-ing it, and falls through to
+  stat/hash for everything git can't vouch for — untracked files, ignored files
+  (crucially the build's own generated intermediates), and inputs outside the
+  repo. It is a pure performance layer that must never change a fingerprint; the
+  correctness obligation is exactly the vouch ("tracked and unmodified since the
+  recorded baseline ⇒ content equals the last build's, so the cached hash is
+  valid"), proven by an equivalence oracle that replays an edit sequence (clean
+  build, no-op, edit-tracked, add-untracked, commit, edit-now-tracked) under
+  both detectors and asserts byte-identical rebuild decisions at every step.
+  Design decisions worked through before building: git is the authority on its
+  own ignore rules (the vouchable set is `git ls-files`, never a reimplemented
+  `.gitignore` — brix already knows its inputs from the graph, so it only asks
+  git to classify a small known set); "since last build" (not "since last
+  commit") is the working-tree diff unioned with `git diff <baseline>..HEAD`
+  where the baseline is the HEAD recorded at the previous build, so commits
+  between builds are caught and no one is ever forced to commit; and it degrades
+  to the stat scan on any git absence or failure, always in the safe direction
+  (never over-vouch). It inherits git's fsmonitor speedup for free when the user
+  has enabled it — no Watchman dependency, no sudo — which is what makes it
+  viable on a locked-down or air-gapped box. Deliberately shipped opt-in and
+  Python-engine-first: change detection is the one component where a miss is a
+  silent stale build, so it earns default-on only after soak against real repos,
+  and not before the air-gapped trial. Follow-ups: mirror into the Rust core (it
+  only accelerates `BRIX_ENGINE=py` today) and, later, the default-for-git-repos
+  flip. `src/brix/gitdetect.py`, `src/brix/metadata.py` (baseline +
+  signature-free lookups), `tests/test_git_detect.py`.
 - **Guard: AtomicBuilder must be the outermost builder.** The staging overlay
   and the P0 staging-hazard guard both hang off `AtomicBuilder`, so burying it
   inside another builder — `CacheBuilder(AtomicBuilder(...))` — silently
