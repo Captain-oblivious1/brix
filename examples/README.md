@@ -21,6 +21,7 @@ proven (each one has found a real bug or missing feature).
 | `layers_demo/` | the middleware layer stack (incremental / cache / atomic) on a live build |
 | `cli_demo/` | the CLI section of a project `brix.py` (`build`/`status`/`clean`/…) |
 | `cache_store_demo/` | a pluggable two-tier team cache across machines |
+| `hierarchical/` | a monorepo split into per-package `brix.py` files (`core → api → web` plus an independent `docs`, one shared `tools/step.py`): `load_workspace` merges them to build identically to a monolith, and `load_affected` loads **only** the packages an edit touches. `verify_lazy.py` proves it: a leaf edit loads the chain and skips `docs`, an independent edit loads only `docs`, editing the shared tool loads everything (soundness), an unreferenced edit loads nothing — each checked byte-identical against a full build |
 
 Run any of them directly, e.g. `python examples/hello_text/brix.py build`.
 

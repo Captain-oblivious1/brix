@@ -17,6 +17,12 @@ the equivalent monolith. It is the safe, non-lazy foundation: every package is
 loaded and merged, so nothing yet skips a load; the ownership map it builds is
 what tiers 2–3 will use.
 
+A runnable end-to-end demonstration lives in `examples/hierarchical/` — a
+`core → api → web` chain plus an independent `docs` package and one shared tool,
+with `verify_lazy.py` proving that a scoped edit loads only the affected
+packages (and that each subset build is byte-identical to a full build). It is
+the adoption template: the shape a real service tree copies.
+
 ## The problem
 
 With a single root `brix.py`, every build — even a no-op — runs `create_graph`

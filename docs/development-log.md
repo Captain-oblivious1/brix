@@ -1,5 +1,23 @@
 # Development log
 
+- **Worked example for hierarchical/lazy loading (`examples/hierarchical/`).**
+  The distributed-`brix.py` feature was tested but had no user-facing surface;
+  this is the runnable end-to-end demonstration and the adoption template a
+  real service tree copies. A `core → api → web` dependency chain plus an
+  independent `docs` package, split into per-package `brix.py` files sharing
+  one `tools/step.py`; the root `brix.py` is the workspace entry point
+  (`load_workspace(ROOT).graph`, the safe full-load default) and documents the
+  one-line `load_affected` opt-in. `verify_lazy.py` is the proof: it drives
+  `load_affected` with explicit change sets (no git state needed) and checks
+  both the loaded package set and every subset build's outputs, byte-for-byte,
+  against a from-scratch full build — a leaf-source edit loads the chain and
+  skips `docs`; an independent edit loads only `docs`; editing the shared tool
+  loads everything (the soundness guarantee, since it lives in no package's
+  subtree — ownership-based selection would wrongly skip); an unreferenced
+  edit loads nothing. Idempotent (snapshots and restores every file it
+  touches). Registered in `examples/README.md`; pointer added from
+  `docs/monorepo-scaling.md`.
+
 - **`env_used=` phase-2 review (Fable) — verdict positive, one bypass
   closed.** The scoped checklist held: unset-vs-empty deterministic and
   engine-identical; no process-env or command leak; verbatim snapshot under
