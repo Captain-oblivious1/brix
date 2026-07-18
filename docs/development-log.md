@@ -1,5 +1,24 @@
 # Development log
 
+- **Hierarchical build files, tier 2: the derived cross-package index.** Builds
+  on tier 1 (docs/monorepo-scaling.md). `brix.workspace` now derives the
+  package-level dependency graph — "which package consumes which package's
+  outputs" — straight from the actions' data references, using the planner's own
+  `infer_dependency` (the exact edge logic it applies action-to-action, which it
+  runs on raw actions including `ExpandAll`, so this is not an approximation).
+  No cross-module dependency *declarations*: the information is already in the
+  graph, so it is derived, not restated. `Workspace.depends_on` /
+  `dependents_of` expose it and `save_index`/`load_index` persist it to
+  `build/.brix/workspace-index.json` (repo-relative), so a future build that
+  loads only a subset can consult it without a full load. Safe to build ahead of
+  the trial because **nothing consumes the index yet** — it is derived and saved,
+  never used to skip a load, so there is no staleness surface (the same
+  "record now, act later" shape as environment-recording phase 1). The
+  loading-footprint half of tier 2 (reload a package if a glob/file its
+  construction read changed) is deferred to land with the lazy-loading tier,
+  since it is only load-bearing once the index is actually consumed.
+  `src/brix/workspace.py`, `tests/test_workspace.py` (derivation from data
+  overlap, the reverse index, and the persistence round-trip).
 - **Hierarchical build files, tier 1 (monorepo scaling).** The safe foundation
   of the plan in `docs/monorepo-scaling.md`: a large repo can split its one root
   `brix.py` into several placed at module/service boundaries, each a *package*

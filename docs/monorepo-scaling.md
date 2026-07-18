@@ -128,10 +128,18 @@ changed" → load all → safe).
 1. **Hierarchical files + ownership resolution + subtree loading.** The safe,
    structural prerequisite; subsumes the monolith as the one-root-file case;
    testable on its own. **Opus. Done (2026-07-17) — `src/brix/workspace.py`.**
-2. **Derived reverse-dependency index + loading-footprint tracking +
-   persistence.** Correctness-sensitive; the metadata change lands in the
-   reference (Python) and, later, the Rust core. **Opus build + Fable review**
-   (fingerprint/staleness-adjacent, like `content_key`/`env_used`).
+2. **Derived reverse-dependency index + persistence.** **Done (2026-07-17) —
+   `brix.workspace`** (`_derive_package_deps`, `Workspace.depends_on` /
+   `dependents_of` / `save_index`, `load_index`). The cross-package graph is
+   derived from the actions' data references using the planner's own
+   `infer_dependency` (no declaration), and persisted to
+   `build/.brix/workspace-index.json`. Safe to build ahead of the trial because
+   **nothing consumes it yet** — it is derived and saved, never used to skip a
+   load, so there is no staleness surface (the same "record now, act later"
+   shape as environment-recording phase 1). **Loading-footprint tracking**
+   (reload a package if a glob/file its construction read changed) is deferred
+   to land *with* tier 3, since it is only load-bearing once lazy loading
+   actually consumes the index; that is the Opus-build + Fable-review piece.
 3. **Lazy loading (`DistributedBuilder`).** The Fable-worthy core — "did we load
    every affected package" is a completeness property ordinary tests miss on
    small graphs. **Opus builds it behind the equivalence oracle below; Fable

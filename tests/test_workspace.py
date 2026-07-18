@@ -178,3 +178,63 @@ def test_merge_remaps_forced_orders(tmp_path):
     assert len(merged.actions) == 3  # a(1) + b(2)
     # b's forced order (0->1 within b) is remapped by a's offset (1) -> (1->2).
     assert merged.forced_orders == [(1, 2, b.forced_orders[0][2])]
+
+
+# --- tier 2: the derived cross-package dependency index ---------------------
+
+def _write_dep_workspace(root):
+    """A workspace where `app` consumes `lib`'s output (a cross-package edge),
+    plus an independent `root` package with no cross-deps."""
+    (root / "tools").mkdir(parents=True, exist_ok=True)
+    (root / "tools/upper.py").write_text(UPPER_TOOL)
+    (root / "services/lib").mkdir(parents=True, exist_ok=True)
+    (root / "services/lib/src.txt").write_text("lib source")
+    (root / "services/lib/brix.py").write_text(
+        _pkg_source("lib", "services/lib/src.txt", "build/lib/out.txt")
+    )
+    (root / "services/app").mkdir(parents=True, exist_ok=True)
+    # app reads lib's output -> app depends on lib.
+    (root / "services/app/brix.py").write_text(
+        _pkg_source("app", "build/lib/out.txt", "build/app/final.txt")
+    )
+    # root package: independent (reads a static tool file, produces its own out).
+    (root / "brix.py").write_text(
+        _pkg_source("root", "tools/upper.py", "build/root/out.txt")
+    )
+
+
+def test_derived_cross_package_index(tmp_path):
+    _write_dep_workspace(tmp_path)
+    ws = load_workspace(tmp_path)
+    lib = tmp_path / "services/lib"
+    app = tmp_path / "services/app"
+    root = tmp_path
+
+    # Derived purely from the data references — no declaration.
+    assert ws.depends_on[app] == {lib}
+    assert ws.depends_on[lib] == set()
+    assert ws.depends_on[root] == set()
+    # The reverse index: lib changing implicates app.
+    assert ws.dependents_of(lib) == {app}
+    assert ws.dependents_of(app) == set()
+
+
+def test_index_persistence_round_trip(tmp_path):
+    _write_dep_workspace(tmp_path)
+    ws = load_workspace(tmp_path)
+    ws.save_index()
+
+    from brix.workspace import load_index
+
+    loaded = load_index(tmp_path)
+    lib = tmp_path / "services/lib"
+    app = tmp_path / "services/app"
+    assert loaded[app] == {lib}
+    assert loaded[lib] == set()
+    assert (tmp_path / "build/.brix/workspace-index.json").exists()
+
+
+def test_missing_index_degrades_to_empty(tmp_path):
+    from brix.workspace import load_index
+
+    assert load_index(tmp_path) == {}  # no index yet -> safe (full load)

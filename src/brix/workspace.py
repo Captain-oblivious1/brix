@@ -26,11 +26,15 @@ Conventions:
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .graph import Graph
+
+_INDEX_FILE = "workspace-index.json"
+_INDEX_VERSION = 1
 
 # Directories never scanned for packages: brix's own storage and the usual
 # heavy/generated trees. A package's build outputs live under these, and they
@@ -101,19 +105,95 @@ def _load_module(package_dir: Path, brix_file: str):
     return module
 
 
+def _derive_package_deps(loaded: list[tuple[Path, Graph]]) -> dict[Path, set[Path]]:
+    """The cross-package dependency graph — ``package -> the packages it depends
+    on`` — derived from the actions' data references, using the planner's exact
+    edge logic (`infer_dependency`, the same it applies action-to-action). No
+    declaration: if package C has an action consuming an output produced by an
+    action in package P, C depends on P."""
+    from .planner import infer_dependency
+
+    deps: dict[Path, set[Path]] = {pkg: set() for pkg, _ in loaded}
+    for consumer_pkg, consumer_graph in loaded:
+        for producer_pkg, producer_graph in loaded:
+            if producer_pkg == consumer_pkg or producer_pkg in deps[consumer_pkg]:
+                continue
+            if any(
+                infer_dependency(producer, consumer) is not None
+                for consumer in consumer_graph.actions
+                for producer in producer_graph.actions
+            ):
+                deps[consumer_pkg].add(producer_pkg)
+    return deps
+
+
 @dataclass
 class Workspace:
-    """A loaded hierarchical workspace: its packages, their merged graph, and
-    the ownership map. `graph` plugs straight into the existing builders (it is
-    an ordinary merged `Graph`); `owner_of` is what a later tier will use to
-    load only the packages an edit touches."""
+    """A loaded hierarchical workspace: its packages, their merged graph, the
+    ownership map, and the *derived* cross-package dependency index. `graph`
+    plugs straight into the existing builders (it is an ordinary merged
+    `Graph`). `owner_of` maps a changed path to its package; `dependents_of`
+    (the reverse of `depends_on`) is what a later tier will walk to load only
+    the packages an edit touches — "package P changed → also load its
+    dependents." Nothing consumes the index yet, so there is no staleness
+    surface here; it is derived and (optionally) persisted for tiers 2b/3."""
 
     root: Path
     packages: list[Path]
     graph: Graph
+    depends_on: dict[Path, set[Path]] = field(default_factory=dict)
 
     def owner_of(self, path: str | Path) -> Path | None:
         return owner(path, self.packages)
+
+    def dependents_of(self, package: str | Path) -> set[Path]:
+        """Packages that depend on ``package`` (the reverse index): if this
+        package's files change, these must also be loaded/rebuilt."""
+        package = Path(package).resolve()
+        return {p for p, deps in self.depends_on.items() if package in deps}
+
+    def save_index(self, metadata_dir: str | Path = "build/.brix") -> Path:
+        """Persist the derived dependency index (repo-relative), so a later
+        build that loads only a subset can consult it without a full load."""
+        directory = self.root / metadata_dir
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / _INDEX_FILE
+
+        def rel(p: Path) -> str:
+            return p.resolve().relative_to(self.root).as_posix() or "."
+
+        payload = {
+            "version": _INDEX_VERSION,
+            "depends_on": {
+                rel(pkg): sorted(rel(d) for d in deps)
+                for pkg, deps in sorted(self.depends_on.items())
+            },
+        }
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=1, sort_keys=True))
+        tmp.replace(path)
+        return path
+
+
+def load_index(root: str | Path, metadata_dir: str | Path = "build/.brix") -> dict[Path, set[Path]]:
+    """Read a persisted dependency index back as absolute-path `depends_on`, or
+    ``{}`` if absent/unreadable (degrade to a full load — the safe direction)."""
+    root = Path(root).resolve()
+    path = root / metadata_dir / _INDEX_FILE
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    if payload.get("version") != _INDEX_VERSION:
+        return {}
+
+    def abs_of(r: str) -> Path:
+        return root if r == "." else (root / r)
+
+    return {
+        abs_of(pkg): {abs_of(d) for d in deps}
+        for pkg, deps in payload.get("depends_on", {}).items()
+    }
 
 
 def load_workspace(
@@ -134,7 +214,7 @@ def load_workspace(
     """
     root = Path(root).resolve()
     packages = find_packages(root, brix_file=brix_file)
-    graphs: list[Graph] = []
+    loaded: list[tuple[Path, Graph]] = []
     for package_dir in packages:
         module = _load_module(package_dir, brix_file)
         factory = getattr(module, graph_attr, None)
@@ -146,5 +226,11 @@ def load_workspace(
                 f"{package_dir / brix_file}: {graph_attr}() must return a Graph, "
                 f"got {type(graph).__name__}"
             )
-        graphs.append(graph)
-    return Workspace(root=root, packages=packages, graph=merge_graphs(graphs))
+        loaded.append((package_dir, graph))
+    merged = merge_graphs([g for _, g in loaded])
+    return Workspace(
+        root=root,
+        packages=packages,
+        graph=merged,
+        depends_on=_derive_package_deps(loaded),
+    )
