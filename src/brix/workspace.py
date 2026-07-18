@@ -33,10 +33,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .graph import Graph
-from .patterns import PathPattern, overlaps
+from .patterns import PathPattern
 
 _INDEX_FILE = "workspace-index.json"
-_INDEX_VERSION = 2
+_INDEX_VERSION = 3
 
 # Directories never scanned for packages: brix's own storage and the usual
 # heavy/generated trees. A package's build outputs live under these, and they
@@ -170,41 +170,6 @@ def _descriptor_matches(desc: list[str], rel: str) -> bool:
     return PathPattern(text).match(rel) is not None
 
 
-def _descriptors_overlap(out_desc: list[str], in_desc: list[str]) -> bool:
-    """Conservative "can these two descriptors name the same path", mirroring
-    the planner's `_atoms_overlap` with no shared bindings (persisted patterns
-    carry no expansion context; the extra edges that costs only over-load)."""
-    okind, otext = out_desc
-    ikind, itext = in_desc
-    if okind == "regex" and ikind == "regex":
-        return False  # match-only, exactly like the planner
-    if okind == "regex":
-        pattern = PathPattern(itext)
-        return pattern.is_concrete and re.compile(otext).fullmatch(itext) is not None
-    if ikind == "regex":
-        pattern = PathPattern(otext)
-        return pattern.is_concrete and re.compile(itext).fullmatch(otext) is not None
-    return overlaps(PathPattern(otext), PathPattern(itext))
-
-
-def _derive_deps_from_entries(entries: dict[Path, dict]) -> dict[Path, set[Path]]:
-    """`package -> packages it depends on`, from persisted descriptors: C
-    depends on P when any P output pattern can name a path any C input pattern
-    can. This is how a subset build gets edges without loading anything."""
-    deps: dict[Path, set[Path]] = {pkg: set() for pkg in entries}
-    for consumer, c_entry in entries.items():
-        for producer, p_entry in entries.items():
-            if producer == consumer:
-                continue
-            if any(
-                _descriptors_overlap(out_desc, in_desc)
-                for out_desc in p_entry.get("outputs", [])
-                for in_desc in c_entry.get("inputs", [])
-            ):
-                deps[consumer].add(producer)
-    return deps
-
-
 import sys
 import threading
 
@@ -292,6 +257,10 @@ class Workspace:
     depends_on: dict[Path, set[Path]] = field(default_factory=dict)
     footprints: dict[Path, set[Path]] = field(default_factory=dict)
     patterns: dict[Path, dict[str, list[list[str]]]] = field(default_factory=dict)
+    # True when every package was loaded (only=None), so `depends_on` is the
+    # complete cross-package graph — the one time save_index can persist edges
+    # authoritatively. A subset load leaves it False.
+    full_load: bool = True
 
     def owner_of(self, path: str | Path) -> Path | None:
         return owner(path, self.packages)
@@ -303,16 +272,26 @@ class Workspace:
         return {p for p, deps in self.depends_on.items() if package in deps}
 
     def save_index(self, metadata_dir: str | Path = "build/.brix") -> Path:
-        """Persist per-package input/output patterns and footprints
-        (repo-relative), so a later build can decide what to load — and derive
-        the cross-package edges — without loading anything.
+        """Persist per-package input/output patterns, footprints, and the
+        cross-package dependency edges (repo-relative), so a later build can
+        decide what to load without loading — or re-deriving — anything.
 
-        **Merges** with an existing index: entries are written for the
-        packages this workspace actually *loaded* (``self.patterns``), entries
-        for packages that no longer exist are dropped, and entries for
+        **Merges** with an existing index: entries are written for the packages
+        this workspace actually *loaded* (``self.patterns``), entries for
+        packages that no longer exist are dropped, and entries for
         discovered-but-unloaded packages are kept as-is — so a subset load
         refreshes its slice without clobbering the rest. ``last_selected``
-        records the loaded set, the recovery anchor after a failed build."""
+        records the loaded set, the recovery anchor after a failed build.
+
+        **Edges** are the performance-critical part. Deriving them is
+        O(packages² × patterns), so they are computed once on a *full* load
+        (where ``depends_on`` is complete and authoritative) and persisted; a
+        later subset build reads them O(packages) instead of re-deriving. A
+        subset save carries the persisted edges forward — sound because a subset
+        build only happens when no ``brix.py`` changed, so patterns are stable —
+        *unless* a footprint-driven reload actually changed a loaded package's
+        input/output patterns, in which case the edges are dropped so the next
+        build full-loads and heals them (edges depend only on the patterns)."""
         directory = self.root / metadata_dir
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / _INDEX_FILE
@@ -325,27 +304,48 @@ class Workspace:
             existing = json.loads(path.read_text())
         except (OSError, ValueError):
             existing = {}
-        entries: dict[str, dict] = (
-            dict(existing.get("packages", {}))
-            if existing.get("version") == _INDEX_VERSION
-            else {}
-        )
+        usable = existing.get("version") == _INDEX_VERSION
+        old_entries: dict[str, dict] = dict(existing.get("packages", {})) if usable else {}
         alive = {rel(p) for p in self.packages}
-        entries = {k: v for k, v in entries.items() if k in alive}
+        entries = {k: v for k, v in old_entries.items() if k in alive}
         for pkg, descriptors in self.patterns.items():
             entries[rel(pkg)] = {
                 "inputs": descriptors["inputs"],
                 "outputs": descriptors["outputs"],
-                "footprint": sorted(
-                    rel(f) for f in self.footprints.get(pkg, set())
-                ),
+                "footprint": sorted(rel(f) for f in self.footprints.get(pkg, set())),
             }
+
+        def io(entry: dict) -> tuple:
+            return (entry.get("inputs"), entry.get("outputs"))
+
+        if self.full_load:
+            # The authoritative edges: every package was loaded, so depends_on
+            # is complete. This is the one place they are (re)derived.
+            depends_on: dict[str, list[str]] | None = {
+                rel(pkg): sorted(rel(d) for d in deps)
+                for pkg, deps in self.depends_on.items()
+            }
+        elif (
+            usable
+            and "depends_on" in existing
+            and set(entries) == set(old_entries)
+            and all(io(entries[k]) == io(old_entries[k]) for k in entries)
+        ):
+            # Subset save, patterns unchanged: the persisted edges still hold.
+            depends_on = existing["depends_on"]
+        else:
+            # Subset save that changed a package's patterns (a footprint reload):
+            # the edges may be stale, so drop them — the next build sees no edges,
+            # full-loads, and re-derives. Correct, at the cost of one full load.
+            depends_on = None
 
         payload = {
             "version": _INDEX_VERSION,
             "packages": entries,
             "last_selected": sorted(rel(p) for p in self.patterns),
         }
+        if depends_on is not None:
+            payload["depends_on"] = depends_on
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=1, sort_keys=True))
         tmp.replace(path)
@@ -354,8 +354,9 @@ class Workspace:
 
 @dataclass
 class WorkspaceIndex:
-    """The persisted index, decoded: per-package pattern/footprint entries,
-    the *derived* dependency edges, and the last-loaded selection."""
+    """The persisted index, decoded: per-package pattern/footprint entries, the
+    persisted cross-package dependency edges (read O(packages), never
+    re-derived), and the last-loaded selection."""
 
     root: Path
     entries: dict[Path, dict]
@@ -383,8 +384,12 @@ class WorkspaceIndex:
 def load_index_data(
     root: str | Path, metadata_dir: str | Path = "build/.brix"
 ) -> WorkspaceIndex | None:
-    """Read the persisted index, or None if absent/unreadable/old-version —
-    the caller must degrade to a full load, the safe direction."""
+    """Read the persisted index, or None if absent/unreadable/old-version, or
+    if it carries no persisted edges (never full-built, or edges invalidated by
+    a pattern change) — in every None case the caller degrades to a full load,
+    the safe direction, which re-persists the edges. Reading the edges directly
+    is O(packages); it never re-derives them (that O(packages²) cost is paid
+    once, on a full build, in `save_index`)."""
     root = Path(root).resolve()
     path = root / metadata_dir / _INDEX_FILE
     try:
@@ -393,16 +398,22 @@ def load_index_data(
         return None
     if payload.get("version") != _INDEX_VERSION:
         return None
+    raw_deps = payload.get("depends_on")
+    if raw_deps is None:
+        return None  # no trustworthy edges -> full load heals the index
 
     def abs_of(r: str) -> Path:
         return root if r == "." else (root / r)
 
     entries = {abs_of(k): v for k, v in payload.get("packages", {}).items()}
+    depends_on = {
+        abs_of(pkg): {abs_of(d) for d in deps} for pkg, deps in raw_deps.items()
+    }
     raw_selected = payload.get("last_selected")
     return WorkspaceIndex(
         root=root,
         entries=entries,
-        depends_on=_derive_deps_from_entries(entries),
+        depends_on=depends_on,
         last_selected=(
             {abs_of(r) for r in raw_selected} if raw_selected is not None else None
         ),
@@ -478,4 +489,5 @@ def load_workspace(
         depends_on=depends_on,
         footprints=footprints,
         patterns=patterns,
+        full_load=only is None,
     )

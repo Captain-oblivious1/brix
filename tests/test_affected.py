@@ -19,7 +19,7 @@ import pytest
 from brix import IncrementalBuilder
 from brix.affected import load_affected, select_affected
 from brix.metadata import BuildMetadata
-from brix.workspace import find_packages, load_workspace
+from brix.workspace import find_packages, load_index_data, load_workspace
 
 from test_workspace import UPPER_TOOL, _pkg_source
 from test_workspace_oracle import _full_build, _snapshot
@@ -270,6 +270,59 @@ def test_selection_loads_less_than_everything(tmp_path):
     assert {"services/lib", "services/mid", "services/app", "services/dyn"} <= _rel_set(
         root, chosen
     )
+
+
+# --- persisted edges (the O(n^2)-selection fix) ---------------------------------
+
+def _index_json(root):
+    return json.loads((root / "build/.brix/workspace-index.json").read_text())
+
+
+def test_full_build_persists_the_dependency_edges(tmp_path):
+    # The fix: edges are derived once on a full build and stored, so selection
+    # reads them O(packages) instead of re-deriving O(packages^2). A silent
+    # revert to derive-on-load would drop this key and fail here.
+    root = _write_workspace(tmp_path / "ws")
+    load_workspace(root).save_index()
+    index = _index_json(root)
+    assert "depends_on" in index
+    # The chain is lib -> mid -> app, so each consumer records its producer.
+    assert index["depends_on"]["services/mid"] == ["services/lib"]
+    assert index["depends_on"]["services/app"] == ["services/mid"]
+    # And selection uses them: editing lib pulls in its transitive dependents.
+    chosen = select_affected(root, ["services/lib/src.txt"], find_packages(root))
+    assert _rel_set(root, chosen) == {"services/lib", "services/mid", "services/app"}
+
+
+def test_index_without_persisted_edges_forces_a_full_load(tmp_path):
+    # An index carrying no edges (a subset save that changed patterns, or a
+    # pre-fix index) must degrade to a full load, which re-persists them.
+    root = _write_workspace(tmp_path / "ws")
+    load_workspace(root).save_index()
+    index_path = root / "build/.brix/workspace-index.json"
+    payload = json.loads(index_path.read_text())
+    del payload["depends_on"]
+    index_path.write_text(json.dumps(payload))
+    assert load_index_data(root) is None  # no edges -> caller full-loads
+    assert select_affected(root, ["services/lib/src.txt"], find_packages(root)) is None
+
+
+def test_source_edit_carries_edges_forward_but_footprint_change_drops_them(tmp_path):
+    root = _write_workspace(tmp_path / "ws")
+    load_workspace(root).save_index()
+
+    # A subset load whose patterns are unchanged (an ordinary source edit)
+    # keeps the persisted edges.
+    load_workspace(root, only={root / "services/lib"}).save_index()
+    assert "depends_on" in _index_json(root)
+
+    # dyn's create_graph reads deps.txt to choose its input; flipping it changes
+    # dyn's *patterns*, so a subset reload of dyn must drop the edges (they may
+    # be stale) — the next build full-loads and heals.
+    (root / "services/dyn/deps.txt").write_text("services/dyn/b.txt")
+    load_workspace(root, only={root / "services/dyn"}).save_index()
+    assert "depends_on" not in _index_json(root)
+    assert load_index_data(root) is None
 
 
 # --- the FULL fallbacks ---------------------------------------------------------

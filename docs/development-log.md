@@ -1,5 +1,25 @@
 # Development log
 
+- **Selector fix: persist the cross-package edges (kill the O(n²) selection).**
+  The lazy-loading benchmark showed selection re-deriving every cross-package
+  edge per call — O(packages² × modules²), 11 s at 100 packages — which dwarfed
+  the construction it saved. Fixed by persisting the derived `depends_on` in the
+  index (v3): the edges are computed once on a *full* load (the one load that
+  has the complete graph) and stored, so `load_index_data` reads them
+  O(packages) instead of re-deriving (`_derive_deps_from_entries` and its
+  helper are gone). A subset save carries the persisted edges forward — sound
+  because a subset build only happens when no `brix.py` changed, so patterns are
+  stable — and drops them (so the next build full-loads and re-derives) only
+  when a footprint-driven reload actually changed a loaded package's
+  input/output patterns; edges depend solely on those patterns, so this is
+  exact. Selection dropped from 11 s to 52 ms at 100 packages (~220×) and is now
+  linear (~0.5 ms/package, mostly the discovery walk), so lazy loading is a net
+  win at every scale measured. Regression-guarded in `tests/test_affected.py`
+  (edges are persisted; a missing-edges index forces a full load; a source edit
+  carries edges forward while a footprint pattern-change drops them) with the
+  equivalence oracle still green on both engines. `src/brix/workspace.py`,
+  `examples/lazy_loading_benchmark.py`.
+
 - **Quantified the lazy-loading win — and found the selector is O(n²).**
   `examples/lazy_loading_benchmark.py` isolates graph-construction time (the
   cost lazy loading removes, above incrementality), full-load vs affected-only,

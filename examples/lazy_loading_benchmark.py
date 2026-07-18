@@ -88,10 +88,10 @@ def bench(packages: int, modules: int, reps: int) -> dict:
         changed = setup(root, packages, modules)
         discovered = find_packages(root)
         all_pkgs = {p.resolve() for p in discovered}
-        # Bootstrap the persisted index (untimed). `only=all_pkgs` constructs
-        # every package and persists its patterns WITHOUT the O(n^2) edge
-        # derivation, which the v2 index derives lazily on read anyway.
-        load_workspace(root, only=all_pkgs).save_index()
+        # Bootstrap the persisted index (untimed): a real full build derives the
+        # cross-package edges once and persists them, so later selection reads
+        # them O(packages) instead of re-deriving.
+        load_workspace(root).save_index()
 
         # Pure construction: full (every package) vs affected-only. This is the
         # thesis — the cost a small edit pays for the graph it then ignores.
@@ -102,12 +102,10 @@ def bench(packages: int, modules: int, reps: int) -> dict:
         sel_set = {p.resolve() for p in selected}
         lazy = _median_ms(lambda: load_workspace(root, only=sel_set), reps)
 
-        # Selection is a separate, graph-free cost (walk + pattern match + edge
-        # derivation). Reported so its scaling is visible, not hidden — as of
-        # 2026-07-18 it re-derives every cross-package edge per call, which is
-        # O(packages^2 x modules^2) and dominates past a dozen packages (see the
-        # note printed below). Measured once: it is slow and deterministic.
-        select = _median_ms(lambda: select_affected(root, [changed], discovered), 1)
+        # Selection is a separate, graph-free cost (discovery walk + pattern
+        # match + an O(packages) read of the persisted edges). Reported so its
+        # scaling stays visible.
+        select = _median_ms(lambda: select_affected(root, [changed], discovered), reps)
         return {"full": full, "lazy": lazy, "select": select}
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -132,13 +130,10 @@ def main() -> None:
     print(
         "\nReading: full-load construction grows ~linearly with package count;\n"
         "affected-only stays roughly flat, so the construction speedup rises with\n"
-        "repo size — the design thesis holds. BUT `select` (the affected-set\n"
-        "computation) currently re-derives every cross-package edge per call\n"
-        "(O(packages^2 x modules^2), regex-compiling), so it grows ~quadratically\n"
-        "and dominates past ~a dozen packages. Fix: persist the derived edges in\n"
-        "the index at full-build time so selection reads them O(packages) instead\n"
-        "of re-deriving. Until then the construction win is real but the selector\n"
-        "is the bottleneck, not the loading."
+        "repo size — the design thesis holds. `select` reads the persisted\n"
+        "cross-package edges (O(packages)) rather than re-deriving them, so it\n"
+        "stays cheap and linear; a small edit's total cost (affected construct +\n"
+        "select) is now well under a full load and the gap widens with repo size."
     )
 
 
