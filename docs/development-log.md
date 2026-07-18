@@ -1,5 +1,23 @@
 # Development log
 
+- **Hierarchical build files, tier 1 (monorepo scaling).** The safe foundation
+  of the plan in `docs/monorepo-scaling.md`: a large repo can split its one root
+  `brix.py` into several placed at module/service boundaries, each a *package*
+  owning its subtree until interrupted by a deeper `brix.py` (the Bazel package
+  model). `brix.workspace` provides discovery (`find_packages`), nearest-ancestor
+  ownership (`owner`), a graph union that remaps the index-based `forced_orders`
+  (`merge_graphs`), and `load_workspace` — which imports every package's
+  `create_graph()` and merges them into one ordinary `Graph` that plugs straight
+  into the existing builders (`cli.main(lambda: load_workspace(ROOT).graph, …)`),
+  so no builder change was needed. This tier is deliberately **non-lazy**: every
+  package is loaded and merged, which is exactly why the load-bearing test proves
+  a hierarchical workspace builds **byte-identically to the equivalent monolith**
+  — the "monolith is the degenerate one-root-file case" contract, made mechanical.
+  The ownership map it computes now is what the deferred tiers (derived reverse-
+  dependency index, then lazy loading) will consume to load only the packages an
+  edit touches; nothing yet skips a load, so there is no staleness surface here.
+  Paths stay workspace-root-relative (the merge is a pure union, no rebasing).
+  `src/brix/workspace.py`, `tests/test_workspace.py`.
 - **Git-accelerated change detection (opt-in reference path).** brix finds what
   changed by stat-ing every declared input; on a large working tree those stats
   become the floor. The change detector is an injected seam —

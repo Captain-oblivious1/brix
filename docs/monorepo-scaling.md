@@ -1,11 +1,19 @@
 # Scaling to a large monorepo: hierarchical build files and lazy loading
 
-Status: **design (2026-07-17)** — not implemented; **post-trial** (the
-monolithic full-load path is the safe floor for the air-gapped trial, this is
-"scale after proven correct"). Companion to `docs/roadmap.md` ("only build what
-my change touched"), `src/brix/gitdetect.py` (the change source), and the
-`build_stack`/detector-injection work. This note is the contract for the
-sequenced plan; build against it, don't re-derive it.
+Status: **tier 1 implemented (2026-07-17, Opus)**; tiers 2–3 designed, not built
+(the risky lazy-loading core is **post-trial** — the monolithic full-load path
+is the safe floor for the air-gapped trial, this is "scale after proven
+correct"). Companion to `docs/roadmap.md` ("only build what my change touched"),
+`src/brix/gitdetect.py` (the change source), and the `build_stack`/detector-
+injection work. This note is the contract for the sequenced plan; build against
+it, don't re-derive it.
+
+Tier 1 shipped in `src/brix/workspace.py` (`find_packages`, `owner`,
+`merge_graphs`, `load_workspace`, `Workspace`), proven by
+`tests/test_workspace.py` — a hierarchical workspace builds **identically** to
+the equivalent monolith. It is the safe, non-lazy foundation: every package is
+loaded and merged, so nothing yet skips a load; the ownership map it builds is
+what tiers 2–3 will use.
 
 ## The problem
 
@@ -119,7 +127,7 @@ changed" → load all → safe).
 
 1. **Hierarchical files + ownership resolution + subtree loading.** The safe,
    structural prerequisite; subsumes the monolith as the one-root-file case;
-   testable on its own. **Opus.**
+   testable on its own. **Opus. Done (2026-07-17) — `src/brix/workspace.py`.**
 2. **Derived reverse-dependency index + loading-footprint tracking +
    persistence.** Correctness-sensitive; the metadata change lands in the
    reference (Python) and, later, the Rust core. **Opus build + Fable review**

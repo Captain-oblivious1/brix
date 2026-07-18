@@ -22,6 +22,7 @@ from .gitdetect import GitChangeDetector
 from .graph import Graph
 from .layers import BuildLayer, NodeContext, NodeProposal
 from .plan import EdgeTrigger
+from .workspace import Workspace, load_workspace
 from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 from .status import ActionStatus, StatusReport, compute_status
@@ -57,7 +58,9 @@ __all__ = [
     "StatusReport",
     "TwoTierCacheStore",
     "WorkerSpec",
+    "Workspace",
     "build_stack",
+    "load_workspace",
     "cli",
     "compute_status",
     "cpp",
