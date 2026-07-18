@@ -249,6 +249,19 @@ chain). This is the same discipline the git detector's equivalence oracle uses.
 If that oracle can't be made solid, that is the signal the design isn't ready —
 regardless of which model touches it.
 
+## Precondition surfaced by the end-to-end dogfood: gitignore the build output
+
+`examples/monorepo_dogfood.py` runs the whole stack the way the trial will —
+git-driven `load_affected` plus a git-accelerated Rust build over a hierarchical
+C monorepo — and it caught one real precondition: **the build output directory
+must be gitignored.** git-driven change detection treats untracked files as
+changes, so an un-ignored `build/` makes every no-op build "see" its own outputs
+as changes (they match the packages' *output* patterns) and reload — and rebuild
+freshness-check — everything. Real repos already ignore their build dir; it is
+just the one thing the trial's repo has to get right for lazy loading to be the
+clean no-op it should be. With it in place the dogfood's no-op build loads zero
+packages and runs nothing, and every edit rebuilds exactly its affected set.
+
 ## What this plan explicitly does *not* require
 
 - **No redundant cross-module dependency declarations** — derived from the data

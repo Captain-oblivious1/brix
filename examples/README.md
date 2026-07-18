@@ -31,6 +31,14 @@ characterizes the engine's per-build overhead as graph size grows, and
 graph-construction time, full-load vs affected-only, across a ladder of package
 counts.
 
+And an **end-to-end dogfood**, `monorepo_dogfood.py` — a git-backed hierarchical
+C monorepo (`util` static library + `app` that links it) driven by the trial's
+exact workflow: git-based `load_affected` selects what to load, and a
+git-accelerated incremental build (native on the Rust engine) rebuilds only
+what changed. It runs an edit sequence and checks *what actually rebuilt* —
+proving hierarchical loading, derived cross-package deps, lazy loading, git
+detection, and C header tracking all compose. Needs `cc`/`ar`/`git`.
+
 ## Real-project dogfoods (clone required)
 
 Each has its own `README.md` with clone + setup steps. Checkouts go in

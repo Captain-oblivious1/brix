@@ -1,5 +1,26 @@
 # Development log
 
+- **End-to-end monorepo dogfood — the whole stack, the trial's workflow.**
+  `examples/monorepo_dogfood.py` runs a git-backed hierarchical C monorepo
+  (`services/util` static library + `services/app` that links it) the way the
+  air-gapped trial will: git-driven `load_affected` (changed=None → git
+  enumerates what changed) selects the packages to load, and a git-accelerated
+  incremental build — native on the default Rust engine — rebuilds only what
+  changed. It runs a real edit sequence with `cc`/`ar` and asserts *what
+  actually rebuilt*: cold build compiles everything (output 42); a no-op loads
+  zero packages and runs nothing while preserving the binary; editing `util`'s
+  source recompiles util + relinks app but replays app's compile (git-vouched
+  unchanged, output 100); editing `app` rebuilds only app while util does no
+  work (101); editing the shared header full-loads (a discovered depfile input,
+  unattributable to a package) and rebuilds both includers. This exercises
+  tiers 1–3, derived cross-package deps, the git-detection Rust mirror plus its
+  cross-engine metadata interop (the Rust build writes the baseline the Python
+  change enumeration reads), and C header tracking — all composed, with no test
+  scaffolding. Guarded by `tests/test_monorepo_dogfood.py` (skips without
+  cc/ar/git). **Finding:** the build output dir must be gitignored, or git-driven
+  detection sees the untracked outputs as changes and defeats the no-op —
+  recorded as a trial precondition in `docs/monorepo-scaling.md`.
+
 - **Selector fix: persist the cross-package edges (kill the O(n²) selection).**
   The lazy-loading benchmark showed selection re-deriving every cross-package
   edge per call — O(packages² × modules²), 11 s at 100 packages — which dwarfed
