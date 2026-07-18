@@ -67,6 +67,10 @@ _WORKER_SOURCE = Path(__file__).parent / "_java" / "KotlincWorker.java"
 _SPRING_PRESET = "plugin:org.jetbrains.kotlin.allopen:preset=spring"
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = ['JarAction', 'kotlinc_worker', 'abi', 'KotlinAbiFile', 'KotlinAbiGlob']
+
+
 class KotlinAbiFile(FileData):
     """A jar/class compared through the Kotlin ABI lens: jvm-abi semantics,
     except classes whose Kotlin metadata declares inline members (whose

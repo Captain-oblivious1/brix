@@ -13,6 +13,20 @@ from collections.abc import Iterator
 from .patterns import PathPattern
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = [
+    'DataExpr',
+    'DataAtom',
+    'FileData',
+    'GlobData',
+    'RegexData',
+    'ToolData',
+    'ValueData',
+    'DataUnion',
+    'DataFactory',
+]
+
+
 class DataExpr:
     """Base class for all logical data expressions."""
 

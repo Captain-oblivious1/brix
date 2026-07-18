@@ -28,6 +28,10 @@ from .data import DataExpr, FileData, GlobData, ToolData, ValueData
 from .deps import DepSet
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = ['CompileSourceAction', 'LinkApplicationAction', 'ArchiveAction', 'pkg_config']
+
+
 def _options_expr(options: list[str] | DataExpr | None) -> DataExpr:
     if isinstance(options, DataExpr):
         return options

@@ -31,6 +31,10 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = ['ContentIdentity', 'register']
+
+
 @runtime_checkable
 class ContentIdentity(Protocol):
     """A registered content-identity plugin."""

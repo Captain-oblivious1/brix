@@ -336,6 +336,17 @@ These are self-contained and come with tests. No Fable needed.
 - **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
   does this for Java and TypeScript (skip rebuilding users when only internals
   changed). Add it for Go and Protobuf when those languages show up in a project.
+- **Generate API docs for the *user's* project as a build step.** A brix helper
+  that runs the ecosystem's doc generator over a project's own sources —
+  `javadoc` for Java, `typedoc`/`tsdoc` for TypeScript, `doxygen` for C/C++,
+  `pydoc`/`pdoc` for Python — as an ordinary action, so a project's API docs are
+  a tracked, incremental build output like anything else (rebuilt only when the
+  sources that feed them change, cacheable, composable with the rest of the
+  graph). Distinct from brix's *own* documentation (that is the "generate HTML
+  documentation" item below); this is doc generation offered *to* the projects
+  brix builds. Likely shapes: `java.javadoc(sources=…, out=…)`,
+  `ts.typedoc(…)`, `cpp.doxygen(…)` — each just an `ExternalProcessAction` with
+  the right declared inputs/outputs, so incrementality and caching come for free.
 - **TypeScript: automatic import-dependency tracking — done (2026-07-18,
   Opus).** A `ts.CompileAction` already tracked *declared* cross-module deps
   (another module's built `.d.ts`, ts-dts-lensed); it now also discovers the

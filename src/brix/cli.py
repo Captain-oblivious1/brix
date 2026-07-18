@@ -54,6 +54,10 @@ from .report import ConsoleReporter
 from .status import compute_status
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = ['main', 'Alias']
+
+
 @dataclass(frozen=True)
 class Alias:
     """A target shorthand that also carries a description for ``help``.

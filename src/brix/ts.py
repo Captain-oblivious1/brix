@@ -64,6 +64,10 @@ from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
 _LISTFILES_WRAPPER = Path(__file__).parent / "_ts" / "tsc_listfiles.py"
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = ['CompileAction', 'dts', 'DtsFile', 'DtsGlob']
+
+
 class DtsFile(FileData):
     """A `.d.ts` declaration file compared through the ts-dts lens, not its
     bytes: a consumer recompiles on a public-API change, not an

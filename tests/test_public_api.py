@@ -52,6 +52,35 @@ def test_top_level_exports_are_the_supported_v1_contract():
     assert all(hasattr(brix, name) for name in EXPECTED)
 
 
+# Each public authoring submodule declares a curated `__all__` — the documented
+# surface (autogen renders exactly these) and a reviewed contract. Internal
+# helpers stay out; adding a genuinely public name means updating this set.
+MODULE_EXPORTS = {
+    "cpp": {"CompileSourceAction", "LinkApplicationAction", "ArchiveAction", "pkg_config"},
+    "java": {"JarAction", "JUnitTestAction", "javac_worker", "abi", "AbiFile",
+             "AbiGlob", "pom", "maven", "gradle"},
+    "kotlin": {"JarAction", "kotlinc_worker", "abi", "KotlinAbiFile", "KotlinAbiGlob"},
+    "ts": {"CompileAction", "dts", "DtsFile", "DtsGlob"},
+    "springboot": {"SpringBootJar", "boot_repackager", "RepackagerSpec"},
+    "cli": {"main", "Alias"},
+    "data": {"DataExpr", "DataAtom", "FileData", "GlobData", "RegexData",
+             "ToolData", "ValueData", "DataUnion", "DataFactory"},
+    "identity": {"ContentIdentity", "register"},
+}
+
+
+def test_public_submodules_expose_their_curated_surface():
+    import importlib
+
+    for name, expected in MODULE_EXPORTS.items():
+        module = importlib.import_module(f"brix.{name}")
+        assert set(module.__all__) == expected, name
+        # No private/underscore names leak into the documented surface, and
+        # every listed name actually resolves.
+        assert all(not n.startswith("_") for n in module.__all__), name
+        assert all(hasattr(module, n) for n in module.__all__), name
+
+
 def test_engine_internals_are_not_top_level_attributes():
     internal = {
         "AtomicLayer",

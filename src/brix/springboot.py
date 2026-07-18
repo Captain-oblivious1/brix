@@ -47,6 +47,10 @@ if TYPE_CHECKING:
 _REPACKAGER_SOURCE = Path(__file__).parent / "_java" / "BootRepackager.java"
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = ['SpringBootJar', 'boot_repackager', 'RepackagerSpec']
+
+
 @dataclass(frozen=True)
 class RepackagerSpec:
     """Handle to the bootstrapped ``BootRepackager`` helper: its jar plus the

@@ -56,6 +56,20 @@ _WORKER_SOURCE = Path(__file__).parent / "_java" / "JavacWorker.java"
 # re-running Maven; editing the pom or the coordinates re-resolves.
 
 
+# Public API surface (curated for documentation and as a contract).
+__all__ = [
+    'JarAction',
+    'JUnitTestAction',
+    'javac_worker',
+    'abi',
+    'AbiFile',
+    'AbiGlob',
+    'pom',
+    'maven',
+    'gradle',
+]
+
+
 def _parse_classpath(text: str) -> list[str]:
     """The jar paths from a Maven `dependency:build-classpath` file (one
     os.pathsep-joined line of absolute ~/.m2 paths)."""
