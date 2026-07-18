@@ -31,17 +31,37 @@ fingerprint inputs; ``tsc``'s own module resolution locates them on disk (they
 sit in the upstream ``out_dir`` the dependent imports from), so no classpath-style
 flag is needed.
 
-Scope for now: a single ``tsc`` spawn per module (no warm compiler daemon — like
-`brix.cpp`, unlike `brix.java`'s javac worker) and no npm/``node_modules``
-resolver (that is the `ts.npm`-style adapter of docs/dependencies.md, still
-planned). ``tsc`` is often not global; pass ``tsc=data.tool(".../node_modules/.bin/tsc")``
-to point at a local install.
+**Automatic import tracking.** The declared ``sources`` glob covers a module's
+own tree, but a TS ``import`` can reach a shared ``.ts`` *outside* it (a common
+``utils/`` file, an ambient ``.d.ts``). Left undiscovered, editing that file
+would leave the module stale — the TS version of the C/C++ header problem. So by
+default (``track_imports=True``) brix wraps ``tsc`` in a ``--listFiles`` recorder
+that writes a Makefile depfile of every workspace ``.ts``/``.d.ts`` the compile
+actually read; the incremental layer scans it exactly like a ``cc -MMD`` one, so
+editing a deeply-imported source re-stales the compile. It is complementary to
+``dependencies=``: a *declared* upstream ``.d.ts`` is tracked through the ts-dts
+lens (impl-only upstream change → replay), and its directory is excluded from
+the depfile so that byte-tracking never overrides the lens; the depfile is only
+for the *undeclared* source imports the lens doesn't cover. Set
+``track_imports=False`` for a bare single ``tsc`` spawn.
+
+Scope for now: no warm compiler daemon (like `brix.cpp`, unlike `brix.java`'s
+javac worker) and no npm/``node_modules`` resolver (that is the `ts.npm`-style
+adapter of docs/dependencies.md, still planned). ``tsc`` is often not global;
+pass ``tsc=data.tool(".../node_modules/.bin/tsc")`` to point at a local install.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from .actions import Action, ExternalProcessAction
 from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+
+# brix's tsc wrapper: runs the compile with --listFiles and records the files
+# tsc actually read as a Makefile depfile (the TS counterpart of `cc -MMD`).
+_LISTFILES_WRAPPER = Path(__file__).parent / "_ts" / "tsc_listfiles.py"
 
 
 class DtsFile(FileData):
@@ -103,12 +123,21 @@ class CompileAction(Action):
         options: list[str] | DataExpr | None = None,
         declaration: bool = True,
         dependencies: list[DataExpr] | None = None,
+        track_imports: bool = True,
+        python: ToolData | None = None,
     ) -> None:
         self.sources = sources
         self.out_dir = out_dir
         self.tsc = tsc if tsc is not None else ToolData("tsc")
         self.options = options
         self.declaration = declaration
+        # Discover the transitive import graph: run tsc with --listFiles and
+        # record the workspace .ts/.d.ts it read as a depfile, so editing a
+        # deeply-imported source that the declared `sources` glob doesn't cover
+        # re-stales this compile (the TS answer to the C/C++ header problem).
+        # On by default — a correctness feature, like C++'s always-on -MMD.
+        self.track_imports = track_imports
+        self.python = python if python is not None else ToolData(sys.executable)
         # Upstream modules' emitted .d.ts (ts-dts-lensed): fingerprint inputs
         # only. tsc resolves the imports to them on disk (they live in the
         # upstream out_dir this module imports from), so no classpath flag is
@@ -146,14 +175,46 @@ class CompileAction(Action):
             # reading a stale declaration (docs/capability-audit.md).
             self_resolved = ("types",)
 
+        tsc_command = f"{{tsc}} {{options}} {decl_flag}--outDir {{out_dir}} {{sources}}"
+        if not self.track_imports:
+            return [
+                ExternalProcessAction(
+                    name=f"tsc -> {self.out_dir}",
+                    command_line=tsc_command,
+                    inputs=inputs,
+                    outputs=outputs,
+                    self_resolved_inputs=self_resolved,
+                )
+            ]
+
+        # Wrap tsc in brix's --listFiles recorder, writing a Makefile depfile
+        # the incremental layer scans like any C/C++ one. Exclude this module's
+        # own out_dir (its emit is not an input) and each declared dependency's
+        # directory (those .d.ts are tracked through the ts-dts lens above;
+        # byte-tracking them here would defeat the impl-only-change replay).
+        depfile = f"{self.out_dir}/.brix-tsdeps.d"
+        outputs["depfile"] = FileData(depfile)
+        inputs["python"] = self.python
+        inputs["wrapper"] = FileData(str(_LISTFILES_WRAPPER.resolve()))
+        exclude_dirs = {self.out_dir.rstrip("/")}
+        for dep in self.dependencies:
+            for atom in dep.atoms():
+                pattern = getattr(atom, "pattern", None)
+                if pattern is not None and pattern.literal_prefix_dir:
+                    exclude_dirs.add(pattern.literal_prefix_dir)
+        exclude_flags = " ".join(f"--exclude {d}" for d in sorted(exclude_dirs))
+        inputs["excludes"] = ValueData(exclude_flags)
+
         return [
             ExternalProcessAction(
                 name=f"tsc -> {self.out_dir}",
                 command_line=(
-                    f"{{tsc}} {{options}} {decl_flag}--outDir {{out_dir}} {{sources}}"
+                    f"{{python}} {{wrapper}} {{depfile}} {{excludes}} "
+                    f"-- {tsc_command}"
                 ),
                 inputs=inputs,
                 outputs=outputs,
                 self_resolved_inputs=self_resolved,
+                depfile=depfile,
             )
         ]

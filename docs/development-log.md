@@ -1,5 +1,30 @@
 # Development log
 
+- **TypeScript automatic import-dependency tracking.** Closed the stale-build
+  hole where a module `import`s a shared `.ts` outside its declared `sources`
+  glob (or an ambient `.d.ts`) — the TS analogue of the C/C++ header problem.
+  `ts.CompileAction` now defaults to `track_imports=True`, wrapping `tsc` in
+  `src/brix/_ts/tsc_listfiles.py`, a `--listFiles` recorder that writes a
+  **Makefile-format depfile** of the workspace `.ts`/`.d.ts` the compile
+  actually read. That reuses the existing discovered-deps channel wholesale —
+  both engines already scan Makefile depfiles (`scan_depfile`) — so there is
+  **zero engine change**, confirmed by running the new integration test on both
+  the Rust and Python engines. The recorder excludes the module's own `out_dir`
+  and each *declared* dependency's directory, so a declared upstream `.d.ts`
+  stays governed by the ts-dts lens (impl-only upstream change → replay);
+  byte-tracking it via the depfile would have defeated that shortcut, so the two
+  mechanisms are kept strictly complementary — the depfile is only for the
+  undeclared source imports the lens doesn't cover. Absolute lib/`node_modules`
+  and out-of-tree paths are dropped, exactly as the C/C++ scanner drops absolute
+  system prerequisites. Proof: `tests/test_ts_import_tracking.py` drives the
+  whole channel with an executable **fake tsc** (models `// import:` comments,
+  emits `.js`/`.d.ts`, prints an absolute `--listFiles` list) — editing an
+  undeclared imported source re-runs the compile, an unimported sibling does
+  not, and the depfile records only workspace sources — plus a gated real-tsc
+  case in `tests/test_ts_equivalence.py`. `track_imports=False` restores the
+  bare single-spawn. `src/brix/ts.py`, `src/brix/_ts/tsc_listfiles.py`,
+  `tests/test_ts.py`.
+
 - **Worked example for hierarchical/lazy loading (`examples/hierarchical/`).**
   The distributed-`brix.py` feature was tested but had no user-facing surface;
   this is the runnable end-to-end demonstration and the adoption template a

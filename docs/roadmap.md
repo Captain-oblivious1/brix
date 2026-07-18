@@ -312,20 +312,40 @@ These are self-contained and come with tests. No Fable needed.
 - **Write down the official ways to plug in.** There are three: where cached
   results are stored, how brix judges whether a change actually "matters," and how
   it detects file changes. Document them so other people can build on brix.
+- **Generate HTML documentation.** Two complementary outputs, published as a
+  browsable site: (1) an **API reference** built from the code's own docstrings
+  — the Python equivalent of Javadoc (a generator such as `pdoc`, `mkdocstrings`,
+  or Sphinx `autodoc`; the docstrings are already thorough, so this is mostly
+  tool selection + a build step), and eventually the same for the TS authoring
+  API via **TypeDoc** once that API exists; and (2) **user-facing conceptual
+  docs** — the high-level concepts (the graph/action model, incrementality,
+  content-key lenses, the layer stack, hierarchical/lazy loading) written for a
+  reader adopting brix, not spelunking the source. The existing `docs/*.md` are
+  design notes and contracts, not a learner's on-ramp; this is the friendly
+  narrative on top, cross-linked to the API reference. Decide: one static-site
+  toolchain that renders both (e.g. MkDocs/Material + mkdocstrings, or Sphinx +
+  MyST) vs. two separate pipelines; keep it self-contained (no external
+  services) so it can be built and viewed on the air-gapped machine.
 - **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
   does this for Java and TypeScript (skip rebuilding users when only internals
   changed). Add it for Go and Protobuf when those languages show up in a project.
-- **TypeScript: automatic import-dependency tracking** — the remaining half of
-  the TS build story (the helper itself, `brix.ts`, **landed** — see the
-  [development log](development-log.md)).
-  Today a `ts.CompileAction` tracks *cross-module* deps you declare (the built
-  `.d.ts` of another module, ts-dts-lensed). Not yet automatic: reading a
-  module's own `import` graph so editing a deeply-imported *source* rebuilds it —
-  the TS version of the C/C++ header problem. The machinery exists (the `-MMD`
-  depfile path built for C/C++); TS needs a reader for its dependency format
-  (`tsc --listFiles` / a resolver pass) feeding the same depfile channel. Note:
-  this is about *building* TS code — separate from the [Blocked] track-3 item of
-  *writing build files* in TS.
+- **TypeScript: automatic import-dependency tracking — done (2026-07-18,
+  Opus).** A `ts.CompileAction` already tracked *declared* cross-module deps
+  (another module's built `.d.ts`, ts-dts-lensed); it now also discovers the
+  *undeclared* import graph, closing the stale-build hole where a module imports
+  a shared `.ts` outside its `sources` glob (the TS version of the C/C++ header
+  problem). Default-on (`track_imports=True`, like C++'s always-on `-MMD`): brix
+  wraps `tsc` in a `--listFiles` recorder (`src/brix/_ts/tsc_listfiles.py`) that
+  writes a **Makefile depfile** of the workspace `.ts`/`.d.ts` the compile read,
+  so it flows through the *existing* depfile channel — **no engine change**, and
+  proven identical on both engines. The recorder excludes this module's own
+  `out_dir` and each declared dependency's directory, so declared `.d.ts` stay
+  governed by the ts-dts lens (byte-tracking them in the depfile would defeat
+  the impl-only-change replay). Gated real-tsc test plus a self-contained
+  fake-tsc integration test (`tests/test_ts_import_tracking.py`) that runs on
+  both engines. Separate from the [Blocked] track-3 item of *writing build
+  files* in TS. **Follow-up:** an `ts.npm`/`node_modules` resolver is still
+  planned (docs/dependencies.md).
 
 **Bigger, but still Opus** (sketch the design first):
 

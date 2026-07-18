@@ -26,6 +26,7 @@ bindings = "pyo3"
 strip = true
 include = [
   { path = "src/brix/_java/*.java", format = ["sdist", "wheel"] },
+  { path = "src/brix/_ts/*.py", format = ["sdist", "wheel"] },
 ]
 
 [tool.pytest.ini_options]

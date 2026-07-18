@@ -151,3 +151,46 @@ def test_api_edit_cascades_to_dependent_and_matches_clean(tmp_path):
     materialize(clean, state)
     assert CleanBuilder(build_graph(), root=clean).build().success
     assert _js_tree(inc) == _js_tree(clean)
+
+
+# --- automatic import tracking: an undeclared shared source (real tsc) --------
+
+
+@needs_tsc
+def test_editing_an_undeclared_imported_source_recompiles(tmp_path):
+    """A module imports a shared `.ts` that is NOT in its `sources` glob and is
+    NOT a declared dependency. Without import tracking, editing that file leaves
+    the module stale; with it (the default), the compile re-runs. Proven here
+    against a real tsc's --listFiles output."""
+    root = tmp_path / "ws"
+    (root / "app/src").mkdir(parents=True)
+    (root / "common").mkdir()
+    (root / "common/util.ts").write_text("export const tag = 'v1';\n")
+    # The import reaches outside app/src — the declared glob never sees it.
+    (root / "app/src/main.ts").write_text(
+        'import { tag } from "../../common/util";\n'
+        "export function run(): string { return tag; }\n"
+    )
+
+    def graph():
+        g = Graph()
+        g.add(
+            ts.CompileAction(
+                sources=g.data.glob("app/src/{name}.ts"),
+                out_dir="app/dist",
+                tsc=ToolData(TSC),
+                options=[*_COMMON, "--rootDir", "app/src"],
+            )
+        )
+        return g
+
+    builder = IncrementalBuilder(graph, root=root, metadata_dir=".brix-meta")
+    assert builder.build().success
+
+    result = builder.build()  # no-op: nothing changed
+    assert _source(result, "tsc -> app/dist") == "replayed"
+
+    (root / "common/util.ts").write_text("export const tag = 'v2';\n")
+    result = builder.build()
+    assert result.success
+    assert _source(result, "tsc -> app/dist") == "process"  # the hole is closed

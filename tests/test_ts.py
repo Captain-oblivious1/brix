@@ -39,6 +39,7 @@ def test_compile_emits_js_and_dts_globs_and_declaration_flag():
     (action,) = ts.CompileAction(
         sources=data.glob("src/{name}.ts"),
         out_dir="dist",
+        track_imports=False,
     ).lower()
     assert "--declaration" in action.command_line
     assert "--outDir {out_dir}" in action.command_line
@@ -46,7 +47,42 @@ def test_compile_emits_js_and_dts_globs_and_declaration_flag():
     assert action.outputs["js"].pattern.template == "dist/{name}.js"
     assert action.outputs["dts"].pattern.template == "dist/{name}.d.ts"
     assert action.outputs["out_dir"].path == "dist"
+    # Without import tracking it is a bare single tsc spawn.
     assert set(action.inputs) == {"tsc", "options", "sources"}
+    assert action.depfile is None
+    assert action.command_line.startswith("{tsc}")
+
+
+# --- import tracking (default on): the --listFiles depfile channel -----------
+
+
+def test_import_tracking_is_on_by_default_and_wraps_tsc():
+    (action,) = ts.CompileAction(
+        sources=data.glob("src/{name}.ts"),
+        out_dir="dist",
+    ).lower()
+    # tsc is wrapped in brix's recorder; a depfile is declared and scanned.
+    assert action.command_line.startswith("{python} {wrapper} {depfile}")
+    assert " -- {tsc} " in action.command_line
+    assert action.depfile == "dist/.brix-tsdeps.d"
+    assert action.outputs["depfile"].path == "dist/.brix-tsdeps.d"
+    assert {"python", "wrapper", "excludes"} <= set(action.inputs)
+    # The module's own out_dir is excluded (its emit is not an input).
+    assert "--exclude dist" in action.inputs["excludes"].text
+
+
+def test_import_tracking_excludes_declared_dependency_dirs():
+    # Declared deps are tracked through the ts-dts lens; their .d.ts must NOT
+    # also be byte-tracked via the depfile, or the impl-only replay is lost.
+    (action,) = ts.CompileAction(
+        sources=data.glob("b/src/{name}.ts"),
+        out_dir="b/dist",
+        dependencies=[data.file("a/dist/lib.d.ts"), data.glob("c/out/{n}.d.ts")],
+    ).lower()
+    excludes = action.inputs["excludes"].text
+    assert "--exclude b/dist" in excludes  # own out_dir
+    assert "--exclude a/dist" in excludes  # concrete dependency's dir
+    assert "--exclude c/out" in excludes  # glob dependency's literal prefix
 
 
 def test_compile_without_declaration_omits_dts():
