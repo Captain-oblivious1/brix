@@ -1,5 +1,22 @@
 # Development log
 
+- **Quantified the lazy-loading win — and found the selector is O(n²).**
+  `examples/lazy_loading_benchmark.py` isolates graph-construction time (the
+  cost lazy loading removes, above incrementality), full-load vs affected-only,
+  across a package-count ladder. Result: the design thesis holds — full-load
+  construction grows ~linearly with package count (2.9→77 ms for 10→100
+  packages) while affected-only stays flat (~0.3→1.3 ms), so the construction
+  speedup *rises* with repo size (8.6× at 10 packages, 62× at 100). **But the
+  benchmark exposed a real defect**: `select_affected` re-derives every
+  cross-package edge on each call (`_derive_deps_from_entries`,
+  O(packages² × modules²), regex-compiling), so selection grows quadratically —
+  82 ms at 10 packages, 11 s at 100 — and dominates past ~a dozen packages,
+  dwarfing the construction it saves. The loading win is real; the selector is
+  the bottleneck. Fix (not yet done): persist the derived `depends_on` edges in
+  the index at full-build time so selection reads them O(packages) instead of
+  re-deriving. Recorded in `docs/monorepo-scaling.md`; the benchmark prints the
+  finding. No production code changed — this is measurement.
+
 - **Git-accelerated change detection, mirrored into the Rust core.** The git
   detector was a Python-engine-only layer, so the default (Rust) engine — the
   one the air-gapped trial will run — paid the full per-file `stat` scan.

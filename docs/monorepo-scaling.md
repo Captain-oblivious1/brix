@@ -10,6 +10,33 @@ change touched"), `src/brix/gitdetect.py` (the change source), and the
 `build_stack`/detector-injection work. This note is the contract for the
 sequenced plan; build against it, don't re-derive it.
 
+## Measured (2026-07-18): the construction win is real; the selector is O(n²)
+
+`examples/lazy_loading_benchmark.py` isolates graph-construction time, full-load
+vs affected-only, across a package-count ladder (20 actions/package):
+
+| packages | full construct | affected construct | speedup | select (1 call) |
+|---:|---:|---:|---:|---:|
+| 10 | 2.9 ms | 0.34 ms | 8.6× | 82 ms |
+| 25 | 18 ms | 0.49 ms | 37× | 0.70 s |
+| 50 | 38 ms | 0.75 ms | 50× | 2.8 s |
+| 100 | 77 ms | 1.25 ms | 62× | 11 s |
+
+The **thesis holds**: full-load construction grows ~linearly with package count
+while affected-only stays flat, so the construction speedup *rises* with repo
+size (the O(whole-repo) cost lazy loading removes). **But a defect surfaced**:
+`select_affected` re-derives every cross-package edge on each call
+(`_derive_deps_from_entries`, O(packages² × modules²), regex-compiling), so the
+*selection* grows ~quadratically and dominates past ~a dozen packages — 11 s at
+100, which dwarfs the ~75 ms it saves. Net: the loading win is real, but as
+shipped the selector is the bottleneck, not the loading.
+
+**Fix (planned):** persist the derived `depends_on` edges in the index at
+full-build time (they are computed there already), so `load_index_data` reads
+them O(packages) instead of re-deriving. That converts selection to roughly
+O(packages + changed×patterns) and lets the construction win actually land. Until
+then, lazy loading is best kept to small package counts.
+
 Tier 1 shipped in `src/brix/workspace.py` (`find_packages`, `owner`,
 `merge_graphs`, `load_workspace`, `Workspace`), proven by
 `tests/test_workspace.py` — a hierarchical workspace builds **identically** to

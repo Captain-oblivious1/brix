@@ -25,6 +25,12 @@ proven (each one has found a real bug or missing feature).
 
 Run any of them directly, e.g. `python examples/hello_text/brix.py build`.
 
+There are also two **benchmarks** (not build files): `scaling_benchmark.py`
+characterizes the engine's per-build overhead as graph size grows, and
+`lazy_loading_benchmark.py` quantifies the hierarchical lazy-loading win —
+graph-construction time, full-load vs affected-only, across a ladder of package
+counts.
+
 ## Real-project dogfoods (clone required)
 
 Each has its own `README.md` with clone + setup steps. Checkouts go in
