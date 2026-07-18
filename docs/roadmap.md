@@ -357,18 +357,21 @@ careful model:
   soak. A line-by-line review that the Rust engine fully covers the execution
   half before the Python fallback is removed; one subtle ordering gap here breaks
   builds. Deletion boundary spelled out in track 2 above.
-- **Review pass on `env_used=` (environment-recording phase 2)** — the *guard*
-  that makes an ambient variable fingerprint material, so a mistake is in the
-  stale direction (a tracked variable changes but the fingerprint doesn't).
-  Built to stay off the Rust neutral path (the snapshot rides as a
-  fingerprint-only `ValueData` input, `classpath_track`-style, with a golden
-  case pinning cross-engine parity), so the review is scoped: (a) the
-  unset-vs-empty encoding is deterministic and identical on both engines; (b)
-  `env_used` never leaks into the process environment or the command; (c) the
+- **Review pass on `env_used=` (environment-recording phase 2)** — **done
+  (2026-07-18, Fable), verdict positive.** All four scoped checks hold: (a)
+  unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
+  `null` ≠ `""`); (b) the snapshot never reaches the process environment or
+  the command (probe test proves tracking ≠ injection); (c) the
   verbatim-through-`substitute` copy holds under nested expansion; (d) the
-  golden genuinely exercises the path (spec carries `_brix_env_used`, Rust
-  re-derives). `src/brix/actions.py`, `tests/test_env_used.py`,
-  `docs/environment-recording.md`.
+  golden genuinely exercises the path (stored spec carries `_brix_env_used`,
+  Rust re-derives the pinned `58ec081e…` fingerprint). One hole found and
+  closed: idempotence keyed on the reserved input key's *presence*, so an
+  author-supplied `_brix_env_used` silently replaced the live snapshot with a
+  constant — a guard bypass in the stale direction. Now: supplying the
+  reserved key raises, and `substitute` threads the frozen snapshot through a
+  private parameter. Fingerprints byte-identical (golden regen: zero diff).
+  Miss-only note: a non-UTF-8 env value (surrogate-escaped) fails loudly at
+  the boundary rather than fingerprinting silently.
 - **Review pass on the `content_key` relocation** (commit `634c115`) — **done
   (2026-07-17, Fable), verdict positive.** The byte-identity claim holds: the
   golden diff proves digests unchanged across the `identity`→`content_key`

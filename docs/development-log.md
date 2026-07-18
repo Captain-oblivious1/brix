@@ -1,5 +1,21 @@
 # Development log
 
+- **`env_used=` phase-2 review (Fable) — verdict positive, one bypass
+  closed.** The scoped checklist held: unset-vs-empty deterministic and
+  engine-identical; no process-env or command leak; verbatim snapshot under
+  nested expansion; golden genuinely exercises `_brix_env_used` (Rust
+  re-derives the pinned fingerprint). Found: `substitute`-idempotence keyed on
+  the reserved key's *presence* in `inputs`, so an author-supplied
+  `_brix_env_used` silently replaced the live snapshot with a constant — the
+  exact stale-direction bypass the guard exists to prevent. Fixed by
+  rejecting the reserved key loudly and threading the frozen snapshot through
+  a private `_env_used_snapshot` parameter in `substitute`. Behavior- and
+  fingerprint-identical for legitimate use (golden regeneration: zero diff);
+  pinned by a new rejection test. Miss-only note: surrogate-escaped (non
+  UTF-8) env values fail loudly at the boundary, never silently.
+  `src/brix/actions.py`, `tests/test_env_used.py`,
+  `docs/environment-recording.md`.
+
 - **Monorepo scaling, tier 3 — the lazy-loading completeness core (Fable),
   plus a real staleness fix in the git detector.** `src/brix/affected.py`:
   `select_affected` decides the provably complete set of packages to load for

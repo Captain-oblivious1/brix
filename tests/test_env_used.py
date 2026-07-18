@@ -67,6 +67,22 @@ def test_substitute_preserves_the_snapshot_verbatim(monkeypatch):
     assert narrowed.env_used == ("MYVAR",)
 
 
+def test_reserved_input_key_cannot_be_supplied_directly(monkeypatch):
+    # An author-supplied `_brix_env_used` would silently replace the live
+    # snapshot with a constant — a guard bypass in the stale direction. It is
+    # rejected loudly, with or without env_used=.
+    monkeypatch.setenv("MYVAR", "one")
+    for env_used in (["MYVAR"], None):
+        with pytest.raises(ValueError, match="reserved"):
+            ExternalProcessAction(
+                name="forged",
+                command_line="cc {src} {out}",
+                inputs={"src": FileData("a.c"), _ENV_USED_KEY: ValueData("stale")},
+                outputs={"out": FileData("a.o")},
+                env_used=env_used,
+            )
+
+
 # --- fingerprint sensitivity -----------------------------------------------
 
 def _fingerprint(env_value, monkeypatch):

@@ -4,8 +4,20 @@ Status: **phases 1–2 implemented (2026-07-17, Opus)** — phase 1 diagnostic
 capture + `brix.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
 and phase 2 the `env_used=` guard (`src/brix/actions.py`,
 `tests/test_env_used.py`, golden-pinned cross-engine); phase 3 deferred with its
-boundary drawn below. **Phase 2 crosses the fingerprint path and is queued for a
-Fable review** (the reserved role, as with the `content_key` relocation).
+boundary drawn below. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
+`null` ≠ `""`); the snapshot never reaches the process environment or the
+command; the verbatim-through-`substitute` copy holds under nested expansion
+(the frozen snapshot is handed to each copy explicitly); and the golden
+genuinely exercises the path (the stored spec carries `_brix_env_used`; Rust
+re-derives the pinned fingerprint). One hardening from the review: the
+reserved input key can no longer be supplied directly — it previously
+*replaced* the live snapshot with the author's constant (a guard bypass in the
+stale direction); it now raises, and `substitute` threads the frozen snapshot
+through a private parameter instead of relying on key presence. Fingerprints
+byte-identical before/after (golden regeneration: zero diff). Known miss-only
+edge: an env value that is not valid UTF-8 (surrogate-escaped bytes) fails
+loudly at the boundary rather than fingerprinting silently.
 Companion to `docs/content-key.md` (the state-vs-semantics rule this obeys) and
 `docs/roadmap.md` (the "record the environment a build used" item).
 

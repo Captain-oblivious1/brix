@@ -94,6 +94,7 @@ class ExternalProcessAction(Expandable):
         worker: "WorkerSpec | None" = None,
         depfile: str | None = None,
         self_resolved_inputs: tuple[str, ...] = (),
+        _env_used_snapshot: DataExpr | None = None,
     ) -> None:
         from .data import ValueData
 
@@ -101,6 +102,16 @@ class ExternalProcessAction(Expandable):
         self.command_line = command_line
         self.inputs: dict[str, DataExpr] = dict(inputs or {})
         self.outputs: dict[str, DataExpr] = dict(outputs or {})
+        # The reserved key may only be materialized by brix itself (below, or
+        # carried through `substitute` via `_env_used_snapshot`). An author
+        # supplying it directly would silently *replace* the live snapshot
+        # with a constant — a guard bypass in the stale direction — so it is
+        # rejected loudly instead.
+        if _ENV_USED_KEY in self.inputs:
+            raise ValueError(
+                f"input key {_ENV_USED_KEY!r} is reserved: it is materialized "
+                f"by env_used=, never supplied directly"
+            )
         self.env: dict[str, DataExpr] = {
             k: v if isinstance(v, DataExpr) else ValueData(v)
             for k, v in (env or {}).items()
@@ -108,12 +119,17 @@ class ExternalProcessAction(Expandable):
         # `env_used` names ambient environment variables this action's output
         # depends on but does not *set* (unlike `env=`). They are snapshotted
         # into a single fingerprint-only input so a change re-stales the action
-        # — the guard, not a declaration of process env. Materialized once here;
-        # idempotent under `substitute` (the reserved key survives the copy, so
-        # the snapshot is never re-read). See `_resolve_env_used`.
+        # — the guard, not a declaration of process env. Materialized once, at
+        # first construction; `substitute` passes the frozen snapshot back via
+        # `_env_used_snapshot`, so it is never re-read during expansion.
+        # See `_resolve_env_used`.
         self.env_used: tuple[str, ...] = tuple(env_used or ())
-        if self.env_used and _ENV_USED_KEY not in self.inputs:
-            self.inputs[_ENV_USED_KEY] = _resolve_env_used(self.env_used)
+        if self.env_used:
+            self.inputs[_ENV_USED_KEY] = (
+                _env_used_snapshot
+                if _env_used_snapshot is not None
+                else _resolve_env_used(self.env_used)
+            )
         # A worker executes this action as a request instead of spawning it;
         # None spawns a process. Purely an execution transport (see workers.py).
         self.worker = worker
@@ -147,14 +163,15 @@ class ExternalProcessAction(Expandable):
         if depfile is not None:
             for key, value in bindings.items():
                 depfile = depfile.replace("{" + key + "}", value)
-        # The materialized _brix_env_used snapshot is immutable — copy it
-        # verbatim rather than through placeholder substitution, so an env value
-        # that happens to contain a `{binding}`-shaped substring cannot be
-        # rewritten during expansion. Its key's presence also makes __init__
-        # skip re-resolving (the snapshot is taken once, at construction).
+        # The materialized _brix_env_used snapshot is immutable — it is handed
+        # to the copy verbatim via `_env_used_snapshot`, never through
+        # placeholder substitution, so an env value that happens to contain a
+        # `{binding}`-shaped substring cannot be rewritten during expansion,
+        # and the snapshot is never re-read (taken once, at construction).
         inputs = {
-            k: (v if k == _ENV_USED_KEY else _substitute_expr(v, bindings))
+            k: _substitute_expr(v, bindings)
             for k, v in self.inputs.items()
+            if k != _ENV_USED_KEY
         }
         return ExternalProcessAction(
             name=name,
@@ -166,6 +183,7 @@ class ExternalProcessAction(Expandable):
             worker=self.worker,
             depfile=depfile,
             self_resolved_inputs=self.self_resolved_inputs,
+            _env_used_snapshot=self.inputs.get(_ENV_USED_KEY),
         )
 
     def __repr__(self) -> str:
