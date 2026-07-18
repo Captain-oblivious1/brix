@@ -23,6 +23,10 @@ pub struct TimeAndHashChangeDetector {
     /// Skin-registered lenses (the `content_identity` extension trait);
     /// consulted only for names the built-in registry doesn't know.
     pub custom_identities: Option<Arc<dyn crate::content_key::CustomIdentities>>,
+    /// Optional git acceleration: a tracked file git vouches as unchanged
+    /// since the last build returns its cached hash without a `stat`. A pure
+    /// performance layer — never changes a returned digest.
+    pub git: Option<Arc<crate::gitdetect::GitVouch>>,
 }
 
 impl TimeAndHashChangeDetector {
@@ -31,7 +35,14 @@ impl TimeAndHashChangeDetector {
     }
 
     pub fn with_metadata(metadata: Arc<BuildMetadata>) -> Self {
-        Self { metadata: Some(metadata), custom_identities: None }
+        Self { metadata: Some(metadata), custom_identities: None, git: None }
+    }
+
+    /// Attach git vouching (or clear it with `None`); the returned detector
+    /// short-circuits `hash_file`/`content_key_digest` for vouched files.
+    pub fn with_git(mut self, git: Option<Arc<crate::gitdetect::GitVouch>>) -> Self {
+        self.git = git;
+        self
     }
 
     pub fn with_custom_identities(
@@ -81,6 +92,15 @@ impl TimeAndHashChangeDetector {
     /// non-regular file (a directory declared as an input/output hashes as
     /// `None`). Mirrors `hash_file`, cache included.
     pub fn hash_file(&self, path: &Path) -> Option<String> {
+        // Git vouch: a tracked+unmodified file's last-build hash is still valid,
+        // so return it without a stat or read (mirrors GitChangeDetector).
+        if let (Some(git), Some(meta)) = (&self.git, &self.metadata) {
+            if git.vouch_unchanged(path) {
+                if let Some(cached) = meta.hash_by_path(&path.to_string_lossy()) {
+                    return Some(cached);
+                }
+            }
+        }
         if !path.is_file() {
             return None;
         }
@@ -106,6 +126,17 @@ impl TimeAndHashChangeDetector {
     /// (built-in or skin-registered); custom digests cache under their
     /// versioned tag exactly like built-ins.
     pub fn content_key_digest(&self, path: &Path, name: &str) -> Result<Option<String>, String> {
+        // Git vouch: the last-build content-key digest is still valid for a
+        // tracked+unmodified file — return it without a stat or re-derive.
+        if let (Some(git), Some(meta)) = (&self.git, &self.metadata) {
+            if git.vouch_unchanged(path) {
+                if let Some(tag) = self.content_key_tag(name) {
+                    if let Some(cached) = meta.identity_by_path(&path.to_string_lossy(), &tag) {
+                        return Ok(Some(cached));
+                    }
+                }
+            }
+        }
         if !path.is_file() {
             return Ok(None);
         }

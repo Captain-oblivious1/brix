@@ -22,6 +22,7 @@ pub mod detector;
 pub mod executor;
 pub mod fingerprint;
 pub mod fsutil;
+pub mod gitdetect;
 pub mod incremental;
 pub mod keys;
 pub mod layers;

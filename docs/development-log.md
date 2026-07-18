@@ -1,5 +1,31 @@
 # Development log
 
+- **Git-accelerated change detection, mirrored into the Rust core.** The git
+  detector was a Python-engine-only layer, so the default (Rust) engine — the
+  one the air-gapped trial will run — paid the full per-file `stat` scan.
+  `rust/brix-core/src/gitdetect.rs` now ports the vouch: git subprocess helpers,
+  a `GitVouch` (tracked ∖ changed-since-baseline ∖ previous-build-dirty), and a
+  `prepare()` that records the next build's (HEAD, working-tree dirty set)
+  baseline pair — including the revert-hole fix — and returns a vouch only when
+  a prior pair exists and every git call succeeds (else degrade to the stat
+  scan). It is folded into `TimeAndHashChangeDetector` as an optional `git`
+  field rather than a trait refactor: a vouched file returns its last-build
+  hash/identity from metadata with no `stat` or read, and the detector is shared
+  with the cache layer exactly as before. The metadata gained `git_baseline`/
+  `git_dirty` and signature-free `hash_by_path`/`identity_by_path` under the
+  same JSON keys as Python, so the shared `metadata.json` round-trips between
+  engines. Opt-in and unchanged at the authoring layer: `detector=`
+  `GitChangeDetector` now accelerates *both* engines — the class can't cross the
+  boundary, so `IncrementalBuilder.layer_specs` emits a `git_detection` flag
+  that turns on the native mirror (`GitChangeDetector.wire_git_detection` is the
+  marker). Proof: the git/stat equivalence oracle in `tests/test_git_detect.py`
+  now runs on **both** engines (a pure performance layer must not change a
+  rebuild decision), plus a guard test that the Rust path is genuinely engaged
+  (only it writes the baseline — otherwise a silent fall-back to stat would pass
+  the equivalence check unnoticed), and six native vouch tests in
+  `rust/brix-core/tests/gitdetect.rs` mirroring the Python targeted cases. Rust
+  suites green, clippy clean on the new code; 486 Python tests.
+
 - **TypeScript automatic import-dependency tracking.** Closed the stale-build
   hole where a module `import`s a shared `.ts` outside its declared `sources`
   glob (or an ambient `.d.ts`) — the TS analogue of the C/C++ header problem.

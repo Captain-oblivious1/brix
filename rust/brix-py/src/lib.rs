@@ -319,8 +319,19 @@ fn build_layers(
             let metadata =
                 std::sync::Arc::new(BuildMetadata::with_directory(root, dir));
             metadata.load();
+            // Opt-in git acceleration (the Python side sets this flag when a
+            // GitChangeDetector is configured). `prepare` records the next
+            // baseline and returns a vouch only when the repo/baseline are
+            // ready; otherwise the detector runs the plain stat scan.
+            let git = if entry.get("git_detection").and_then(|v| v.as_bool()).unwrap_or(false) {
+                brix_core::gitdetect::prepare(std::path::Path::new(root), &metadata)
+                    .map(std::sync::Arc::new)
+            } else {
+                None
+            };
             let detector = brix_core::TimeAndHashChangeDetector::with_metadata(metadata.clone())
-                .with_custom_identities(custom.clone());
+                .with_custom_identities(custom.clone())
+                .with_git(git);
             incremental = Some(IncrementalLayer::with_detector(metadata, detector));
         }
     }

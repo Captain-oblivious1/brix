@@ -49,9 +49,9 @@ class Ran(Reporter):
         self.labels.append(node.label)
 
 
-def _sequence(root, detector, monkeypatch):
+def _sequence(root, detector, monkeypatch, engine="py"):
     """Run a fixed edit sequence; return the sorted run-set at each step."""
-    monkeypatch.setenv("BRIX_ENGINE", "py")
+    monkeypatch.setenv("BRIX_ENGINE", engine)
     write_workspace(root, {"a": "x", "b": "y"})
     _init_repo(root)
     _commit(root)
@@ -84,20 +84,30 @@ def _sequence(root, detector, monkeypatch):
     return steps
 
 
-def test_git_and_stat_detectors_make_identical_decisions(tmp_path, monkeypatch):
+@pytest.mark.parametrize("engine", ["py", "rust"])
+def test_git_and_stat_detectors_make_identical_decisions(tmp_path, monkeypatch, engine):
+    # The equivalence oracle, on BOTH engines: the git detector is a pure
+    # performance layer, so its rebuild decisions must match the stat detector's
+    # at every step. On the Rust engine, `detector=GitChangeDetector` turns on
+    # the native mirror (rust/brix-core/src/gitdetect.rs) via the wire flag.
     git_root = tmp_path / "git"
     stat_root = tmp_path / "stat"
     git_root.mkdir()
     stat_root.mkdir()
 
-    git_steps = _sequence(git_root, detector=GitChangeDetector, monkeypatch=monkeypatch)
-    stat_steps = _sequence(stat_root, detector=None, monkeypatch=monkeypatch)
+    git_steps = _sequence(
+        git_root, detector=GitChangeDetector, monkeypatch=monkeypatch, engine=engine
+    )
+    stat_steps = _sequence(
+        stat_root, detector=None, monkeypatch=monkeypatch, engine=engine
+    )
 
     assert git_steps == stat_steps
 
 
-def test_no_op_build_is_clean_under_git(tmp_path, monkeypatch):
-    monkeypatch.setenv("BRIX_ENGINE", "py")
+@pytest.mark.parametrize("engine", ["py", "rust"])
+def test_no_op_build_is_clean_under_git(tmp_path, monkeypatch, engine):
+    monkeypatch.setenv("BRIX_ENGINE", engine)
     write_workspace(tmp_path, {"a": "x", "b": "y"})
     _init_repo(tmp_path)
     _commit(tmp_path)
@@ -106,6 +116,33 @@ def test_no_op_build_is_clean_under_git(tmp_path, monkeypatch):
     rep = Ran()  # second build: nothing should run
     assert IncrementalBuilder(make_graph, root=tmp_path, detector=GitChangeDetector).build(reporter=rep).success
     assert rep.labels == []
+
+
+def test_rust_engine_engages_the_native_git_path(tmp_path, monkeypatch):
+    # The equivalence test alone can't catch a silent fall-back to stat on the
+    # Rust engine (stat == stat still matches). Only the native git path writes
+    # the baseline/dirty pair, so its presence proves the mirror is engaged.
+    import json
+
+    monkeypatch.setenv("BRIX_ENGINE", "rust")
+    write_workspace(tmp_path, {"a": "x", "b": "y"})
+    _init_repo(tmp_path)
+    _commit(tmp_path)
+    assert IncrementalBuilder(
+        make_graph, root=tmp_path, detector=GitChangeDetector
+    ).build().success
+
+    meta = json.loads((tmp_path / "build/.brix/metadata.json").read_text())
+    assert "git_baseline" in meta and "git_dirty" in meta
+    # A plain build (no git detector) must NOT write them — the flag gates it.
+    other = tmp_path / "plain"
+    other.mkdir()
+    write_workspace(other, {"a": "x"})
+    _init_repo(other)
+    _commit(other)
+    assert IncrementalBuilder(make_graph, root=other).build().success
+    plain_meta = json.loads((other / "build/.brix/metadata.json").read_text())
+    assert "git_baseline" not in plain_meta
 
 
 # --- targeted vouch logic ---------------------------------------------------

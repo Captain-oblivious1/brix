@@ -1,4 +1,4 @@
-"""Git-accelerated change detection (opt-in, reference implementation).
+"""Git-accelerated change detection (opt-in; mirrored natively in the Rust core).
 
 The default `TimeAndHashChangeDetector` finds what changed by ``stat``-ing every
 declared input each build. On a large working tree those stats become the floor.
@@ -114,7 +114,18 @@ class GitChangeDetector:
     """Wraps a `TimeAndHashChangeDetector`, vouching tracked+unmodified files as
     unchanged without stat-ing them. Presents the same interface (the incremental
     and cache layers use it identically), sharing the inner detector's metadata.
+
+    Configuring this detector accelerates *both* engines: the Python engine uses
+    this class directly, and on the Rust engine the builder emits a
+    ``git_detection`` flag (see `builders.py`) that turns on the native mirror
+    in `rust/brix-core/src/gitdetect.rs` — same vouch, same baseline/dirty
+    metadata, so a build started on one engine continues correctly on the other.
     """
+
+    # Marker read by IncrementalBuilder.layer_specs to turn on the Rust-native
+    # git detector across the boundary. A custom detector factory without this
+    # attribute simply doesn't accelerate the Rust engine (degrades to stat).
+    wire_git_detection = True
 
     def __init__(
         self,

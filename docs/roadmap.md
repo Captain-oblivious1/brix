@@ -304,11 +304,18 @@ These are self-contained and come with tests. No Fable needed.
   a previously-dirty file is never vouched. Same commit added
   `changed_paths()`, the graph-independent "what changed since the last build"
   enumeration the lazy-loading tier consumes (None whenever git can't answer —
-  the caller loads everything). **Follow-ups:**
-  mirror into the Rust core (today it only accelerates `BRIX_ENGINE=py`); then,
-  once soak-proven against real repos, consider defaulting it on for git
-  workspaces — but *not before the air-gapped trial* (the boring stat detector
-  is the safe floor there).
+  the caller loads everything). **Rust mirror done (2026-07-18, Opus):**
+  `rust/brix-core/src/gitdetect.rs` ports the vouch (same baseline+dirty
+  metadata keys, same degrade-to-stat rules), folded into
+  `TimeAndHashChangeDetector` as an optional mode rather than a trait refactor.
+  Configuring `detector=GitChangeDetector` now accelerates the **default (Rust)
+  engine** too: `IncrementalBuilder.layer_specs` emits a `git_detection` wire
+  flag (the detector object can't cross the boundary; the intent does). Proven
+  by the equivalence oracle run on *both* engines plus a guard test that the
+  native path is actually engaged (only it writes the baseline). **Remaining
+  follow-up:** once soak-proven against real repos, consider defaulting it on
+  for git workspaces — but *not before the air-gapped trial* (the boring stat
+  detector is the safe floor there).
 - **Write down the official ways to plug in.** There are three: where cached
   results are stored, how brix judges whether a change actually "matters," and how
   it detects file changes. Document them so other people can build on brix.

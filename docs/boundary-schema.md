@@ -111,6 +111,16 @@ ordinary dependencies continue to be inferred from data overlap. Targeting an
 recommended order is the one shown. `targets` is a list of output paths
 (alias resolution is a skin concern and stays out of the core).
 
+The `incremental` entry takes an optional `"git_detection": true`. When set, the
+core builds its change detector with the git vouch enabled
+(`rust/brix-core/src/gitdetect.rs`): a tracked file git reports unmodified since
+the last build returns its cached hash without a `stat`. It is a pure
+performance layer that never changes a fingerprint and degrades to the plain
+stat scan whenever git is unavailable or there is no baseline yet. The Python
+skin emits this flag when a `GitChangeDetector` is configured — the detector
+object itself is a skin concern and does not cross the boundary, only the
+intent does.
+
 **Ordering rule — the atomic layer must be outermost.** If a `{ "kind":
 "atomic" }` entry is present it must be the **last** entry (outermost, since the
 list is innermost-first); the core rejects any other position. The atomic layer

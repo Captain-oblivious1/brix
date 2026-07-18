@@ -153,6 +153,69 @@ impl BuildMetadata {
         });
     }
 
+    // Signature-free lookups: the *last-build* digest for a path regardless of
+    // its current stat signature. Only sound when a caller has independently
+    // established the file is unchanged since that build — the git vouch, which
+    // trusts a tracked+unmodified file without stat-ing it. Mirror
+    // `hash_by_path` / `identity_by_path` in `metadata.py`.
+
+    pub fn hash_by_path(&self, path_key: &str) -> Option<String> {
+        self.section("files", |files| {
+            files.get(path_key)?.as_object()?.get("sha256")?.as_str().map(str::to_string)
+        })
+    }
+
+    pub fn identity_by_path(&self, path_key: &str, tag: &str) -> Option<String> {
+        self.section("files", |files| {
+            files.get(path_key)?.as_object()?.get(tag)?.as_str().map(str::to_string)
+        })
+    }
+
+    // -- git change-detection baseline -----------------------------------------
+    //
+    // The last build's HEAD sha paired with the working-tree paths dirty *at*
+    // that build. The dirty set closes the revert hole: a file dirty at build N
+    // was hashed with content git never saw, so even if git reports it clean at
+    // N+1 (reverted to HEAD) its cached hash is not trustworthy. Top-level
+    // keys, same names as Python, so the shared metadata.json round-trips.
+
+    pub fn git_baseline(&self) -> Option<String> {
+        let data = self.data.lock().unwrap();
+        data.get("git_baseline")?.as_str().map(str::to_string)
+    }
+
+    pub fn set_git_baseline(&self, sha: Option<&str>) {
+        let mut data = self.data.lock().unwrap();
+        match sha {
+            Some(s) => {
+                data.insert("git_baseline".to_string(), Value::String(s.to_string()));
+            }
+            None => {
+                data.remove("git_baseline");
+            }
+        }
+    }
+
+    pub fn git_dirty(&self) -> Option<Vec<String>> {
+        let data = self.data.lock().unwrap();
+        data.get("git_dirty")?.as_array().map(|list| {
+            list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+        })
+    }
+
+    pub fn set_git_dirty(&self, paths: Option<Vec<String>>) {
+        let mut data = self.data.lock().unwrap();
+        match paths {
+            Some(mut p) => {
+                p.sort();
+                data.insert("git_dirty".to_string(), json!(p));
+            }
+            None => {
+                data.remove("git_dirty");
+            }
+        }
+    }
+
     // -- action records --------------------------------------------------------
 
     pub fn action_record(&self, key: &str) -> Option<Value> {

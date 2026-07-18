@@ -132,8 +132,10 @@ class IncrementalBuilder(NestableBuilder):
         # hands it in. `None` uses the default stat detector. `GitChangeDetector`
         # (brix.gitdetect) is a drop-in that accelerates via git — both existing
         # detectors already have the `(root, metadata)` shape, so you pass the
-        # class. (The Rust engine runs its own detector, so a Python-side
-        # detector only affects BRIX_ENGINE=py builds until mirrored.)
+        # class. It accelerates *both* engines: the Python engine uses the class
+        # directly; the Rust engine reads the `git_detection` flag `layer_specs`
+        # emits (below) and runs its native mirror. A detector object can't
+        # cross the boundary, so the flag is how the intent does.
         self._detector = detector
 
     def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
@@ -153,7 +155,14 @@ class IncrementalBuilder(NestableBuilder):
         return self._supplier()
 
     def layer_specs(self) -> list[dict] | None:
-        return [{"kind": "incremental", "metadata_dir": str(self.metadata_dir)}]
+        spec = {"kind": "incremental", "metadata_dir": str(self.metadata_dir)}
+        # Turn on the Rust-native git detector when a GitChangeDetector is
+        # configured, so the default (Rust) engine gets the same acceleration
+        # the Python engine already has (the detector object itself can't cross
+        # the boundary — this flag is how the intent does).
+        if getattr(self._detector, "wire_git_detection", False):
+            spec["git_detection"] = True
+        return [spec]
 
     def build(self, jobs: int | None = None, reporter=None,
               targets: list[str] | None = None,
