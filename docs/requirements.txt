@@ -1,0 +1,12 @@
+# Documentation toolchain (dev-only; not a runtime or wheel dependency).
+# Builds the public-API site: a hand-written landing page plus an API reference
+# generated from the source docstrings by mkdocstrings. Everything builds fully
+# offline once these are installed — no CDN, no network at build time — so the
+# site can be produced on the air-gapped machine.
+#
+#   python -m venv .venv-docs && .venv-docs/bin/pip install -r docs/requirements.txt
+#   .venv-docs/bin/mkdocs serve     # live preview at http://127.0.0.1:8000
+#   .venv-docs/bin/mkdocs build     # static HTML into ./site
+mkdocs-material
+mkdocstrings[python]
+black

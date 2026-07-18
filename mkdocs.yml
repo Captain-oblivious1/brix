@@ -1,0 +1,64 @@
+site_name: Brix
+site_description: A build-system toolkit for defining build graphs in ordinary Python.
+docs_dir: docs/site
+site_dir: site
+use_directory_urls: false
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            heading_level: 2
+            members_order: source
+            separate_signature: true
+            merge_init_into_class: true
+            docstring_section_style: table
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - API Reference:
+      - Overview: api/index.md
+      - Core & builders: api/core.md
+      - Data model: api/data.md
+      - C++: api/cpp.md
+      - Java: api/java.md
+      - Kotlin: api/kotlin.md
+      - TypeScript: api/ts.md
+      - Spring Boot: api/springboot.md
+      - Command line: api/cli.md
+      - Extending brix: api/extending.md

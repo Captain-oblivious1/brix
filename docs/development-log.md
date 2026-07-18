@@ -1,5 +1,21 @@
 # Development log
 
+- **HTML documentation site (public API only), first version.** A MkDocs +
+  Material + mkdocstrings site: a hand-written landing page (purpose + tenets,
+  distilled from the spec's design rules into user-facing form) plus an API
+  reference **generated from the source docstrings**, so it never drifts from
+  the code. Scoped to the public authoring surface only — the prerequisite
+  `__all__` curation on the eight public modules is the boundary, and a build
+  check confirmed mkdocstrings honors it (the C++ page shows its four public
+  symbols and zero leaked imports). Structure: `mkdocs.yml` + `docs/site/`
+  (`index.md`, `api/*.md` with `:::` mkdocstrings directives grouped as core,
+  data, the language helpers, CLI, and the extension seams). Builds fully
+  offline (`docs/requirements.txt`; Material bundles its assets, no CDN) so it
+  runs on the air-gapped machine; `site/` output is gitignored (build on
+  demand via `mkdocs serve`/`build`, wired into the README). Known cosmetic
+  follow-up: the docstrings' RST-ish inline markup renders readably but not
+  perfectly under Markdown. `mkdocs.yml`, `docs/site/`, `docs/requirements.txt`.
+
 - **End-to-end monorepo dogfood — the whole stack, the trial's workflow.**
   `examples/monorepo_dogfood.py` runs a git-backed hierarchical C monorepo
   (`services/util` static library + `services/app` that links it) the way the

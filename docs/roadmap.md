@@ -319,20 +319,22 @@ These are self-contained and come with tests. No Fable needed.
 - **Write down the official ways to plug in.** There are three: where cached
   results are stored, how brix judges whether a change actually "matters," and how
   it detects file changes. Document them so other people can build on brix.
-- **Generate HTML documentation.** Two complementary outputs, published as a
-  browsable site: (1) an **API reference** built from the code's own docstrings
-  — the Python equivalent of Javadoc (a generator such as `pdoc`, `mkdocstrings`,
-  or Sphinx `autodoc`; the docstrings are already thorough, so this is mostly
-  tool selection + a build step), and eventually the same for the TS authoring
-  API via **TypeDoc** once that API exists; and (2) **user-facing conceptual
-  docs** — the high-level concepts (the graph/action model, incrementality,
-  content-key lenses, the layer stack, hierarchical/lazy loading) written for a
-  reader adopting brix, not spelunking the source. The existing `docs/*.md` are
-  design notes and contracts, not a learner's on-ramp; this is the friendly
-  narrative on top, cross-linked to the API reference. Decide: one static-site
-  toolchain that renders both (e.g. MkDocs/Material + mkdocstrings, or Sphinx +
-  MyST) vs. two separate pipelines; keep it self-contained (no external
-  services) so it can be built and viewed on the air-gapped machine.
+- **Generate HTML documentation — first version done (2026-07-18, Opus).**
+  A MkDocs + Material + **mkdocstrings** site (`mkdocs.yml`, `docs/site/`): a
+  hand-written landing page (purpose + tenets, distilled from the spec's design
+  rules) plus an **API reference generated from the source docstrings**, so it
+  can't drift from the code. Scoped to the **public authoring API only** — the
+  curated `__all__` on each public module is the boundary, so the generator
+  renders exactly the user-facing surface and none of the engine internals or
+  private helpers. Builds fully offline (`docs/requirements.txt`; no CDN), so it
+  works on the air-gapped machine; output `site/` is gitignored (build on
+  demand). **Follow-ups / advice-and-consent:** (a) the docstrings use a mixed
+  RST-ish style (``double backticks``, `:class:` refs) that Material renders
+  readably but not perfectly — a future pass could normalize them to Markdown or
+  configure a docstring style for cleaner cross-references; (b) the conceptual
+  layer is currently one tenets page — it could grow guides (the graph/action
+  model, incrementality, lenses, hierarchical/lazy loading) if wanted; (c) the
+  same **TypeDoc** treatment for the TS authoring API once that API exists.
 - **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
   does this for Java and TypeScript (skip rebuilding users when only internals
   changed). Add it for Go and Protobuf when those languages show up in a project.

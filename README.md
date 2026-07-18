@@ -81,6 +81,18 @@ See the [roadmap](docs/roadmap.md) for the full prioritized list.
 
 ## Documentation
 
+The user-facing **HTML site** (purpose, tenets, and an API reference generated
+from the source docstrings — public authoring API only) builds from `mkdocs.yml`:
+
+```
+python -m venv .venv-docs && .venv-docs/bin/pip install -r docs/requirements.txt
+.venv-docs/bin/mkdocs serve     # live preview at http://127.0.0.1:8000
+.venv-docs/bin/mkdocs build     # static HTML into ./site
+```
+
+The design notes below are the internal contracts (engine, wire schema, design
+rules) — deeper than the site, for working *on* brix rather than *with* it:
+
 - [Getting started](docs/getting-started.md) — run the tests and examples.
 - [Specification](docs/specification.md) — behavior, graph model, actions,
   execution plans, builders, and design rules.
