@@ -74,6 +74,13 @@ def _sequence(root, detector, monkeypatch):
     steps.append(build())                                   # no-op after a commit
     (root / "src/c.txt").write_text("zz")                   # edit the now-tracked file
     steps.append(build())
+    _commit(root)                                           # commit the c edit
+    steps.append(build())                                   # no-op after the commit
+    (root / "src/a.txt").write_text("A-DIRTY")              # dirty at build time
+    steps.append(build())
+    _git(root, "checkout", "--", "src/a.txt")               # revert to HEAD content
+    steps.append(build())                                   # the revert IS a change
+    steps.append(build())                                   # then clean again
     return steps
 
 
@@ -146,6 +153,45 @@ def test_untracked_and_out_of_tree_files_are_never_vouched(tmp_path):
     assert det2._vouch_unchanged(tmp_path / "src/untracked.txt") is False
     # Outside the repo entirely -> the inner detector owns it.
     assert det2._vouch_unchanged(tmp_path.parent / "elsewhere.txt") is False
+
+
+def test_file_dirty_at_last_build_is_not_vouched_after_revert(tmp_path):
+    # The revert hole: a file dirty at build N (its dirty content's hash is what
+    # the metadata stores), reverted to HEAD content before build N+1. Git then
+    # reports it clean and baseline..HEAD is empty — but its content is NOT what
+    # the last build hashed, so vouching it would replay a stale hash. The
+    # previous build's persisted dirty set must block the vouch.
+    write_workspace(tmp_path, {"a": "x", "b": "y"})
+    _init_repo(tmp_path)
+    _commit(tmp_path)
+    det1, md1 = _detector(tmp_path)  # records baseline + (empty) dirty set
+    md1.save()
+    (tmp_path / "src/a.txt").write_text("DIRTY")
+    det2, md2 = _detector(tmp_path)
+    assert det2._vouch_unchanged(tmp_path / "src/a.txt") is False  # dirty now
+    md2.save()  # persists {src/a.txt} as this build's dirty set
+    _git(tmp_path, "checkout", "--", "src/a.txt")  # revert: clean vs HEAD again
+    det3, _ = _detector(tmp_path)
+    assert det3._vouch_unchanged(tmp_path / "src/a.txt") is False  # was dirty last build
+    assert det3._vouch_unchanged(tmp_path / "src/b.txt") is True   # untouched: still vouched
+
+
+def test_changed_paths_enumerates_since_last_build(tmp_path):
+    write_workspace(tmp_path, {"a": "x", "b": "y"})
+    _init_repo(tmp_path)
+    _commit(tmp_path)
+    det1, md1 = _detector(tmp_path)
+    assert det1.changed_paths() is None  # no baseline yet -> caller loads all
+    md1.save()
+    (tmp_path / "src/a.txt").write_text("edited")
+    det2, md2 = _detector(tmp_path)
+    assert det2.changed_paths() == {(tmp_path / "src/a.txt").resolve()}
+    md2.save()
+    _git(tmp_path, "checkout", "--", "src/a.txt")  # revert before the next build
+    det3, _ = _detector(tmp_path)
+    # Clean vs HEAD now, but changed *since the last build* — the previous
+    # build's dirty set carries the reverted file into the enumeration.
+    assert det3.changed_paths() == {(tmp_path / "src/a.txt").resolve()}
 
 
 def test_not_a_git_repo_degrades_to_inner(tmp_path):

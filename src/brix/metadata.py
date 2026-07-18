@@ -103,9 +103,12 @@ class BuildMetadata:
     # -- git change-detection baseline -------------------------------------
     #
     # The HEAD commit sha as of the last build, so the git detector can ask
-    # "what changed since then" (working tree + commits). Absent until a
-    # git-accelerated build records it; a missing baseline means "vouch
-    # nothing", degrading safely to the stat scan.
+    # "what changed since then" (working tree + commits), paired with the
+    # working-tree paths that were *dirty at that build*. The dirty set closes
+    # the revert hole: a file dirty at build N was hashed with its dirty
+    # content, so even if git reports it clean at build N+1 (reverted to HEAD),
+    # its cached hash is not trustworthy. Both absent until a git-accelerated
+    # build records them; missing means "vouch nothing" — the safe stat scan.
 
     def git_baseline(self) -> str | None:
         return self._data.get("git_baseline")
@@ -116,6 +119,19 @@ class BuildMetadata:
                 self._data.pop("git_baseline", None)
             else:
                 self._data["git_baseline"] = sha
+
+    def git_dirty(self) -> list[str] | None:
+        """Repo-relative paths that were dirty in the working tree at the last
+        build, or None if never recorded (pre-dirty-set metadata, or the last
+        build could not read git status)."""
+        return self._data.get("git_dirty")
+
+    def set_git_dirty(self, paths: list[str] | None) -> None:
+        with self._lock:
+            if paths is None:
+                self._data.pop("git_dirty", None)
+            else:
+                self._data["git_dirty"] = sorted(paths)
 
     def store_identity(
         self, path_key: str, signature: list[int], tag: str, digest: str
@@ -153,6 +169,20 @@ class BuildMetadata:
 
     def action_records(self) -> dict[str, dict]:
         return dict(self._data["actions"])
+
+    def has_failed_actions(self) -> bool:
+        """Did the last recorded build leave any action in a failed state?
+        The lazy-loading selector treats this as "the previous selection's
+        work is unfinished" and unions it into the next selection."""
+        return any(not r.get("ok", True) for r in self._data["actions"].values())
+
+    def all_discovered_deps(self) -> set[str]:
+        """Every scanned dependency path across all actions (repo-relative).
+        The deps table is keyed by action_key — expansion keys that cannot be
+        attributed to a package without loading it — so the selector can only
+        use it as a trip-wire: a change to any scanned path forces a full
+        load."""
+        return {p for paths in self._data.get("deps", {}).values() for p in paths}
 
     # -- collection membership ----------------------------------------------
 

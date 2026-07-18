@@ -35,6 +35,7 @@ EXPECTED = {
     "Workspace",
     "build_stack",
     "cli",
+    "load_affected",
     "load_workspace",
     "compute_status",
     "cpp",

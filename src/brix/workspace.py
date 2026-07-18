@@ -28,13 +28,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .graph import Graph
+from .patterns import PathPattern, overlaps
 
 _INDEX_FILE = "workspace-index.json"
-_INDEX_VERSION = 1
+_INDEX_VERSION = 2
 
 # Directories never scanned for packages: brix's own storage and the usual
 # heavy/generated trees. A package's build outputs live under these, and they
@@ -127,6 +129,82 @@ def _derive_package_deps(loaded: list[tuple[Path, Graph]]) -> dict[Path, set[Pat
     return deps
 
 
+# --- persisted pattern descriptors -------------------------------------------
+#
+# The index must let a *later* build — with no package loaded — answer two
+# questions: "which packages does this changed path concern?" (matching) and
+# "which packages depend on which?" (edges). Both are answered from the same
+# persisted per-package input/output pattern descriptors, extracted with the
+# planner's own atom helpers, so selection can never drift from what edge
+# inference and re-fingerprinting actually look at.
+
+def _pattern_descriptors(graph: Graph) -> dict[str, list[list[str]]]:
+    """Serializable input/output path patterns for a package's actions.
+    A descriptor is ``["glob", template]`` or ``["regex", source]``. Glob
+    excludes are dropped: matching without them can only over-match, which
+    only ever loads more — the safe direction."""
+    from .data import RegexData
+    from .planner import input_atoms, output_atoms
+
+    def descs(atom_lists) -> list[list[str]]:
+        out: set[tuple[str, str]] = set()
+        for atoms in atom_lists:
+            for atom in atoms:
+                if isinstance(atom, RegexData):
+                    out.add(("regex", atom.regex.pattern))
+                else:
+                    out.add(("glob", atom.pattern.template))
+        return [list(d) for d in sorted(out)]
+
+    return {
+        "inputs": descs(input_atoms(a) for a in graph.actions),
+        "outputs": descs(output_atoms(a) for a in graph.actions),
+    }
+
+
+def _descriptor_matches(desc: list[str], rel: str) -> bool:
+    """Does a repo-relative path fall in a descriptor's path set?"""
+    kind, text = desc
+    if kind == "regex":
+        return re.compile(text).fullmatch(rel) is not None
+    return PathPattern(text).match(rel) is not None
+
+
+def _descriptors_overlap(out_desc: list[str], in_desc: list[str]) -> bool:
+    """Conservative "can these two descriptors name the same path", mirroring
+    the planner's `_atoms_overlap` with no shared bindings (persisted patterns
+    carry no expansion context; the extra edges that costs only over-load)."""
+    okind, otext = out_desc
+    ikind, itext = in_desc
+    if okind == "regex" and ikind == "regex":
+        return False  # match-only, exactly like the planner
+    if okind == "regex":
+        pattern = PathPattern(itext)
+        return pattern.is_concrete and re.compile(otext).fullmatch(itext) is not None
+    if ikind == "regex":
+        pattern = PathPattern(otext)
+        return pattern.is_concrete and re.compile(itext).fullmatch(otext) is not None
+    return overlaps(PathPattern(otext), PathPattern(itext))
+
+
+def _derive_deps_from_entries(entries: dict[Path, dict]) -> dict[Path, set[Path]]:
+    """`package -> packages it depends on`, from persisted descriptors: C
+    depends on P when any P output pattern can name a path any C input pattern
+    can. This is how a subset build gets edges without loading anything."""
+    deps: dict[Path, set[Path]] = {pkg: set() for pkg in entries}
+    for consumer, c_entry in entries.items():
+        for producer, p_entry in entries.items():
+            if producer == consumer:
+                continue
+            if any(
+                _descriptors_overlap(out_desc, in_desc)
+                for out_desc in p_entry.get("outputs", [])
+                for in_desc in c_entry.get("inputs", [])
+            ):
+                deps[consumer].add(producer)
+    return deps
+
+
 import sys
 import threading
 
@@ -213,6 +291,7 @@ class Workspace:
     graph: Graph
     depends_on: dict[Path, set[Path]] = field(default_factory=dict)
     footprints: dict[Path, set[Path]] = field(default_factory=dict)
+    patterns: dict[Path, dict[str, list[list[str]]]] = field(default_factory=dict)
 
     def owner_of(self, path: str | Path) -> Path | None:
         return owner(path, self.packages)
@@ -224,21 +303,48 @@ class Workspace:
         return {p for p, deps in self.depends_on.items() if package in deps}
 
     def save_index(self, metadata_dir: str | Path = "build/.brix") -> Path:
-        """Persist the derived dependency index (repo-relative), so a later
-        build that loads only a subset can consult it without a full load."""
+        """Persist per-package input/output patterns and footprints
+        (repo-relative), so a later build can decide what to load — and derive
+        the cross-package edges — without loading anything.
+
+        **Merges** with an existing index: entries are written for the
+        packages this workspace actually *loaded* (``self.patterns``), entries
+        for packages that no longer exist are dropped, and entries for
+        discovered-but-unloaded packages are kept as-is — so a subset load
+        refreshes its slice without clobbering the rest. ``last_selected``
+        records the loaded set, the recovery anchor after a failed build."""
         directory = self.root / metadata_dir
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / _INDEX_FILE
 
         def rel(p: Path) -> str:
-            return p.resolve().relative_to(self.root).as_posix() or "."
+            r = p.resolve().relative_to(self.root).as_posix()
+            return r if r != "" else "."
+
+        try:
+            existing = json.loads(path.read_text())
+        except (OSError, ValueError):
+            existing = {}
+        entries: dict[str, dict] = (
+            dict(existing.get("packages", {}))
+            if existing.get("version") == _INDEX_VERSION
+            else {}
+        )
+        alive = {rel(p) for p in self.packages}
+        entries = {k: v for k, v in entries.items() if k in alive}
+        for pkg, descriptors in self.patterns.items():
+            entries[rel(pkg)] = {
+                "inputs": descriptors["inputs"],
+                "outputs": descriptors["outputs"],
+                "footprint": sorted(
+                    rel(f) for f in self.footprints.get(pkg, set())
+                ),
+            }
 
         payload = {
             "version": _INDEX_VERSION,
-            "depends_on": {
-                rel(pkg): sorted(rel(d) for d in deps)
-                for pkg, deps in sorted(self.depends_on.items())
-            },
+            "packages": entries,
+            "last_selected": sorted(rel(p) for p in self.patterns),
         }
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=1, sort_keys=True))
@@ -246,25 +352,69 @@ class Workspace:
         return path
 
 
-def load_index(root: str | Path, metadata_dir: str | Path = "build/.brix") -> dict[Path, set[Path]]:
-    """Read a persisted dependency index back as absolute-path `depends_on`, or
-    ``{}`` if absent/unreadable (degrade to a full load — the safe direction)."""
+@dataclass
+class WorkspaceIndex:
+    """The persisted index, decoded: per-package pattern/footprint entries,
+    the *derived* dependency edges, and the last-loaded selection."""
+
+    root: Path
+    entries: dict[Path, dict]
+    depends_on: dict[Path, set[Path]]
+    last_selected: set[Path] | None
+
+    def dependents_closure(self, seeds: set[Path]) -> set[Path]:
+        """`seeds` plus every package that transitively depends on one — the
+        set that must be reloaded when the seeds' outputs may have changed."""
+        dependents: dict[Path, set[Path]] = {}
+        for pkg, deps in self.depends_on.items():
+            for dep in deps:
+                dependents.setdefault(dep, set()).add(pkg)
+        closed: set[Path] = set()
+        frontier = set(seeds)
+        while frontier:
+            pkg = frontier.pop()
+            if pkg in closed:
+                continue
+            closed.add(pkg)
+            frontier |= dependents.get(pkg, set())
+        return closed
+
+
+def load_index_data(
+    root: str | Path, metadata_dir: str | Path = "build/.brix"
+) -> WorkspaceIndex | None:
+    """Read the persisted index, or None if absent/unreadable/old-version —
+    the caller must degrade to a full load, the safe direction."""
     root = Path(root).resolve()
     path = root / metadata_dir / _INDEX_FILE
     try:
         payload = json.loads(path.read_text())
     except (OSError, ValueError):
-        return {}
+        return None
     if payload.get("version") != _INDEX_VERSION:
-        return {}
+        return None
 
     def abs_of(r: str) -> Path:
         return root if r == "." else (root / r)
 
-    return {
-        abs_of(pkg): {abs_of(d) for d in deps}
-        for pkg, deps in payload.get("depends_on", {}).items()
-    }
+    entries = {abs_of(k): v for k, v in payload.get("packages", {}).items()}
+    raw_selected = payload.get("last_selected")
+    return WorkspaceIndex(
+        root=root,
+        entries=entries,
+        depends_on=_derive_deps_from_entries(entries),
+        last_selected=(
+            {abs_of(r) for r in raw_selected} if raw_selected is not None else None
+        ),
+    )
+
+
+def load_index(root: str | Path, metadata_dir: str | Path = "build/.brix") -> dict[Path, set[Path]]:
+    """The persisted index as absolute-path `depends_on` (edges derived from
+    the persisted patterns), or ``{}`` if absent/unreadable (degrade to a full
+    load — the safe direction)."""
+    data = load_index_data(root, metadata_dir)
+    return data.depends_on if data is not None else {}
 
 
 def load_workspace(
@@ -300,6 +450,7 @@ def load_workspace(
     selected = None if only is None else {Path(p).resolve() for p in only}
     loaded: list[tuple[Path, Graph]] = []
     footprints: dict[Path, set[Path]] = {}
+    patterns: dict[Path, dict[str, list[list[str]]]] = {}
     for package_dir in packages:
         if selected is not None and package_dir.resolve() not in selected:
             continue
@@ -315,6 +466,7 @@ def load_workspace(
             )
         loaded.append((package_dir, graph))
         footprints[package_dir] = footprint
+        patterns[package_dir] = _pattern_descriptors(graph)
     merged = merge_graphs([g for _, g in loaded])
     # The dependency index is only meaningful for the whole workspace; a subset
     # load leaves it empty and defers to the persisted index.
@@ -325,4 +477,5 @@ def load_workspace(
         graph=merged,
         depends_on=depends_on,
         footprints=footprints,
+        patterns=patterns,
     )

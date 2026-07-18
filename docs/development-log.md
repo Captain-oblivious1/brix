@@ -1,5 +1,44 @@
 # Development log
 
+- **Monorepo scaling, tier 3 — the lazy-loading completeness core (Fable),
+  plus a real staleness fix in the git detector.** `src/brix/affected.py`:
+  `select_affected` decides the provably complete set of packages to load for
+  a change set, `load_affected(root, changed=None)` wires it (composition, no
+  builder wrapper: enumerate → select → subset-load → refresh index). Two
+  load-bearing findings shaped it. (1) **Ownership-based selection is unsound**
+  — packages legitimately reference paths outside their subtree (a shared
+  `tools/` script in no package's subtree), so "nearest owner of the changed
+  file" under-selects; selection instead matches changed paths against
+  **persisted per-package input/output patterns** (index v2 of
+  `workspace-index.json`), extracted with the planner's own atom helpers
+  (worker inputs included, glob excludes dropped = safe over-match), plus each
+  package's construction footprint, then closes over dependents; the
+  cross-package edges are themselves derived from the persisted patterns
+  (`patterns.overlaps`, no shared bindings — conservative), so matching and
+  edges cannot drift apart and a subset load refreshes only its own entries
+  (`save_index` merges). FULL-load fallbacks: no index; any `brix.py`
+  added/removed/edited; a changed path in the discovered-deps table (per-action
+  keys, unattributable without loading); out-of-tree changes; failed-build
+  recovery via `last_selected` (written at load time, before the build).
+  (2) **The shipped `GitChangeDetector` had a revert-staleness hole**: a file
+  dirty at build N is hashed with content git never saw; reverted to HEAD
+  before build N+1, git calls it clean and `baseline..HEAD` is empty, so the
+  stale cached hash was vouched — the extended git/stat equivalence sequence
+  (dirty-build-then-revert) catches it, and the fix persists each build's
+  working-tree **dirty set** paired with the baseline (a previously-dirty path
+  is never vouched; if either half is unknowable both are cleared).
+  `changed_paths()` — the graph-independent enumeration for the selector —
+  includes that dirty set for the same reason (a reverted file *did* change
+  since the last build). Gate: `tests/test_affected.py` replays the real
+  `load_affected` flow against a full load across the whole edit alphabet
+  (multi-hop lib→mid→app ripple, shared-tool edit, dynamic-config footprint
+  reload, glob-member deletion, new package, dependency rewired via `brix.py`
+  edit → FULL, irrelevant edit → empty selection), proves laziness (a lib edit
+  selects exactly {lib, mid, app}), covers every FULL fallback, and keeps a
+  negative control (footprint-blind selector must diverge). Opt-in; the full
+  load stays the default. Suite: 483 Python (new surface green on both
+  engines); 15 Rust suites clean.
+
 - **Monorepo scaling: the tier-3 scaffolding (Opus half of the Fable-worthy
   tier).** The lazy-loading *decision* core is Fable-authored (a mis-loaded
   package = silent stale build), but the mechanical infrastructure it needs is

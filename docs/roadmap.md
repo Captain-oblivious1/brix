@@ -296,7 +296,15 @@ These are self-contained and come with tests. No Fable needed.
   recorded last-build HEAD), so commits between builds are caught and the user
   never has to commit; degrades to the stat scan when not a git repo / no
   baseline / any git call fails. Inherits git's fsmonitor speedup for free when
-  the user has it enabled (no sudo, no Watchman dependency). **Follow-ups:**
+  the user has it enabled (no sudo, no Watchman dependency). **Hardened
+  (2026-07-18, Fable):** the vouch had a revert-staleness hole — a file dirty
+  at build N is hashed with content git never saw, so reverting it to HEAD
+  before build N+1 made git call it clean while the cached hash was stale. The
+  baseline is now persisted *paired with that build's working-tree dirty set*;
+  a previously-dirty file is never vouched. Same commit added
+  `changed_paths()`, the graph-independent "what changed since the last build"
+  enumeration the lazy-loading tier consumes (None whenever git can't answer —
+  the caller loads everything). **Follow-ups:**
   mirror into the Rust core (today it only accelerates `BRIX_ENGINE=py`); then,
   once soak-proven against real repos, consider defaulting it on for git
   workspaces — but *not before the air-gapped trial* (the boring stat detector
@@ -323,14 +331,20 @@ These are self-contained and come with tests. No Fable needed.
 
 - **"Only build what my change touched."** Given a set of edits, work out which
   parts of a big project could be affected and build/test only those — not all 50
-  services every time. The biggest time-saver for a company monorepo. **Design
-  note: `docs/monorepo-scaling.md`** — hierarchical `brix.py` files (a Bazel-style
+  services every time. The biggest time-saver for a company monorepo. **All
+  three tiers implemented** (tiers 1–2 Opus 2026-07-17; tier 3 — the
+  lazy-loading completeness core — Fable 2026-07-18: `brix.affected` with
+  `select_affected` + `load_affected`, index v2 persisting per-package
+  patterns/footprints, gated by `tests/test_affected.py`'s full edit alphabet
+  plus a negative control). **Opt-in**: `load_workspace` full load stays the
+  default; relying on lazy loading is post-trial. **Design note:
+  `docs/monorepo-scaling.md`** — hierarchical `brix.py` files (a Bazel-style
   package model, monolith as the degenerate case), a *derived* reverse-dependency
   index + loading-footprint tracking (no redundant declarations), and lazy
-  loading gated by an equivalence oracle. Key finding: the value is lopsided —
-  lazy *loading* (skipping graph construction) is the real win and the
-  Fable-worthy core; affected-computation on the fully-loaded graph is thin over
-  incremental+git and only worth it if measured. Post-trial.
+  loading gated by an equivalence oracle. Key findings: the value is lopsided —
+  lazy *loading* (skipping graph construction) is the real win; and selection
+  must be pattern-based, not ownership-based (shared out-of-subtree inputs make
+  "nearest owner" under-select — see the design note's correction).
 
 ### Fable queue — for the careful model only
 

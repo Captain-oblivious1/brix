@@ -22,7 +22,11 @@ Design notes (see docs/roadmap.md, "use git to spot changes instantly"):
 * **"Since last build", not "since last commit", and no forced commits.** The
   changed set unions the working-tree diff with `git diff <baseline>..HEAD`, so
   commits *between* builds are caught and the user need never commit. The
-  baseline is the HEAD sha recorded at the previous build.
+  baseline is the HEAD sha recorded at the previous build, **paired with that
+  build's working-tree dirty set**: a file dirty at the last build was hashed
+  with content git never committed, so if it is reverted before this build git
+  reports it clean while the cached hash is stale — such files are never
+  vouched (and count as changed in `changed_paths()`).
 * **Degrades to the wrapped detector** whenever the workspace is not a git repo,
   git is unavailable, there is no baseline yet (first build, or an empty repo
   with no commits), or any git call fails — the safe direction is to fall back
@@ -73,14 +77,13 @@ def _tracked(repo_root: Path) -> set[str] | None:
     return {p for p in out.split("\0") if p}
 
 
-def _changed_since(repo_root: Path, baseline: str | None) -> set[str] | None:
-    """Repo-relative paths changed since the baseline build: the working-tree
-    diff (unstaged + staged + untracked) unioned with commits `baseline..HEAD`."""
-    changed: set[str] = set()
-
+def _worktree_dirty(repo_root: Path) -> set[str] | None:
+    """Repo-relative paths dirty in the working tree right now (unstaged +
+    staged + untracked), from `git status --porcelain`."""
     status = _git(repo_root, "status", "--porcelain", "-z", "--untracked-files=all")
     if status is None:
         return None
+    dirty: set[str] = set()
     # Porcelain -z: each entry is "XY <path>", NUL-separated; a rename/copy adds
     # a second NUL-separated path (the origin). Parse defensively — any path
     # mentioned is a candidate, so both sides of a rename count as changed.
@@ -90,20 +93,21 @@ def _changed_since(repo_root: Path, baseline: str | None) -> set[str] | None:
         entry = tokens[i]
         code, path = entry[:2], entry[3:] if len(entry) > 3 else ""
         if path:
-            changed.add(path)
+            dirty.add(path)
         if code and (code[0] in ("R", "C")):
             i += 1  # the following token is the rename/copy source path
             if i < len(tokens):
-                changed.add(tokens[i])
+                dirty.add(tokens[i])
         i += 1
+    return dirty
 
-    if baseline:
-        committed = _git(repo_root, "diff", "--name-only", "-z", f"{baseline}..HEAD")
-        if committed is None:
-            return None
-        changed.update(p for p in committed.split("\0") if p)
 
-    return changed
+def _committed_since(repo_root: Path, baseline: str) -> set[str] | None:
+    """Repo-relative paths touched by commits in `baseline..HEAD`."""
+    out = _git(repo_root, "diff", "--name-only", "-z", f"{baseline}..HEAD")
+    if out is None:
+        return None
+    return {p for p in out.split("\0") if p}
 
 
 class GitChangeDetector:
@@ -124,6 +128,7 @@ class GitChangeDetector:
         self._repo_root: Path | None = None
         self._tracked: set[str] | None = None
         self._changed: set[str] | None = None
+        self._previous_dirty: set[str] | None = None
         self._ready = False
         self._prepare()
 
@@ -132,33 +137,73 @@ class GitChangeDetector:
         if repo_root is None:
             return  # not a git repo (or no git) -> pure fall-through
         baseline = self.metadata.git_baseline()
+        previous_dirty = self.metadata.git_dirty()
         tracked = _tracked(repo_root)
-        changed = _changed_since(repo_root, baseline)
+        dirty_now = _worktree_dirty(repo_root)
         head = _head(repo_root)
-        # Record this build's HEAD as the next build's baseline (persisted with
-        # the metadata at build end). HEAD is stable across a build.
-        self.metadata.set_git_baseline(head)
-        if tracked is None or changed is None or baseline is None:
-            # No baseline yet (first git build / empty repo) or a git call
-            # failed: vouch nothing this build, but the baseline is now set so
-            # the *next* build can accelerate.
+        # Record this build's (HEAD, working-tree dirty set) as the next
+        # build's baseline pair (persisted with the metadata at build end).
+        # They must be recorded together: the dirty set is what makes a later
+        # "clean vs HEAD" answer trustworthy — a file dirty *now* is hashed
+        # with its dirty content, so if it is reverted before the next build,
+        # git will call it clean while the cached hash is stale. If either
+        # half is unknowable, clear both so the next build vouches nothing.
+        if head is not None and dirty_now is not None:
+            self.metadata.set_git_baseline(head)
+            self.metadata.set_git_dirty(sorted(dirty_now))
+        else:
+            self.metadata.set_git_baseline(None)
+            self.metadata.set_git_dirty(None)
             return
+        if baseline is None or previous_dirty is None or tracked is None:
+            # No baseline/dirty pair yet (first git build, or metadata written
+            # before the dirty set existed) or ls-files failed: vouch nothing
+            # this build, but the pair is now set so the *next* build can
+            # accelerate.
+            return
+        committed = _committed_since(repo_root, baseline)
+        if committed is None:
+            return  # baseline no longer resolvable (rebase/gc) -> full scan
         self._repo_root = repo_root
         self._tracked = tracked
-        self._changed = changed
+        self._changed = dirty_now | committed
+        self._previous_dirty = set(previous_dirty)
         self._ready = True
 
     def _vouch_unchanged(self, path: Path) -> bool:
-        """True iff git guarantees this file's content equals the last build's
-        (tracked, and not changed since the recorded baseline)."""
+        """True iff git guarantees this file's content equals what the last
+        build hashed: tracked, not changed since the recorded baseline, and
+        not dirty *at* the last build (a then-dirty file was hashed with
+        content git never saw — reverting it makes git report clean while the
+        cached hash is stale)."""
         if not self._ready:
             return False
         assert self._repo_root is not None and self._tracked is not None
+        assert self._previous_dirty is not None
         try:
             rel = path.resolve().relative_to(self._repo_root).as_posix()
         except ValueError:
             return False  # outside the repo -> the inner detector owns it
-        return rel in self._tracked and rel not in self._changed
+        return (
+            rel in self._tracked
+            and rel not in self._changed
+            and rel not in self._previous_dirty
+        )
+
+    def changed_paths(self) -> set[Path] | None:
+        """Absolute paths changed since the last build — the working-tree diff,
+        commits since the baseline, and the last build's dirty set (a file
+        dirty then and clean now was *reverted*, which is still a change since
+        that build). None when git cannot answer (no repo, no baseline, a git
+        call failed): callers must treat None as "anything may have changed".
+
+        This is the enumeration query the lazy-loading tier uses to decide
+        which packages to load, independent of any loaded graph."""
+        if not self._ready:
+            return None
+        assert self._repo_root is not None
+        assert self._changed is not None and self._previous_dirty is not None
+        return {self._repo_root / rel for rel in (self._changed | self._previous_dirty)}
 
     # -- detector interface (delegates, with the vouch fast path) ----------
 

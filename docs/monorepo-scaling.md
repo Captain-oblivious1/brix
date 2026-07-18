@@ -1,12 +1,14 @@
 # Scaling to a large monorepo: hierarchical build files and lazy loading
 
-Status: **tier 1 implemented (2026-07-17, Opus)**; tiers 2–3 designed, not built
-(the risky lazy-loading core is **post-trial** — the monolithic full-load path
-is the safe floor for the air-gapped trial, this is "scale after proven
-correct"). Companion to `docs/roadmap.md` ("only build what my change touched"),
-`src/brix/gitdetect.py` (the change source), and the `build_stack`/detector-
-injection work. This note is the contract for the sequenced plan; build against
-it, don't re-derive it.
+Status: **all three tiers implemented** — tier 1 (2026-07-17, Opus), tier 2
+(2026-07-17, Opus), tier 3 (2026-07-18, Fable: `src/brix/affected.py`,
+`load_affected`, gated by `tests/test_affected.py`). Lazy loading is **opt-in**
+— `load_workspace` (full load) stays the default, and *relying* on lazy loading
+in anger remains post-trial: the monolithic full-load path is the safe floor
+for the air-gapped trial. Companion to `docs/roadmap.md` ("only build what my
+change touched"), `src/brix/gitdetect.py` (the change source), and the
+`build_stack`/detector-injection work. This note is the contract for the
+sequenced plan; build against it, don't re-derive it.
 
 Tier 1 shipped in `src/brix/workspace.py` (`find_packages`, `owner`,
 `merge_graphs`, `load_workspace`, `Workspace`), proven by
@@ -75,10 +77,26 @@ Instead:
   outputs) and **persist it** in the metadata.
 - **Bootstrap it on the first/full build** — the one time the whole graph is in
   hand. Chicken-and-egg dissolved: you record the map exactly when you have it.
-- **Incremental builds load** the union of: the `brix.py` files that *own* any
-  changed file (locality), plus their **transitive dependents** walked from the
-  persisted index. The index is flat persisted data, so the reverse-dep walk
-  needs no `brix.py` loaded; only the affected set is then loaded to build.
+- **Incremental builds load** the union of: the packages whose persisted
+  input/output patterns (or construction footprint) match any changed path,
+  plus their **transitive dependents** walked from the persisted index. The
+  index is flat persisted data, so the match and the reverse-dep walk need no
+  `brix.py` loaded; only the affected set is then loaded to build.
+
+**Correction discovered during tier 3 (load-bearing):** the original sketch
+said "the `brix.py` files that *own* any changed file (locality)". That is
+**unsound**, because tier 1 deliberately does not enforce a locality rule —
+packages may reference paths outside their subtree (a shared `tools/` script is
+an input of many packages, and lives in *no* package's subtree in a sparse
+layout). Ownership-based selection would see no owner and pick nothing.
+Selection is therefore **pattern-based**: each package's index entry persists
+its input/output path patterns, extracted with the planner's own atom helpers
+(worker inputs included) — the same atoms edge inference and re-fingerprinting
+look at, so selection cannot drift from them. Glob excludes are dropped when
+matching (over-match only ever over-loads). The cross-package edges are
+likewise derived *from the persisted patterns* (`patterns.overlaps`, no shared
+bindings — conservative), so a subset load can refresh its own entries and the
+edges stay consistent without loading anything else.
 
 ## The correctness crux: completeness under partial loading
 
@@ -108,20 +126,31 @@ Two dependency-change cases, and why the index alone isn't quite enough:
   depfiles) turned on the build files themselves — **meta-incrementality**, not
   new invention.
 
-Together — nearest-ancestor ownership + persisted reverse-dep index + loading
-footprints — the affected set is provably complete.
+Together — persisted per-package patterns + derived reverse-dep index + loading
+footprints — the affected set is provably complete. The shipped selector
+(`brix.affected.select_affected`) adds the remaining FULL-load fallbacks:
+no index; any `brix.py` itself added/removed/edited (structure may have
+changed); a changed path in the discovered-deps table (compiler-scanned inputs
+are keyed per action, unattributable to a package without loading it); a
+changed path outside the workspace; and failed-build recovery (the previous
+selection — `last_selected`, written *at load time* — is unioned back in when
+the last build left failed actions, or FULL if it was never recorded).
 
 ## The change source: `GitChangeDetector`, extended
 
 The detector (injected per the `build_stack(detector=...)` work) is the natural
-source of "what changed" for the loader — but it needs a capability it doesn't
-have yet. Today it answers "is *this declared input* unchanged?" (per-file
-vouching inside an already-loaded graph). The loader needs "what paths changed
-in the repo, period?" — a change-set **enumeration** query, independent of any
-graph, to decide what to load in the first place. Same git plumbing (`status` +
-`diff <baseline>..HEAD`), new method (`changed_paths()`). A non-git detector
-falls back to a scan-derived change set (or, with no baseline, "everything
-changed" → load all → safe).
+source of "what changed" for the loader. **Done (2026-07-18, Fable):**
+`changed_paths()` answers the change-set **enumeration** query — "what paths
+changed since the last build, period?", independent of any loaded graph — from
+the same git plumbing (`status` + `diff <baseline>..HEAD`), returning None
+whenever git can't answer (→ load all → safe). Building it surfaced and fixed a
+real staleness hole in the *vouching* path too: a file dirty at build N was
+hashed with content git never saw, so if it is reverted to HEAD content before
+build N+1, git reports it clean while the cached hash is stale. The fix pairs
+the persisted baseline with **that build's working-tree dirty set** — a file in
+the previous build's dirty set is never vouched and always counts as changed
+(`tests/test_git_detect.py` pins the revert case in the git/stat equivalence
+sequence).
 
 ## Sequencing and model split
 
@@ -140,10 +169,10 @@ changed" → load all → safe).
    (reload a package if a glob/file its construction read changed) is deferred
    to land *with* tier 3, since it is only load-bearing once lazy loading
    actually consumes the index; that is the Opus-build + Fable-review piece.
-3. **Lazy loading (`DistributedBuilder`).** The Fable-worthy core — "did we load
-   every affected package" is a completeness property ordinary tests miss on
-   small graphs — so it is **Fable-authored**, post-trial, behind the
-   equivalence oracle. The split within tier 3:
+3. **Lazy loading.** The Fable-worthy core — "did we load every affected
+   package" is a completeness property ordinary tests miss on small graphs —
+   so it was **Fable-authored**, behind the equivalence oracle. The split
+   within tier 3:
    - **Mechanical scaffolding (Opus, done 2026-07-17):** the subset-load
      primitive `load_workspace(root, only=…)` (loads exactly the packages it is
      told — no decision), loading-footprint tracking (`Workspace.footprints`, an
@@ -153,11 +182,23 @@ changed" → load all → safe).
      `assert_selective_equals_full` — replays edits full-load vs selector-driven
      and asserts byte-identical outputs; proven to catch a stale-producing
      selector and pass correct ones).
-   - **The completeness core (Fable):** the *selector* — given the changed
-     paths, the persisted index, and the footprints, decide the provably
-     complete set of packages to load — and the `DistributedBuilder` that wires
-     it. Authored against the oracle above; nothing ships until it is green on
-     the full edit alphabet.
+   - **The completeness core (Fable, done 2026-07-18):** `src/brix/affected.py`
+     — `select_affected` (pattern + footprint matching, dependents closure over
+     the pattern-derived edges, FULL fallbacks listed above) and
+     `load_affected(root, changed=None)`, the composition entry point (there is
+     no `DistributedBuilder` class — composition over a builder wrapper, per
+     the detector-injection precedent): enumerate changes (explicit, or
+     `GitChangeDetector.changed_paths()`), select, subset-load, refresh the
+     loaded packages' index entries (`save_index` merges; `last_selected` is
+     written at load time for failed-build recovery). Gated by
+     `tests/test_affected.py`: the real selector replayed against a full load
+     across the whole edit alphabet — multi-hop ripple, shared out-of-subtree
+     tool edit, dynamic-config (footprint) change, glob-member deletion, new
+     package, dependency rewired via `brix.py` edit, irrelevant edit — plus a
+     negative control proving the harness still catches an under-selector, and
+     unit tests for every FULL fallback. Index format v2
+     (`workspace-index.json`): per-package patterns + footprint entries,
+     `last_selected`; v1 files degrade to a full load.
 4. *(Affected-computation on the full graph — tier 2 above — only if measured to
    matter.)*
 
