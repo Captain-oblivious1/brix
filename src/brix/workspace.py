@@ -127,6 +127,76 @@ def _derive_package_deps(loaded: list[tuple[Path, Graph]]) -> dict[Path, set[Pat
     return deps
 
 
+import sys
+import threading
+
+_footprint_local = threading.local()
+_hook_installed = False
+_hook_lock = threading.Lock()
+
+
+def _audit_hook(event: str, args) -> None:
+    """Records file-read paths while a package's ``create_graph()`` runs, so a
+    later build can reload that package if a file it *read at construction*
+    changed (a config it opened, a manifest it parsed) — the dynamic-dependency
+    case a static glob pattern doesn't cover. Cheap when inactive: one
+    thread-local check per open."""
+    record = getattr(_footprint_local, "active", None)
+    if record is None:
+        return
+    if event == "open" and args:
+        path = args[0]
+        mode = args[1] if len(args) > 1 else "r"
+        text_mode = str(mode) if mode is not None else "r"
+        if isinstance(path, (str, bytes)) and not any(c in text_mode for c in "wax"):
+            try:
+                record.add(os.fspath(path))
+            except TypeError:
+                pass
+
+
+def _ensure_hook() -> None:
+    global _hook_installed
+    with _hook_lock:
+        if not _hook_installed:
+            sys.addaudithook(_audit_hook)  # permanent by design; no-op when inactive
+            _hook_installed = True
+
+
+def _with_footprint(root: Path, brix_path: Path, factory):
+    """Run ``factory`` (a package's ``create_graph``) while recording the files
+    its construction read, filtered to footprint-relevant repo inputs. Returns
+    ``(result, footprint)``."""
+    _ensure_hook()
+    reads: set[str] = set()
+    previous = getattr(_footprint_local, "active", None)
+    _footprint_local.active = reads
+    try:
+        result = factory()
+    finally:
+        _footprint_local.active = previous
+
+    footprint: set[Path] = set()
+    for raw in reads:
+        try:
+            path = Path(raw).resolve()
+        except OSError:
+            continue
+        if not path.is_file() or path == brix_path.resolve():
+            continue  # the package's own build file is tracked separately
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            continue  # outside the repo — not a workspace input
+        # Skip brix's own machinery and build storage; keep config/data reads.
+        if path.suffix in (".py", ".pyc") or "__pycache__" in rel.parts:
+            continue
+        if rel.parts and (rel.parts[0] == "build" or rel.parts[0].startswith(".brix")):
+            continue
+        footprint.add(path)
+    return result, footprint
+
+
 @dataclass
 class Workspace:
     """A loaded hierarchical workspace: its packages, their merged graph, the
@@ -142,6 +212,7 @@ class Workspace:
     packages: list[Path]
     graph: Graph
     depends_on: dict[Path, set[Path]] = field(default_factory=dict)
+    footprints: dict[Path, set[Path]] = field(default_factory=dict)
 
     def owner_of(self, path: str | Path) -> Path | None:
         return owner(path, self.packages)
@@ -201,36 +272,57 @@ def load_workspace(
     *,
     brix_file: str = "brix.py",
     graph_attr: str = "create_graph",
+    only: set[Path] | None = None,
 ) -> Workspace:
     """Discover every package under ``root``, load each package's graph, and
-    merge them (full, non-lazy). Returns a `Workspace`; ``ws.graph`` is a plain
-    merged `Graph` usable with any builder — e.g.::
+    merge them. Returns a `Workspace`; ``ws.graph`` is a plain merged `Graph`
+    usable with any builder — e.g.::
 
         ws = load_workspace(ROOT)
         cli.main(lambda: load_workspace(ROOT).graph, root=ROOT, ...)
+
+    ``only`` (a set of package directories) is the **subset-loading primitive**:
+    only those packages' graphs are loaded and merged, for a build that touches
+    just part of the workspace. It is deliberately *mechanical* — it loads
+    exactly what it is told; deciding *which* packages are the affected set (so
+    the partial build is complete, not stale) is the lazy-loading tier's job,
+    proven by the equivalence oracle. Unselected packages' outputs are assumed
+    already present and fresh on disk (from a prior full build). ``packages``
+    still lists every discovered package (for ownership); the cross-package
+    index is derived only on a full load — a subset build consults the persisted
+    index via `load_index`, never a partial re-derivation.
 
     A package whose build file lacks ``graph_attr`` is skipped (it may be a
     standalone entry point that only wires `cli.main`, not a graph contributor).
     """
     root = Path(root).resolve()
     packages = find_packages(root, brix_file=brix_file)
+    selected = None if only is None else {Path(p).resolve() for p in only}
     loaded: list[tuple[Path, Graph]] = []
+    footprints: dict[Path, set[Path]] = {}
     for package_dir in packages:
+        if selected is not None and package_dir.resolve() not in selected:
+            continue
         module = _load_module(package_dir, brix_file)
         factory = getattr(module, graph_attr, None)
         if factory is None:
             continue
-        graph = factory()
+        graph, footprint = _with_footprint(root, package_dir / brix_file, factory)
         if not isinstance(graph, Graph):
             raise TypeError(
                 f"{package_dir / brix_file}: {graph_attr}() must return a Graph, "
                 f"got {type(graph).__name__}"
             )
         loaded.append((package_dir, graph))
+        footprints[package_dir] = footprint
     merged = merge_graphs([g for _, g in loaded])
+    # The dependency index is only meaningful for the whole workspace; a subset
+    # load leaves it empty and defers to the persisted index.
+    depends_on = _derive_package_deps(loaded) if only is None else {}
     return Workspace(
         root=root,
         packages=packages,
         graph=merged,
-        depends_on=_derive_package_deps(loaded),
+        depends_on=depends_on,
+        footprints=footprints,
     )

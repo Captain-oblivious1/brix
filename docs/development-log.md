@@ -1,5 +1,27 @@
 # Development log
 
+- **Monorepo scaling: the tier-3 scaffolding (Opus half of the Fable-worthy
+  tier).** The lazy-loading *decision* core is Fable-authored (a mis-loaded
+  package = silent stale build), but the mechanical infrastructure it needs is
+  safe Opus work, and it is now in place. Three pieces: (1) the **subset-load
+  primitive** `load_workspace(root, only={packages})` — loads exactly the
+  packages it is told and merges just those, no decision (unselected packages'
+  outputs are assumed already fresh on disk from a prior full build); (2)
+  **loading-footprint tracking** — a process-wide audit hook (cheap when
+  inactive) records the files a package's `create_graph` reads at construction,
+  so a build that decides dependencies dynamically (`open("deps.txt")`) can be
+  reloaded when that file changes — the case a static glob pattern doesn't cover
+  — filtered to repo inputs, excluding the package's own build file and brix's
+  machinery; (3) the **equivalence oracle** (`tests/test_workspace_oracle.py`),
+  the safety gate: `assert_selective_equals_full` replays an edit sequence two
+  ways — a full load and a *selector*-driven selective load — and asserts the
+  build outputs are byte-identical. The tests prove it is a real gate: it passes
+  a correct selector (owners of changes + their transitive dependents from the
+  persisted index) and **catches** a deliberately stale-producing one (owner
+  only, omitting the dependent). The Fable-authored piece is the *selector*
+  itself — the provably-complete affected-set computation — plus the
+  `DistributedBuilder` that wires it, authored against this oracle, post-trial.
+  `src/brix/workspace.py`, `tests/test_workspace_oracle.py`.
 - **Hierarchical build files, tier 2: the derived cross-package index.** Builds
   on tier 1 (docs/monorepo-scaling.md). `brix.workspace` now derives the
   package-level dependency graph — "which package consumes which package's

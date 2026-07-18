@@ -142,8 +142,22 @@ changed" → load all → safe).
    actually consumes the index; that is the Opus-build + Fable-review piece.
 3. **Lazy loading (`DistributedBuilder`).** The Fable-worthy core — "did we load
    every affected package" is a completeness property ordinary tests miss on
-   small graphs. **Opus builds it behind the equivalence oracle below; Fable
-   reviews that core.**
+   small graphs — so it is **Fable-authored**, post-trial, behind the
+   equivalence oracle. The split within tier 3:
+   - **Mechanical scaffolding (Opus, done 2026-07-17):** the subset-load
+     primitive `load_workspace(root, only=…)` (loads exactly the packages it is
+     told — no decision), loading-footprint tracking (`Workspace.footprints`, an
+     audit-hook recorder that captures the files a package's `create_graph` read
+     at construction, so a dynamic-config read triggers a reload), and the
+     **equivalence oracle** (`tests/test_workspace_oracle.py`:
+     `assert_selective_equals_full` — replays edits full-load vs selector-driven
+     and asserts byte-identical outputs; proven to catch a stale-producing
+     selector and pass correct ones).
+   - **The completeness core (Fable):** the *selector* — given the changed
+     paths, the persisted index, and the footprints, decide the provably
+     complete set of packages to load — and the `DistributedBuilder` that wires
+     it. Authored against the oracle above; nothing ships until it is green on
+     the full edit alphabet.
 4. *(Affected-computation on the full graph — tier 2 above — only if measured to
    matter.)*
 
