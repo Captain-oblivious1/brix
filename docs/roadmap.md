@@ -323,7 +323,14 @@ These are self-contained and come with tests. No Fable needed.
 
 - **"Only build what my change touched."** Given a set of edits, work out which
   parts of a big project could be affected and build/test only those — not all 50
-  services every time. The biggest time-saver for a company monorepo.
+  services every time. The biggest time-saver for a company monorepo. **Design
+  note: `docs/monorepo-scaling.md`** — hierarchical `brix.py` files (a Bazel-style
+  package model, monolith as the degenerate case), a *derived* reverse-dependency
+  index + loading-footprint tracking (no redundant declarations), and lazy
+  loading gated by an equivalence oracle. Key finding: the value is lopsided —
+  lazy *loading* (skipping graph construction) is the real win and the
+  Fable-worthy core; affected-computation on the fully-loaded graph is thin over
+  incremental+git and only worth it if measured. Post-trial.
 
 ### Fable queue — for the careful model only
 
