@@ -114,14 +114,16 @@ def run_targets(paths: list[Path]) -> int:
 
 
 if __name__ == "__main__":
-    from brix import AtomicBuilder, CacheBuilder, IncrementalBuilder
+    from brix import build_stack
 
+    # The full Atomic(Cache(Incremental)) stack, assembled in the correct order
+    # by the helper (atomic outermost) instead of hand-nested.
     def builder():
-        return AtomicBuilder(
-            CacheBuilder(
-                IncrementalBuilder(create_graph, root=ROOT, metadata_dir="build/.brix"),
-                cache_dir="build/.brix-cache",
-            ),
+        return build_stack(
+            create_graph,
+            root=ROOT,
+            metadata_dir="build/.brix",
+            cache_dir="build/.brix-cache",
             staging_dir="build/.brix-staging",
         )
 

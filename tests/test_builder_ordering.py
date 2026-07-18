@@ -83,3 +83,47 @@ def test_core_rejects_atomic_not_outermost_in_spec(tmp_path, monkeypatch, engine
     }
     with pytest.raises(Exception, match="outermost"):
         module.build(spec_json, json.dumps(config))
+
+
+# --- build_stack: the correct-by-construction factory ----------------------
+
+def _chain(builder):
+    out = []
+    while builder is not None:
+        out.append(type(builder).__name__)
+        builder = getattr(builder, "inner", None)
+    return out
+
+
+def test_build_stack_default_is_the_full_correct_stack(tmp_path):
+    from brix import build_stack
+
+    b = build_stack(make_graph, root=tmp_path)
+    assert _chain(b) == ["AtomicBuilder", "CacheBuilder", "IncrementalBuilder"]
+
+
+def test_build_stack_toggles_layers(tmp_path):
+    from brix import build_stack
+
+    assert _chain(build_stack(make_graph, root=tmp_path, cache_dir=None)) == [
+        "AtomicBuilder", "IncrementalBuilder"
+    ]
+    assert _chain(build_stack(make_graph, root=tmp_path, staging_dir=None)) == [
+        "CacheBuilder", "IncrementalBuilder"
+    ]
+    assert _chain(
+        build_stack(make_graph, root=tmp_path, cache_dir=None, staging_dir=None)
+    ) == ["IncrementalBuilder"]
+
+
+def test_build_stack_builds_and_rebuilds(tmp_path):
+    from brix import build_stack
+
+    from test_incremental import write_workspace
+
+    write_workspace(tmp_path, {"a": "x", "b": "y"})
+    assert build_stack(make_graph, root=tmp_path).build().success
+    assert (tmp_path / "build/all.txt").read_text() == "XY"
+    # As a cli.main-style factory thunk, rebuilt fresh each call.
+    factory = lambda: build_stack(make_graph, root=tmp_path)  # noqa: E731
+    assert factory().build().success

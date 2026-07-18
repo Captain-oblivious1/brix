@@ -10,6 +10,10 @@ objects, or metadata storage.
 - `Graph`
 - `ExternalProcessAction`, `ExpandAll`, and `Expandable`
 - `CleanBuilder`, `IncrementalBuilder`, `CacheBuilder`, and `AtomicBuilder`
+  (and `build_stack(...)`, which assembles the correct `AtomicBuilder(Cache(
+  Incremental))` order for you — `AtomicBuilder` must be outermost, enforced by
+  the `NestableBuilder` type hierarchy plus the core, so a buried stack is a
+  type error and a runtime raise)
 - `EdgeTrigger`
 - `DataExpr` and `DepSet`
 - `cpp`, `java`, `springboot`, and `ts`

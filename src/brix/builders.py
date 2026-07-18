@@ -322,3 +322,45 @@ class AtomicBuilder:
         from .atomic import discard_staging
 
         return discard_staging(self.root / self.staging_dir)
+
+
+# The concrete builder types, as a union — a return/parameter annotation that
+# names every builder without a Protocol (which couldn't express the nominal
+# "AtomicBuilder is not nestable" rule anyway).
+Builder = "CleanBuilder | IncrementalBuilder | CacheBuilder | AtomicBuilder"
+
+
+def build_stack(
+    graph_supplier,
+    root: str | Path = ".",
+    *,
+    metadata_dir: str | Path = "build/.brix",
+    cache_dir: str | Path | None = "build/.brix-cache",
+    store: "CacheStoreProtocol | None" = None,
+    staging_dir: str | Path | None = "build/staging",
+) -> "AtomicBuilder | NestableBuilder":
+    """Assemble the standard builder stack in the correct order —
+    ``AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))`` — so the ordering
+    can't be gotten wrong (atomic outermost; see `NestableBuilder`).
+
+    Layers toggle by argument: pass ``cache_dir=None`` (and no ``store``) to
+    drop the cache, ``staging_dir=None`` to drop atomic staging (e.g. a
+    cross-module compiler that self-resolves its classpath, which atomic
+    staging can't support — see `examples/kotlin_multimodule`). Defaults give
+    the full recommended stack.
+
+    Returns a builder; for `cli.main`'s ``builder_factory`` (called fresh per
+    invocation, so ``commit``/``discard`` rebuild cleanly), pass a thunk::
+
+        cli.main(create_graph, builder_factory=lambda: build_stack(create_graph, root=ROOT))
+    """
+    inner: NestableBuilder = IncrementalBuilder(
+        graph_supplier, root=root, metadata_dir=metadata_dir
+    )
+    if store is not None:
+        inner = CacheBuilder(inner, store=store)
+    elif cache_dir is not None:
+        inner = CacheBuilder(inner, cache_dir=cache_dir)
+    if staging_dir is not None:
+        return AtomicBuilder(inner, staging_dir=staging_dir)
+    return inner

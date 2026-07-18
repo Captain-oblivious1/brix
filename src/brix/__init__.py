@@ -5,7 +5,15 @@ the top-level v1 contract. See ``docs/python-api.md``.
 """
 
 from .actions import ExpandAll, Expandable, ExternalProcessAction
-from .builders import AtomicBuilder, BuildResult, CacheBuilder, CleanBuilder, IncrementalBuilder
+from .builders import (
+    AtomicBuilder,
+    BuildResult,
+    CacheBuilder,
+    CleanBuilder,
+    IncrementalBuilder,
+    NestableBuilder,
+    build_stack,
+)
 from .cache import CacheStore, CacheStoreProtocol, TwoTierCacheStore
 from .cache_http import HttpCacheStore
 from .data import DataExpr
@@ -39,6 +47,7 @@ __all__ = [
     "Graph",
     "HttpCacheStore",
     "IncrementalBuilder",
+    "NestableBuilder",
     "NodeContext",
     "NodeProposal",
     "ProcessResult",
@@ -46,6 +55,7 @@ __all__ = [
     "StatusReport",
     "TwoTierCacheStore",
     "WorkerSpec",
+    "build_stack",
     "cli",
     "compute_status",
     "cpp",

@@ -21,7 +21,11 @@
   wrinkle: Python needs *nominal* typing here (a structural `Protocol` wouldn't
   exclude `AtomicBuilder`, whose shape matches the others) — the same reason a TS
   frontend would need branded types rather than a plain interface.
-  `tests/test_builder_ordering.py`, Rust unit tests in `brix-py`.
+  `tests/test_builder_ordering.py`, Rust unit tests in `brix-py`. A
+  `build_stack(...)` factory came with it — it assembles the correct
+  `AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))` order and toggles
+  layers by argument (`cache_dir=None` / `staging_dir=None`), so the common case
+  never hand-nests; dogfooded in `examples/leveldb/brix.py`.
 - **Deleted-source cleanup after a failed build.** brix cleans up a deleted
   source's leftover outputs by remembering, between builds, which collection
   members existed. That record was committed only on *success*, so a member
