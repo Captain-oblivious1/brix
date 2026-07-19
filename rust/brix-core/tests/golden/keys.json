@@ -88,5 +88,10 @@
     "kind": "action_key",
     "spec": "{\"kind\": \"process\", \"command_line\": \"finalize {raw} {mpg}\", \"inputs\": {\"raw\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.raw.mpg\"}]}, \"outputs\": {\"mpg\": [{\"kind\": \"file\", \"path\": \"out/videos/{video}.mpg\"}]}, \"name\": \"finalize {video}\"}",
     "key": "da189575d1ebbb7eaf733ee92cc3d2817737e0bf07c12112ffadd6af49a8168b"
+  },
+  {
+    "kind": "action_key",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{tool} -o {out} {src}\", \"inputs\": {\"tool\": [{\"kind\": \"value\", \"text\": \"gcc\"}], \"src\": [{\"kind\": \"file\", \"path\": \"a.c\"}], \"_brix_env_used\": [{\"kind\": \"value\", \"text\": \"{\\\"BRIX_GOLDEN_TRACKED\\\": null}\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"a.o\"}]}, \"name\": \"env-vocab\", \"env_unset\": [\"FORBIDDEN_VAR\"]}",
+    "key": "b1d32d6795cc768b2cfd3420bf75c4305bf0312b9e170ff97bb48d5ba95bb4db"
   }
 ]

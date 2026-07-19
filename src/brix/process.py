@@ -40,11 +40,17 @@ class ProcessResult:
 
 
 def run_process(
-    action_name: str, command: str, cwd: Path, env: dict[str, str] | None = None
+    action_name: str,
+    command: str,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    env_unset: tuple[str, ...] | list[str] | None = None,
 ) -> ProcessResult:
     """Run a rendered command line, capturing stdout/stderr/exit status.
 
-    ``env`` entries extend (and shadow) the inherited environment.
+    ``env`` entries extend (and shadow) the inherited environment; ``env_unset``
+    names are removed from it (force-absent), which also forces a full inherited
+    environment to be built so the removal takes effect.
     """
     try:
         argv = shlex.split(command)
@@ -52,7 +58,12 @@ def run_process(
         return ProcessResult(action_name, command, stderr=f"brix: bad command line: {exc}")
     if not argv:
         return ProcessResult(action_name, command, stderr="brix: empty command line")
-    full_env = {**os.environ, **env} if env else None
+    if env or env_unset:
+        full_env = {**os.environ, **(env or {})}
+        for name in env_unset or ():
+            full_env.pop(name, None)
+    else:
+        full_env = None
     try:
         proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=full_env)
     except OSError as exc:

@@ -61,6 +61,8 @@ def action_to_spec(action: Action) -> dict:
             d["name"] = action.name
         if action.env:
             d["env"] = {k: expr_to_spec(v) for k, v in action.env.items()}
+        if action.env_unset:
+            d["env_unset"] = list(action.env_unset)
         if action.depfile is not None:
             d["depfile"] = action.depfile
         if action.worker is not None:

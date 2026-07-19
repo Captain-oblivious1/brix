@@ -65,6 +65,8 @@ def action_key(action: ExternalProcessAction) -> str:
     }
     if action.env:
         payload["env"] = {k: _expr_identity(v) for k, v in action.env.items()}
+    if action.env_unset:
+        payload["env_unset"] = list(action.env_unset)
     return _digest(payload)
 
 

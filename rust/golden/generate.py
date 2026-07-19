@@ -431,6 +431,22 @@ def gen_keys():
     for _, factory, _ in PLAN_CASES:
         for action in factory().actions:
             collect(action)
+
+    # Env vocabulary: an action mixing UNSET (identity -> action_key + wire) and
+    # SYSTEM (tracked -> a fingerprint-only input). BRIX_GOLDEN_TRACKED is unset
+    # here, so its snapshot is null (deterministic, portable).
+    from brix import SYSTEM, UNSET
+    from brix.data import FileData, ValueData
+
+    collect(
+        ExternalProcessAction(
+            name="env-vocab",
+            command_line="{tool} -o {out} {src}",
+            inputs={"tool": ValueData("gcc"), "src": FileData("a.c")},
+            outputs={"out": FileData("a.o")},
+            env={"FORBIDDEN_VAR": UNSET, "BRIX_GOLDEN_TRACKED": SYSTEM},
+        )
+    )
     return out
 
 

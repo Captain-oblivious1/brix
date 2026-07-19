@@ -72,6 +72,7 @@ pub fn run_process(
     command: &str,
     cwd: &Path,
     env: &[(String, String)],
+    env_unset: &[String],
 ) -> ProcessResult {
     let argv = match crate::shlex::split(command) {
         Ok(argv) => argv,
@@ -94,6 +95,11 @@ pub fn run_process(
     cmd.args(&argv[1..]).current_dir(cwd);
     for (k, v) in env {
         cmd.env(k, v);
+    }
+    // `UNSET`: force these absent, even if inherited (Command inherits the
+    // parent env by default). Mirrors the Python executor's full_env.pop().
+    for name in env_unset {
+        cmd.env_remove(name);
     }
     let output = match cmd.output() {
         Ok(o) => o,
@@ -148,7 +154,7 @@ mod tests {
 
     #[test]
     fn ok_run_captures_stdout() {
-        let r = run_process("echo", "echo hello", &cwd(), &[]);
+        let r = run_process("echo", "echo hello", &cwd(), &[], &[]);
         assert_eq!(r.exit_code, Some(0));
         assert!(r.ok());
         assert_eq!(r.stdout, "hello\n");
@@ -157,7 +163,7 @@ mod tests {
 
     #[test]
     fn nonzero_exit_is_failure() {
-        let r = run_process("false", "false", &cwd(), &[]);
+        let r = run_process("false", "false", &cwd(), &[], &[]);
         assert_eq!(r.exit_code, Some(1));
         assert!(!r.ok());
         assert_eq!(r.summary(), "FAILED (exit 1): false");
@@ -165,10 +171,10 @@ mod tests {
 
     #[test]
     fn empty_and_unsplittable_commands_never_ran() {
-        let r = run_process("x", "", &cwd(), &[]);
+        let r = run_process("x", "", &cwd(), &[], &[]);
         assert_eq!(r.exit_code, None);
         assert_eq!(r.stderr, "brix: empty command line");
-        let r = run_process("x", "'unterminated", &cwd(), &[]);
+        let r = run_process("x", "'unterminated", &cwd(), &[], &[]);
         assert_eq!(r.exit_code, None);
         assert!(r.stderr.starts_with("brix: bad command line:"));
         assert_eq!(r.summary(), "FAILED (did not run): x");
@@ -176,7 +182,7 @@ mod tests {
 
     #[test]
     fn missing_binary_cannot_execute() {
-        let r = run_process("x", "/no/such/binary-brix-test", &cwd(), &[]);
+        let r = run_process("x", "/no/such/binary-brix-test", &cwd(), &[], &[]);
         assert_eq!(r.exit_code, None);
         assert!(r.stderr.starts_with("brix: cannot execute:"));
     }
@@ -188,7 +194,24 @@ mod tests {
             "sh -c 'echo $BRIX_TEST_VAR'",
             &cwd(),
             &[("BRIX_TEST_VAR".to_string(), "shadowed".to_string())],
+            &[],
         );
         assert_eq!(r.stdout, "shadowed\n");
+    }
+
+    #[test]
+    fn env_unset_forces_a_variable_absent() {
+        // Set it, then UNSET it: the child must not see it (mirrors the Python
+        // executor removing it from the inherited environment).
+        std::env::set_var("BRIX_TEST_UNSET", "leaked");
+        let r = run_process(
+            "env",
+            "sh -c 'echo [$BRIX_TEST_UNSET]'",
+            &cwd(),
+            &[],
+            &["BRIX_TEST_UNSET".to_string()],
+        );
+        std::env::remove_var("BRIX_TEST_UNSET");
+        assert_eq!(r.stdout, "[]\n");
     }
 }

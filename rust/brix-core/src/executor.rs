@@ -108,7 +108,12 @@ fn run_process_node(node: &Node, ctx: &NodeContext, workers: &WorkerRegistry) ->
         Ok(pair) => pair,
         Err(exc) => return ProcessResult::did_not_run(&label, "", format!("brix: {exc}")),
     };
-    run_process(&label, &command, &ctx.workspace_root, &env)
+    let empty: Vec<String> = Vec::new();
+    let env_unset = match action {
+        Action::Process { env_unset, .. } => env_unset.as_slice(),
+        _ => empty.as_slice(),
+    };
+    run_process(&label, &command, &ctx.workspace_root, &env, env_unset)
 }
 
 /// Run the node through the layer stack, innermost first in the given list

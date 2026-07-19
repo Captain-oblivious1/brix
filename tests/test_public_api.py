@@ -32,6 +32,7 @@ EXPECTED = {
     "StatusReport",
     "SYSTEM",
     "TwoTierCacheStore",
+    "UNSET",
     "WorkerSpec",
     "Workspace",
     "build_stack",

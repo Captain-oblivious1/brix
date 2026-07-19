@@ -12,9 +12,13 @@ compile still inherits the ambient value; brix just watches it), which is
 fingerprint-only, so it is safe on the warm-worker path too (a persistent worker
 can be *tracked* but not *set*).
 
-``PASS`` and ``UNSET`` (present, not-fingerprinted; and force-absent) arrive with
-the opt-in scrub mode — they only change behaviour once ``env`` is authoritative.
-They are not exported yet to avoid shipping a sentinel that is inert.
+``UNSET`` forces a variable **absent** from the process environment (even when
+the ambient environment would supply it), so a build can declare "I must not be
+affected by this variable". It is part of the action's identity, so flipping a
+variable between `UNSET` and any other intent re-stales the action.
+
+``PASS`` (present, not-fingerprinted) arrives with the opt-in scrub mode — it
+only changes behaviour once ``env`` is authoritative, so it is not exported yet.
 """
 
 from __future__ import annotations
@@ -35,3 +39,7 @@ class _EnvSentinel:
 # Take the variable from the ambient environment and fingerprint it (track, do
 # not pin). Compares by identity (``value is SYSTEM``).
 SYSTEM = _EnvSentinel("SYSTEM")
+
+# Force the variable absent from the process environment. Compares by identity
+# (``value is UNSET``).
+UNSET = _EnvSentinel("UNSET")

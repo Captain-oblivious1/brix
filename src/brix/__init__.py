@@ -28,7 +28,7 @@ from .process import ProcessResult
 from .report import ConsoleReporter, ErrorsAtEndReporter, Reporter
 from .status import ActionStatus, StatusReport, compute_status
 from .workers import WorkerSpec
-from .env import SYSTEM
+from .env import SYSTEM, UNSET
 from . import cli, cpp, identity, java, kotlin, rust, springboot, ts
 
 __all__ = [
@@ -60,6 +60,7 @@ __all__ = [
     "StatusReport",
     "SYSTEM",
     "TwoTierCacheStore",
+    "UNSET",
     "WorkerSpec",
     "Workspace",
     "build_stack",

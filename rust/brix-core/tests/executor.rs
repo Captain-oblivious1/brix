@@ -28,6 +28,7 @@ fn ok_action(name: &str) -> Action {
         inputs: vec![],
         outputs: vec![],
         env: vec![],
+        env_unset: vec![],
         depfile: None,
         worker: None,
     }
@@ -40,6 +41,7 @@ fn fail_action() -> Action {
         inputs: vec![],
         outputs: vec![],
         env: vec![],
+        env_unset: vec![],
         depfile: None,
         worker: None,
     }
@@ -494,6 +496,7 @@ fn render_error_is_a_failed_node_not_a_crash() {
             inputs: vec![],
             outputs: vec![],
             env: vec![],
+            env_unset: vec![],
             depfile: None,
             worker: None,
         },

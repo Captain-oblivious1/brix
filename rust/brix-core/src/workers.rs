@@ -296,6 +296,7 @@ impl WorkerPool {
             inputs: self.spec.inputs.clone(),
             outputs: Vec::new(),
             env: Vec::new(),
+            env_unset: Vec::new(),
             depfile: None,
             worker: None,
         };

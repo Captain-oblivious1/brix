@@ -91,6 +91,7 @@ class ExternalProcessAction(Expandable):
         outputs: dict[str, DataExpr] | None = None,
         env: dict[str, DataExpr | str] | None = None,
         env_used: tuple[str, ...] | list[str] | None = None,
+        env_unset: tuple[str, ...] | list[str] | None = None,
         worker: "WorkerSpec | None" = None,
         depfile: str | None = None,
         self_resolved_inputs: tuple[str, ...] = (),
@@ -118,14 +119,22 @@ class ExternalProcessAction(Expandable):
         # inherits the ambient value, brix just fingerprints it. Being
         # fingerprint-only, `SYSTEM` is also safe on the warm-worker path, where
         # `env=` setting is ignored. See `brix.env` and docs/environment-recording.md.
-        from .env import SYSTEM
+        from .env import SYSTEM, UNSET
 
         _env_items = env or {}
         _system_tracked = tuple(k for k, v in _env_items.items() if v is SYSTEM)
+        # `UNSET` forces a variable absent from the process environment. It is part
+        # of the action's identity (below), so flipping a var between UNSET and any
+        # other intent re-stales. Sorted for a deterministic, cross-engine order.
+        self.env_unset: tuple[str, ...] = tuple(
+            sorted(
+                {k for k, v in _env_items.items() if v is UNSET} | set(env_unset or ())
+            )
+        )
         self.env: dict[str, DataExpr] = {
             k: v if isinstance(v, DataExpr) else ValueData(v)
             for k, v in _env_items.items()
-            if v is not SYSTEM
+            if v is not SYSTEM and v is not UNSET
         }
         # `env_used` names ambient environment variables this action's output
         # depends on but does not *set* (unlike `env=`). They are snapshotted
@@ -194,6 +203,7 @@ class ExternalProcessAction(Expandable):
             outputs={k: _substitute_expr(v, bindings) for k, v in self.outputs.items()},
             env={k: _substitute_expr(v, bindings) for k, v in self.env.items()},
             env_used=self.env_used,
+            env_unset=self.env_unset,
             worker=self.worker,
             depfile=depfile,
             self_resolved_inputs=self.self_resolved_inputs,

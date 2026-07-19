@@ -20,8 +20,15 @@ and **rust** (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `CARGO_HOME`, `CARGO_NET_OFFLINE`
 link): its actions *are* in the goldens, so the fixtures were regenerated — the
 tracked vars are unset at generation, so every snapshot is `null` (deterministic,
 portable), and the cross-engine golden test confirms Rust reproduces the new
-fingerprints byte-for-byte. **Remaining:** `PASS`/`UNSET` and scrub — the new
-process-env mechanisms — *those* get the Fable review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+fingerprints byte-for-byte. **Increment 3 shipped (2026-07-19):** the **`UNSET`**
+sentinel (`env={"X": UNSET}` forces X absent from the process environment) — the
+first genuinely new mechanism, so it crosses the wire: a new `env_unset` field on
+the process action, applied by *both* process executors (`full_env.pop` /
+`cmd.env_remove`) and folded into *both* `action_key`s (identity, so flipping
+UNSET re-stales), with a new golden case (`env-vocab`) pinning the cross-engine
+parity. Both engines proven in `tests/test_env_system.py` (removal + identity).
+**Remaining:** `PASS` and scrub (authoritative env) — *those* complete the Fable
+review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion

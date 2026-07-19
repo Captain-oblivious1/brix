@@ -75,7 +75,10 @@ def _run_process_node(node: ExecutionNode, ctx: NodeContext, workers) -> Process
         env = render_env(action, ctx)
     except RenderError as exc:
         return ProcessResult(action_name=action.label, command="", stderr=f"brix: {exc}")
-    return run_process(action.label, command, cwd=ctx.workspace_root, env=env or None)
+    return run_process(
+        action.label, command, cwd=ctx.workspace_root,
+        env=env or None, env_unset=action.env_unset or None,
+    )
 
 
 def _stacked_runner(

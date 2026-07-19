@@ -13,9 +13,10 @@ import sys
 
 import pytest
 
-from brix import Graph, IncrementalBuilder, SYSTEM
+from brix import Graph, IncrementalBuilder, SYSTEM, UNSET
 from brix.actions import _ENV_USED_KEY, ExternalProcessAction
 from brix.data import FileData, ValueData
+from brix.incremental import action_key
 
 
 def _action(*, env=None, env_used=None):
@@ -64,6 +65,56 @@ def test_system_folds_in_with_explicit_env_used(monkeypatch):
     monkeypatch.setenv("B", "2")
     action = _action(env={"A": SYSTEM}, env_used=["B"])
     assert set(action.env_used) == {"A", "B"}   # order-preserving union, deduped
+
+
+# --- UNSET: force a variable absent -----------------------------------------
+
+def test_unset_collects_into_env_unset_not_env():
+    action = _action(env={"SECRET": UNSET, "PINNED": "v"})
+    assert action.env_unset == ("SECRET",)     # forced absent
+    assert set(action.env) == {"PINNED"}        # literal still set
+    assert "SECRET" not in action.env
+
+
+def test_unset_is_part_of_the_action_identity():
+    # Flipping a var between UNSET and any other intent must re-stale (change the
+    # action_key), since it changes what the process sees.
+    without = action_key(_action())
+    with_unset = action_key(_action(env={"X": UNSET}))
+    assert without != with_unset
+
+
+TOOL_PROBE = """\
+import os, sys
+from pathlib import Path
+Path("runs.log").open("a").write("ran\\n")
+Path(sys.argv[1]).write_text("[" + os.environ.get("BRIX_TEST_ENVVAR", "") + "]")
+"""
+
+
+def _probe_graph():
+    graph = Graph()
+    d = graph.data
+    graph.add(
+        ExternalProcessAction(
+            name="probe",
+            command_line="{python} {tool} {dst}",
+            inputs={"python": d.tool(sys.executable), "tool": d.file("tool.py")},
+            outputs={"dst": d.file("out.txt")},
+            env={"BRIX_TEST_ENVVAR": UNSET},
+        )
+    )
+    return graph
+
+
+@pytest.mark.parametrize("engine", ["rust", "py"])
+def test_unset_removes_an_ambient_variable_from_the_process(tmp_path, monkeypatch, engine):
+    monkeypatch.setenv("BRIX_ENGINE", engine)
+    monkeypatch.setenv("BRIX_TEST_ENVVAR", "leaked")  # set in the ambient env
+    (tmp_path / "tool.py").write_text(TOOL_PROBE)
+    assert IncrementalBuilder(_probe_graph, root=tmp_path).build().success
+    # UNSET removed it, so the tool saw it absent — not "leaked".
+    assert (tmp_path / "out.txt").read_text() == "[]"
 
 
 # --- behavioral: SYSTEM re-stales exactly like env_used, on both engines ----

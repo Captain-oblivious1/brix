@@ -40,6 +40,11 @@ pub enum Action {
         outputs: Vec<(String, DataExpr)>,
         #[serde(default, deserialize_with = "ordered_map")]
         env: Vec<(String, DataExpr)>,
+        /// Environment variable names forced absent from the process environment
+        /// (the `UNSET` sentinel). Part of `action_key` (identity), like env
+        /// shapes; never substituted (they are plain variable names).
+        #[serde(default)]
+        env_unset: Vec<String>,
         /// Workspace-relative path of a Makefile-format dependency file the
         /// tool writes (`cc -MMD -MF`); the incremental layer scans it after a
         /// successful run to learn undeclared inputs (C/C++ headers). Not
@@ -141,7 +146,7 @@ impl Action {
     /// Expand shape. Mirrors `ExpandAll.substitute`.
     pub fn substitute(&self, bindings: &[(String, String)]) -> Action {
         match self {
-            Action::Process { name, command_line, inputs, outputs, env, depfile, worker } => {
+            Action::Process { name, command_line, inputs, outputs, env, env_unset, depfile, worker } => {
                 // `name` and `depfile` substitute by plain `{key}` -> value
                 // string replacement (mirrors `ExternalProcessAction.substitute`).
                 let replace_keys = |s: &str| {
@@ -157,6 +162,7 @@ impl Action {
                     inputs: subst_pairs(inputs, bindings),
                     outputs: subst_pairs(outputs, bindings),
                     env: subst_pairs(env, bindings),
+                    env_unset: env_unset.clone(),
                     depfile: depfile.as_deref().map(replace_keys),
                     // The worker passes through untouched (a shared spec, not
                     // per-member data) — mirrors Python's `worker=self.worker`.

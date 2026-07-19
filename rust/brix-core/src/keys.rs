@@ -24,7 +24,7 @@ fn shapes(pairs: &[(String, DataExpr)]) -> Value {
 
 /// The stable key of a process action, or `None` for non-process actions.
 pub fn action_key(action: &Action) -> Option<String> {
-    let Action::Process { command_line, inputs, outputs, env, .. } = action else {
+    let Action::Process { command_line, inputs, outputs, env, env_unset, .. } = action else {
         return None;
     };
     let mut payload = BTreeMap::new();
@@ -33,6 +33,12 @@ pub fn action_key(action: &Action) -> Option<String> {
     payload.insert("outputs".to_string(), shapes(outputs));
     if !env.is_empty() {
         payload.insert("env".to_string(), shapes(env));
+    }
+    if !env_unset.is_empty() {
+        payload.insert(
+            "env_unset".to_string(),
+            Value::List(env_unset.iter().map(|n| Value::str(n)).collect()),
+        );
     }
     Some(digest(&Value::Map(payload)))
 }
