@@ -29,6 +29,13 @@ touches only the affected slice regardless of how many languages it spans. The
 `shared → app` edge is derived from `app` declaring `shared`'s built `.d.ts` as a
 dependency (the **ts-dts** lens) — no cross-package edge is hand-declared.
 
+`app` also depends on an **npm package** via `ts.npm(["pretty"])`: a vendored
+`frontend/node_modules/pretty` stands in for `npm install`, and its `.d.ts` is
+tracked through the ts-dts lens, so upgrading the dependency (changing its types)
+would re-stale `app` while a comment-only change replays. It composes with the
+in-repo `shared` dependency — brix does not run npm, it consumes what is
+installed.
+
 ## Run it
 
 ```

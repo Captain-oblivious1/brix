@@ -48,6 +48,17 @@ def test_cross_language_selection(workspace, changed, expected):
     assert _loaded(workspace, [changed]) == expected
 
 
+def test_app_tracks_its_npm_dependency(workspace):
+    # frontend/app declares an npm dep via ts.npm; its .d.ts is tracked through
+    # the ts-dts lens (not placed on the command line — tsc resolves it on disk).
+    from brix.ts import DtsFile
+
+    ws = load_workspace(workspace)
+    app = next(a for a in ws.graph.actions if a.name == "tsc -> build/frontend/app")
+    lensed = {a.path for a in app.inputs["types"].atoms() if isinstance(a, DtsFile)}
+    assert "frontend/node_modules/pretty/index.d.ts" in lensed
+
+
 def test_backend_and_frontend_never_cross(workspace):
     # No backend edit pulls in a frontend package, and no frontend edit pulls in
     # a backend package — stated directly, over every package.

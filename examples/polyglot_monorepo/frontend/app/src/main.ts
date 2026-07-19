@@ -1,3 +1,4 @@
 import { sharedValue } from "../../shared/src/index";
+import { pretty } from "pretty";
 
-console.log("app using " + sharedValue());
+console.log(pretty("app using " + sharedValue()));
