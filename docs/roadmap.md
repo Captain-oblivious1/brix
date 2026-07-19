@@ -275,8 +275,18 @@ These are self-contained and come with tests. No Fable needed.
   demonstrated in `examples/leveldb/brix.py`.
 - **Draw a picture of the build.** Boxes for steps, arrows for what depends on
   what, instead of a text list.
-- **Ready-made starter templates** for a Java service and a TypeScript service, so
-  people begin from something that already works.
+- **Ready-made starter templates — done (2026-07-18, Opus).**
+  `examples/templates/java-service/` (→ runnable jar via `java.JarAction`) and
+  `examples/templates/typescript-service/` (→ `dist/*.js` via `ts.CompileAction`):
+  minimal, generic, working projects meant to be *copied out*, each a `brix.py`
+  on the recommended `build_stack` with a `build`/`run`/`status` CLI and one
+  placeholder source. Each opens with a marked "delete in your copy" block (it
+  only lets the template run in-repo) plus the always-needed `sys.path` fix a
+  file named `brix.py` requires (the script's own dir would otherwise shadow the
+  installed `brix` package). `tests/test_templates.py` runs a tool-free
+  parse-and-plan check on both and a gated end-to-end build+run (Java verified
+  here; TS gated on `tsc`). Listed in `examples/README.md`. **Follow-up:** a C++
+  and a Kotlin template could join them.
 
 **Building trust** (also hardens the parity between the two engines):
 

@@ -25,6 +25,23 @@ proven (each one has found a real bug or missing feature).
 
 Run any of them directly, e.g. `python examples/hello_text/brix.py build`.
 
+## Starter templates (copy these to begin)
+
+Unlike the teaching examples (which *show* a feature), these are minimal,
+generic, working projects meant to be **copied out** as the start of your own —
+a `brix.py` wired with the recommended stack, a `build`/`run`/`status` CLI, and
+one placeholder source. Copy the directory, drop in your sources, adjust a
+couple of names in the `brix.py`, and build.
+
+| template | start here for |
+|---|---|
+| `templates/java-service/` | a Java service → runnable jar (`java.JarAction`); needs a JDK |
+| `templates/typescript-service/` | a TypeScript service → `dist/*.js` (`ts.CompileAction`); needs `tsc` |
+
+Each `brix.py` opens with a marked block to **delete in your copy** (it only
+lets the template run from inside this repo); your own project imports an
+installed `brix`.
+
 There are also two **benchmarks** (not build files): `scaling_benchmark.py`
 characterizes the engine's per-build overhead as graph size grows, and
 `lazy_loading_benchmark.py` quantifies the hierarchical lazy-loading win —

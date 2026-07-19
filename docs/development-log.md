@@ -1,5 +1,23 @@
 # Development log
 
+- **Starter templates — a copy-and-go Java service and TypeScript service.**
+  `examples/templates/java-service/` and `examples/templates/typescript-service/`:
+  minimal, generic, *working* projects to copy as the start of your own, not
+  feature demos. Each is a `brix.py` on the recommended `build_stack` (atomic +
+  cache + incremental for Java; cache + incremental for TS, since `tsc`
+  self-resolves imports off the real filesystem) with a `build`/`run`/`status`
+  CLI, a target alias, and one placeholder source — change a couple of names and
+  drop in your code. Two bootstrap subtleties are handled and documented: a
+  marked "delete in your copy" block that only lets the template import brix from
+  this repo in-tree, and — kept even in a user's copy — the `sys.path` fix that a
+  file named `brix.py` inherently needs, since running `python brix.py` puts the
+  script's own directory first and would otherwise shadow the installed `brix`
+  package. `tests/test_templates.py` copies each template out (so the repo stays
+  clean and the copied-out path is what runs), does a tool-free parse-and-plan
+  check on both, and a gated end-to-end build+`run` (Java verified here; TS gated
+  on `tsc`/`node`). Indexed in `examples/README.md`. Follow-up: C++ and Kotlin
+  templates.
+
 - **"Always re-check file contents" mode — the general stat-collision escape
   hatch.** The default detector trusts `(mtime, size)` to skip re-hashing, so a
   content change that leaves both unchanged is missed — the general form of the

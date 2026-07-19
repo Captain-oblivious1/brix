@@ -10,6 +10,9 @@ examples/incremental_demo/runs.log
 examples/incremental_demo/src/
 examples/typescript/*/dist/
 examples/typescript/node_modules/
+examples/templates/*/build/
+examples/templates/*/dist/
+examples/templates/*/node_modules/
 rust/target/
 src/brix/brix_py*.so
 src/brix/brix_py*.pyd
