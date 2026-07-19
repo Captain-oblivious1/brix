@@ -140,3 +140,18 @@ brix**, as nodes in your own graph (the `examples/leveldb` case: a third-party
 C++ library's 38 translation units compiled into `libleveldb.a`). This is where
 brix is *stronger* than adopting a prebuilt jar: an edit to the vendored
 dependency incrementally rebuilds only what it affects.
+
+## Languages that own their build tool (Rust, Go, …)
+
+Some languages ship a mature build tool that already does dependency resolution
+*and* incremental compilation — **cargo** for Rust, `go build` for Go. brix does
+not replace these; `brix.rust` (`rust.cargo`) wraps `cargo build` as one tracked
+action, so a crate is a node in the polyglot graph — result-cached, lazy-loaded,
+and wired to other languages by its built artifact (a `staticlib`/`cdylib` a
+C/C++/JNI consumer links, per `examples/rust_ffi`). cargo owns crates.io
+resolution and within-crate incremental; **Cargo.toml stays the single source of
+truth** (the adopt-the-manifest principle — you do not re-declare deps in
+brix.py). Two honest consequences: brix's skip granularity is crate-level (cargo
+does the finer work within), and a cargo action wants the plain incremental stack
+because cargo writes its own `target/`, which atomic staging can't redirect. See
+`src/brix/rust.py`.

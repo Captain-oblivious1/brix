@@ -42,6 +42,7 @@ EXPECTED = {
     "identity",
     "java",
     "kotlin",
+    "rust",
     "springboot",
     "ts",
 }
@@ -61,6 +62,7 @@ MODULE_EXPORTS = {
     "java": {"JarAction", "JUnitTestAction", "JavadocAction", "javac_worker",
              "abi", "AbiFile", "AbiGlob", "pom", "maven", "gradle"},
     "kotlin": {"JarAction", "kotlinc_worker", "abi", "KotlinAbiFile", "KotlinAbiGlob"},
+    "rust": {"CargoBuildAction", "cargo"},
     "ts": {"CompileAction", "TypedocAction", "npm", "dts", "DtsFile", "DtsGlob"},
     "springboot": {"SpringBootJar", "boot_repackager", "RepackagerSpec"},
     "cli": {"main", "Alias"},

@@ -1,5 +1,31 @@
 # Development log
 
+- **`brix.rust` — wrap cargo, and self-host (brix builds brix).** brix supported
+  C/C++/Java/Kotlin/TS but not Rust — the language its own engine is written in.
+  `brix.rust` closes that. It is deliberately a *different* model from the others:
+  Rust ships **cargo**, a mature build tool that already does crate/dependency
+  resolution and within-crate incremental compilation, so brix does not replace
+  it — `rust.cargo(manifest)` reads `Cargo.toml` (the adopt-the-manifest pattern,
+  like `java.pom`) and wraps `cargo build` as one tracked action, inferring the
+  output artifact from `[lib].crate-type` and a conservative source footprint
+  (every `.rs` in the workspace + manifests + lock). A crate becomes a node in a
+  polyglot graph — cached, lazy-loaded, wired to other languages by its artifact.
+  Two honest limits, both documented: skip granularity is **crate-level** (cargo
+  owns the finer work — brix can't see inside a `cargo build`), and a cargo action
+  wants the **plain incremental stack** because cargo writes its own `target/`,
+  which atomic staging can't redirect (the foreign-resolver rule, like tsc's
+  node_modules). It is also the **first wrapper to thread `env=`/`env_used=`**
+  through to the action (cargo is env-sensitive: `RUSTFLAGS`, offline registry),
+  setting the precedent the JVM/C++ wrappers can adopt. Proven two ways:
+  `examples/rust_ffi/` links a Rust C-ABI `staticlib` into a C program and shows
+  the derived **cargo → link** edge (editing the Rust source reruns cargo and
+  relinks the C app while the unchanged C compile replays); and
+  `examples/self_host/` **builds brix's own engine** (`rust/brix-py`, a cargo
+  workspace) — the self-hosting dogfood, verified to produce `libbrix_py.so`.
+  `tests/test_rust.py` (lowering, manifest inference incl. the self-host artifact,
+  a real crate build, and the gated FFI relink). `src/brix/rust.py`,
+  `docs/dependencies.md`.
+
 - **`ts.npm` — the node_modules dependency resolver for TypeScript.** Fills the
   one ecosystem the resolver adapters were missing (Java had `pom`/`maven`/`gradle`,
   C++ had `pkg_config`, TS had nothing). `ts.npm([names])` reads an installed

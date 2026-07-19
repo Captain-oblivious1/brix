@@ -115,7 +115,15 @@ and a TypeScript frontend (`shared`, `app`) load into one `load_workspace`;
 `verify_polyglot.py` proves lazy loading partitions across languages (a backend
 edit loads no frontend package and vice versa; the ts-dts `shared → app` edge
 still pulls in the dependent), building the Java slice for real. Guarded by
-`tests/test_polyglot_monorepo.py` on both engines.
+`tests/test_polyglot_monorepo.py` on both engines. Also newest (2026-07-19):
+**`brix.rust`** — brix now builds Rust by wrapping **cargo** (the Camp-2
+orchestrate-a-build-tool model: cargo owns crate resolution + within-crate
+incremental; brix makes a crate a graph node, cached/lazy-loaded/wired by its
+artifact). Proven by `examples/rust_ffi/` (Rust C-ABI staticlib → C, the derived
+cargo→link edge) and `examples/self_host/` (**brix builds its own engine**,
+`rust/brix-py`). First wrapper to thread `env=`/`env_used=`. `tests/test_rust.py`.
+**Follow-ups:** `brix.go` (same wrap-the-tool model) when a Go project appears;
+threading `env=`/`env_used=` into the JVM/C++ wrappers now that the pattern is set.
 
 Completed: **multi-module cross-suite test selection** — the Jackson dogfood
 now builds real 2.19.4 annotations, core, and databind jars plus one smoke suite
