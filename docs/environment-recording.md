@@ -5,7 +5,9 @@ capture + `brix.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
 and phase 2 the `env_used=` guard (`src/brix/actions.py`,
 `tests/test_env_used.py`, golden-pinned cross-engine); phase 3 (automatic
 `getenv` discovery) **struck as unsound (2026-07-18)** and replaced by an
-isolation direction — scrub-to-allowlist — reasoned below. **Phase 2
+isolation direction — scrub-to-allowlist — now **fully spec'd (2026-07-19)**:
+the four-way `env` vocabulary + per-language default maps (see the phase-3 spec
+section below), ready to build (Fable-reviewed at implementation). **Phase 2
 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
@@ -157,6 +159,104 @@ Phase 1 alone is the piece that de-risks the air-gapped monorepo trial: when a
 build there behaves differently and the operator is debugging **without AI**,
 "these N variables differ from the last recorded good build" is the diagnostic
 that turns a blind hunt into a quick answer.
+
+## Phase-3 spec: the env vocabulary and per-language default maps (2026-07-19)
+
+This refines the "Settled API shape" above into the buildable design. It closes
+the **silent latent-env** hole — a variable set in the ambient environment (a
+shell profile, a Nix shell, a CI system) that a tool reads but the build file
+never declared, so it changes output invisibly (the classic
+`JAVA_TOOL_OPTIONS="-Dfile.encoding=…"` that silently re-encodes every `javac`).
+
+### The four-way vocabulary
+
+The `env` dict value carries the intent. Three sentinels were settled on
+2026-07-18; a fourth (`PASS`) is required, for the reason below:
+
+| `env[name]` | in the process? | fingerprinted? | for |
+|---|---|---|---|
+| `"literal"` | yes, pinned to the literal | yes | a reproducible pin (`LANG="C"`, `SOURCE_DATE_EPOCH="0"`) |
+| `SYSTEM` | yes, the ambient value | **yes** | behaviour-affecting vars — inherit the machine's value but re-stale if it changes |
+| `PASS` | yes, the ambient value | **no** | plumbing — needed to run, but must not enter the fingerprint |
+| `UNSET` | no (forced absent) | — | forbid a variable for this action |
+
+`PASS` is not redundant with `SYSTEM`, and conflating them breaks a shipped
+feature. `PATH`, `HOME`, `TMPDIR` are needed for the tool to *run* (find `ld`/`as`,
+locate `~/.cargo`/`~/.m2`), but their values are **noisy and machine-specific** —
+`PATH` differs on every machine and reorders between shells. If they were
+`SYSTEM` (fingerprinted), the *same logical build* would get a different
+fingerprint on the dev laptop and the CI server, and the **shared result cache
+would never hit across machines** — killing one of brix's headline features.
+(`PATH`'s real risk — *which* compiler resolves — is already covered: `ToolData`
+hashes the resolved tool binary.) So plumbing is `PASS` (present, unfingerprinted)
+and behaviour vars are `SYSTEM` (present, fingerprinted).
+
+### Base map + per-language overlay
+
+The knowledge of *which variables matter to a toolchain* lives in the language
+module, not the user's head. So each `brix.<language>` ships a **default `env`
+map**, and an action's effective map is a shared **base** (universal plumbing)
+merged with the module's **overlay** (its behaviour vars), with any user entries
+layered on top (last wins):
+
+- **Base (all actions):** `PATH`, `HOME`, `TMPDIR` → `PASS`; `LANG`/`LC_ALL` →
+  `SYSTEM` (locale affects text decoding, so it is behaviour, not plumbing).
+- **`brix.java` overlay:** `JAVA_HOME`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`,
+  `CLASSPATH` → `SYSTEM`. (`JAVA_TOOL_OPTIONS`/`_JAVA_OPTIONS` are applied to
+  *every* JVM launch, so they silently reach `javac`; this is the one that most
+  needs catching.)
+- **`brix.cpp` overlay:** `CPATH`, `C_INCLUDE_PATH`, `CPLUS_INCLUDE_PATH`,
+  `LIBRARY_PATH`, `SOURCE_DATE_EPOCH` → `SYSTEM`.
+- **`brix.rust` overlay:** `CARGO_HOME`, `RUSTFLAGS`, `RUSTUP_TOOLCHAIN`,
+  `CARGO_NET_OFFLINE` → `SYSTEM`. (`brix.rust` already threads `env=`/`env_used=`
+  through; it becomes the reference for the others.)
+- **`brix.kotlin`/`brix.springboot`** inherit the JVM overlay.
+
+The user overrides any entry: `SYSTEM → "literal"` to pin for reproducibility,
+`→ UNSET` to forbid ("this build must not be affected by `JAVA_TOOL_OPTIONS`"),
+`→ PASS` to stop fingerprinting a var that turns out to be noisy in their setup.
+
+### The payoff lands even without scrub
+
+Crucially, defaulting the behaviour vars to `SYSTEM` **closes the silent-drift
+hole with scrub *off*** — i.e. today's default, additive environment. With those
+vars tracked, editing `JAVA_TOOL_OPTIONS` now re-stales the Java build
+automatically, no user action, because the language module named the trap. And
+it costs nothing in the common case: a `SYSTEM` var that is *unset* records as
+absent (stable — no churn); only a var that is *set and changes* triggers a
+rebuild, which is correct. **Scrub** (making `env` authoritative — the process
+gets *only* the effective map, nothing else) is the second, opt-in step that adds
+the *guarantee* of no undeclared var; the per-language maps are what make it
+painless, since they are the allowlist.
+
+### The worker set-vs-track asymmetry
+
+A warm `javac`/`kotlinc` worker is a persistent process launched once with its
+environment fixed at launch. Per-action `env=` **setting** (`literal`) cannot
+reach it — the process already exists — so a worker-routed compile can only
+**track** (`SYSTEM`/`PASS`, which are fingerprint-only and need not reach the
+process), not **set** or **scrub**. So: `literal`/`UNSET`/scrub apply to the
+spawn path; `SYSTEM`/`PASS` tracking applies to both. An action that both routes
+through a worker and pins a variable must fail loudly at construction rather than
+silently ignore the pin (the guard-bypass class the phase-2 review cared about).
+
+### Boundary, fingerprints, and completeness
+
+- **Fingerprint path / Fable.** `SYSTEM`/`PASS`/`literal` produce fingerprint
+  material (the resolved snapshot, via the phase-2 `env_used` mechanism the Fable
+  review already blessed); scrub changes *which* environment the process runs
+  under. Both cross the fingerprint path and both engines must agree
+  byte-for-byte, so the built implementation gets a **Fable review** — gated on
+  the code existing, not on any external event.
+- **Cross-engine.** Snapshots resolve on the Python side into one fingerprint-only
+  `ValueData` (the `classpath_track`/`env_used` pattern), so only resolved values
+  cross the boundary and the Rust core needs no env logic; a golden pins parity.
+  Scrub is applied where the process is spawned (`src/brix/process.py` and the
+  Rust executor), authoritative-replace instead of `{**os.environ, **env}`.
+- **Incompleteness is safe.** The per-language lists are best-effort and will lag
+  new tool versions. That is never a correctness dependency: with scrub off a
+  missing var behaves exactly as today (leaks, untracked); with scrub on a missing
+  *needed* var fails **loudly** (add it), never silently wrong.
 
 ## Where this sits in the state-vs-semantics rule
 

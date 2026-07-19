@@ -240,14 +240,19 @@ These are self-contained and come with tests. No Fable needed.
   tracked-file change). The sound replacement is **isolation, not detection**:
   scrub each action's environment to an explicit **allowlist**, so undeclared
   variables are simply absent and the failure mode flips from silent-wrong to
-  loud-and-fixable. **Settled API shape (2026-07-18):** collapse `env=` (set) and
-  `env_used=` (track) into a single `env` dict whose value carries the intent via
-  sentinels — a literal *sets*, `SYSTEM` *takes it from the ambient environment*
-  and fingerprints it, `UNSET` *withholds* it from that action — which deletes
-  the `env_used` concept (and its awkward name) rather than renaming it. Portable
-  (pure env manipulation, no `ptrace`), opt-in, post-trial. The implementation
-  crosses the fingerprint path, so it is **reserved for a Fable review when
-  built** (same gate phase 2 passed). See `docs/environment-recording.md`.
+  loud-and-fixable. **Fully spec'd (2026-07-19), ready to build.** A single `env`
+  dict (collapsing `env=`/`env_used=`) whose value carries the intent via a
+  **four-way vocabulary**: a literal *pins* (fingerprinted), `SYSTEM` *inherits +
+  fingerprints* (behaviour vars), `PASS` *inherits without fingerprinting*
+  (plumbing like `PATH`/`HOME`, which must not be fingerprinted or cross-machine
+  caching breaks), `UNSET` *withholds*. Each `brix.<language>` ships a **default
+  env map** (a plumbing base + a per-language overlay of behaviour vars —
+  `JAVA_TOOL_OPTIONS`, `CPATH`, `RUSTFLAGS`, …), so the module names the latent
+  traps for the user; the payoff (auto-tracking closes silent drift) lands even
+  with scrub *off*, and scrub is the opt-in guarantee on top. Handles the warm-
+  worker set-vs-track asymmetry. Crosses the fingerprint path, so the built
+  implementation gets a **Fable review** — gated on the code, not the trial. Full
+  design in `docs/environment-recording.md` (phase-3 spec section).
 
 **Making Kotlin builds fast:**
 
