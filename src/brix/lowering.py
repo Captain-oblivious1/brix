@@ -63,6 +63,13 @@ def action_to_spec(action: Action) -> dict:
             d["env"] = {k: expr_to_spec(v) for k, v in action.env.items()}
         if action.env_unset:
             d["env_unset"] = list(action.env_unset)
+        # Names the scrub-mode executor lets through the authoritative environment
+        # (resolved from its own ambient env). Not fingerprint material — env_used
+        # is fingerprinted via its snapshot input; env_pass is deliberately not.
+        if action.env_pass:
+            d["env_pass"] = list(action.env_pass)
+        if action.env_used:
+            d["env_used"] = list(action.env_used)
         if action.depfile is not None:
             d["depfile"] = action.depfile
         if action.worker is not None:

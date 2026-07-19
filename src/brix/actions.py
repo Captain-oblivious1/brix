@@ -92,6 +92,7 @@ class ExternalProcessAction(Expandable):
         env: dict[str, DataExpr | str] | None = None,
         env_used: tuple[str, ...] | list[str] | None = None,
         env_unset: tuple[str, ...] | list[str] | None = None,
+        env_pass: tuple[str, ...] | list[str] | None = None,
         worker: "WorkerSpec | None" = None,
         depfile: str | None = None,
         self_resolved_inputs: tuple[str, ...] = (),
@@ -119,7 +120,7 @@ class ExternalProcessAction(Expandable):
         # inherits the ambient value, brix just fingerprints it. Being
         # fingerprint-only, `SYSTEM` is also safe on the warm-worker path, where
         # `env=` setting is ignored. See `brix.env` and docs/environment-recording.md.
-        from .env import SYSTEM, UNSET
+        from .env import PASS, SYSTEM, UNSET
 
         _env_items = env or {}
         _system_tracked = tuple(k for k, v in _env_items.items() if v is SYSTEM)
@@ -131,10 +132,18 @@ class ExternalProcessAction(Expandable):
                 {k for k, v in _env_items.items() if v is UNSET} | set(env_unset or ())
             )
         )
+        # `PASS` lets a variable through under scrub without fingerprinting it
+        # (plumbing whose value must not enter the cache key). Not identity — its
+        # value is not part of the fingerprint — so it stays out of action_key.
+        self.env_pass: tuple[str, ...] = tuple(
+            sorted(
+                {k for k, v in _env_items.items() if v is PASS} | set(env_pass or ())
+            )
+        )
         self.env: dict[str, DataExpr] = {
             k: v if isinstance(v, DataExpr) else ValueData(v)
             for k, v in _env_items.items()
-            if v is not SYSTEM and v is not UNSET
+            if v is not SYSTEM and v is not UNSET and v is not PASS
         }
         # `env_used` names ambient environment variables this action's output
         # depends on but does not *set* (unlike `env=`). They are snapshotted
@@ -204,6 +213,7 @@ class ExternalProcessAction(Expandable):
             env={k: _substitute_expr(v, bindings) for k, v in self.env.items()},
             env_used=self.env_used,
             env_unset=self.env_unset,
+            env_pass=self.env_pass,
             worker=self.worker,
             depfile=depfile,
             self_resolved_inputs=self.self_resolved_inputs,

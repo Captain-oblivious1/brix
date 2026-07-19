@@ -44,7 +44,7 @@
     "fingerprint": "65326fb24d8401ee8e16757247093575ebc26d1e9d10925986b360c99b94bf77"
   },
   {
-    "spec": "{\"kind\": \"process\", \"command_line\": \"cc {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}], \"_brix_env_used\": [{\"kind\": \"value\", \"text\": \"{\\\"BRIX_GOLDEN_ENV\\\": \\\"golden-value\\\"}\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"env_used tracked variable\"}",
+    "spec": "{\"kind\": \"process\", \"command_line\": \"cc {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}], \"_brix_env_used\": [{\"kind\": \"value\", \"text\": \"{\\\"BRIX_GOLDEN_ENV\\\": \\\"golden-value\\\"}\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"env_used tracked variable\", \"env_used\": [\"BRIX_GOLDEN_ENV\"]}",
     "fingerprint": "58ec081e05b9b50587d938f47da5ac0d236b50204a35bfa70d7d94708b6d58d2"
   }
 ]

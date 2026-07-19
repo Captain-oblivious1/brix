@@ -14,6 +14,7 @@ import sys
 import pytest
 
 from brix import Graph, IncrementalBuilder, SYSTEM, UNSET
+from brix.env import PASS
 from brix.actions import _ENV_USED_KEY, ExternalProcessAction
 from brix.data import FileData, ValueData
 from brix.incremental import action_key
@@ -115,6 +116,18 @@ def test_unset_removes_an_ambient_variable_from_the_process(tmp_path, monkeypatc
     assert IncrementalBuilder(_probe_graph, root=tmp_path).build().success
     # UNSET removed it, so the tool saw it absent — not "leaked".
     assert (tmp_path / "out.txt").read_text() == "[]"
+
+
+# --- PASS: present under scrub, never fingerprinted --------------------------
+
+def test_pass_collects_into_env_pass_and_is_not_fingerprinted():
+    action = _action(env={"PATH": PASS, "TRACKED": SYSTEM})
+    assert action.env_pass == ("PATH",)     # let through under scrub
+    assert "PATH" not in action.env         # not a literal set
+    assert "PATH" not in action.env_used    # not tracked
+    # PASS is deliberately absent from the action identity (its value must not
+    # enter the cache key — that would break cross-machine caching).
+    assert action_key(_action(env={"PATH": PASS})) == action_key(_action())
 
 
 # --- behavioral: SYSTEM re-stales exactly like env_used, on both engines ----

@@ -27,8 +27,18 @@ the process action, applied by *both* process executors (`full_env.pop` /
 `cmd.env_remove`) and folded into *both* `action_key`s (identity, so flipping
 UNSET re-stales), with a new golden case (`env-vocab`) pinning the cross-engine
 parity. Both engines proven in `tests/test_env_system.py` (removal + identity).
-**Remaining:** `PASS` and scrub (authoritative env) — *those* complete the Fable
-review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+**Increment 4 (foundation) shipped (2026-07-19):** the **`PASS`** sentinel and the
+build-wide `BASE_ENV` (plumbing: `PATH`/`HOME`/`TMPDIR` as `PASS`). `PASS` lets a
+variable through *without* fingerprinting it — deliberately absent from
+`action_key` (proven), since fingerprinting `PATH` would break cross-machine
+caching. The scrub-allowlist names (`env_pass`, `env_used`) now cross the wire for
+the executor to consume; Rust tolerates them (golden regenerated, values
+unchanged). **Remaining — the one piece left:** the **scrub runtime** itself
+(authoritative env: a build-wide `scrub` flag threaded to both process executors,
+which then build the environment from `BASE_ENV` + the declared allowlist instead
+of inheriting everything). That is the largest single sub-piece — it touches build
+orchestration on both engines — and it completes the phase, at which point the
+whole phase-3 diff gets the **Fable review**. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion

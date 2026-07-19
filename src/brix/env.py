@@ -17,8 +17,15 @@ the ambient environment would supply it), so a build can declare "I must not be
 affected by this variable". It is part of the action's identity, so flipping a
 variable between `UNSET` and any other intent re-stales the action.
 
-``PASS`` (present, not-fingerprinted) arrives with the opt-in scrub mode — it
-only changes behaviour once ``env`` is authoritative, so it is not exported yet.
+``PASS`` lets a variable **through** the environment *without* fingerprinting it —
+for plumbing a tool needs to run (``PATH``, ``HOME``) whose value is noisy and
+machine-specific, so tracking it would break cross-machine caching. Under **scrub**
+(the opt-in authoritative-env mode) it is what keeps such a variable present; with
+scrub off it is a no-op (the variable is inherited anyway, untracked).
+
+The build-wide **base map** (`brix.env.BASE_ENV`) supplies the universal plumbing
+as ``PASS`` so a scrubbed build still runs; each language module adds its
+behaviour vars as ``SYSTEM`` on top (docs/environment-recording.md).
 """
 
 from __future__ import annotations
@@ -43,3 +50,16 @@ SYSTEM = _EnvSentinel("SYSTEM")
 # Force the variable absent from the process environment. Compares by identity
 # (``value is UNSET``).
 UNSET = _EnvSentinel("UNSET")
+
+# Let the variable through (present, from the ambient value) but do NOT
+# fingerprint it — for plumbing whose value must not enter the cache key.
+PASS = _EnvSentinel("PASS")
+
+# Universal plumbing every action needs to run; supplied as PASS so a scrubbed
+# build still finds its tools/caches without those noisy values busting the
+# fingerprint. Applied under scrub; a no-op with scrub off (already inherited).
+BASE_ENV = {
+    "PATH": PASS,
+    "HOME": PASS,
+    "TMPDIR": PASS,
+}
