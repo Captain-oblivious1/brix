@@ -290,8 +290,20 @@ These are self-contained and come with tests. No Fable needed.
   change. `tests/test_delete_cleanup.py` (both engines, unstaged fix + retry +
   atomic regression + the nested case the code's own docstring had called
   "unrecoverable").
-- **Double-check symbolic links** — that a symlinked source file, or one whose
-  target changes, is noticed.
+- **Double-check symbolic links — done (2026-07-18, Opus).** A symlinked source
+  was already stat'd *through* to its target, so a target **content** change
+  (mtime/size move) was caught. The hole was a symlink **repointed** to a
+  different file sharing the old target's `(mtime, size)` — a release-style
+  `current -> vN` swap with mtimes preserved by `tar`/`rsync -a` — which collided
+  and served the old target's cached hash (reproduced). Fix: fold the link target
+  into the stat signature (`_symlink_target_sig`: first 8 bytes of sha256 of the
+  readlink target, appended only when `is_symlink()`), so a repoint busts the
+  cache. **Symlink-only**, so no regular-file signature or existing hash cache
+  changes; **pure performance layer** (validates the stat cache, never a
+  fingerprint, like the git detector), so no Fable gate. Mirrored in the Rust
+  detector (`rust/brix-core/src/detector.rs`) under the byte-identical rule;
+  `tests/test_symlink_detection.py` (repoint-with-colliding-stat rebuild,
+  target-content-change rebuild, stable-target replay) runs on both engines.
 
 **Extending brix:**
 

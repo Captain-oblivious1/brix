@@ -78,14 +78,27 @@ impl TimeAndHashChangeDetector {
     /// tool-atom identity and the hash cache's validation, where a
     /// disagreement can miss but never make a stale hit.
     pub fn stat_signature(&self, path: &Path) -> Option<Vec<i64>> {
-        let md = std::fs::metadata(path).ok()?;
+        let md = std::fs::metadata(path).ok()?; // follows a symlink: target's mtime/size
         let mtime_ns = md
             .modified()
             .ok()?
             .duration_since(std::time::UNIX_EPOCH)
             .ok()?
             .as_nanos() as i64;
-        Some(vec![mtime_ns, md.len() as i64])
+        let mut sig = vec![mtime_ns, md.len() as i64];
+        // Symlink repoint guard — mirrors `_symlink_target_sig` in
+        // `src/brix/metadata.py`. A symlink is stat'd through to its target, so a
+        // target content change moves mtime/size; but repointing the link to a
+        // different file with the same (mtime, size) would collide and serve the
+        // old target's cached hash. Fold the link target into the signature.
+        // Symlink-only, so regular-file signatures (and caches) are unchanged.
+        if std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            sig.push(symlink_target_sig(path));
+        }
+        Some(sig)
     }
 
     /// sha256 hex of the file's bytes; `None` for a missing path or a
@@ -155,6 +168,23 @@ impl TimeAndHashChangeDetector {
         }
         self.compute_content_key(name, path).map(Some)
     }
+}
+
+/// A stable 64-bit int from a symlink's target path — the first 8 bytes of
+/// sha256(target), big-endian signed. Mirrors `_symlink_target_sig` in
+/// `src/brix/metadata.py` so a shared metadata cache agrees across engines. The
+/// target is hashed as its lossy UTF-8 bytes; a non-UTF-8 target (vanishingly
+/// rare) may diverge from Python's surrogateescape bytes, which only forces a
+/// safe re-hash, never a stale hit. An unreadable link contributes 0.
+fn symlink_target_sig(path: &Path) -> i64 {
+    let target = match std::fs::read_link(path) {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(target.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    i64::from_be_bytes(digest[..8].try_into().unwrap())
 }
 
 fn hash_bytes(path: &Path) -> Option<String> {

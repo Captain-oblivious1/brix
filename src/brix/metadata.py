@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -194,6 +195,23 @@ class BuildMetadata:
             self._data["memberships"][key] = sorted(members)
 
 
+def _symlink_target_sig(path: Path) -> int:
+    """A stable 64-bit int derived from a symlink's target path, appended to the
+    stat signature so repointing the link busts the hash cache even when the new
+    target shares the old one's (mtime, size). Computed identically in the Rust
+    core (first 8 bytes of sha256 of the target, big-endian signed) so a shared
+    metadata cache agrees across engines; a non-UTF-8 target — vanishingly rare —
+    may hash differently across engines, which only forces a safe re-hash, never
+    a stale hit. A broken/unreadable link contributes 0 (its stat already made
+    the signature None, so this path is only reached for a resolvable link)."""
+    try:
+        target = os.readlink(path)
+    except OSError:
+        return 0
+    digest = hashlib.sha256(target.encode("utf-8", "surrogateescape")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
 class TimeAndHashChangeDetector:
     """Content hashing with a cheap scan: hash only when mtime/size changed.
 
@@ -208,10 +226,20 @@ class TimeAndHashChangeDetector:
 
     def stat_signature(self, path: Path) -> list[int] | None:
         try:
-            st = path.stat()
+            st = path.stat()  # follows a symlink: target's mtime/size
         except OSError:
             return None
-        return [st.st_mtime_ns, st.st_size]
+        sig = [st.st_mtime_ns, st.st_size]
+        # A symlink is stat'd through to its target, so a target *content* change
+        # moves mtime/size and is caught. But a symlink repointed to a *different*
+        # file with the same (mtime, size) — a release-style `current -> vN` swap,
+        # mtimes preserved by `tar`/`rsync -a` — collides and would serve the old
+        # target's cached hash. Fold the link target into the signature so a
+        # repoint busts the cache. Symlink-only: regular files are unaffected, so
+        # no existing hash cache is invalidated. Mirrored in the Rust detector.
+        if path.is_symlink():
+            sig.append(_symlink_target_sig(path))
+        return sig
 
     def hash_file(self, path: Path) -> str | None:
         """sha256 of the file's content; None if missing or not a regular

@@ -1,5 +1,26 @@
 # Development log
 
+- **Symlink repoint detection — close a stale-build hole in the stat cache.** A
+  symlinked source was already stat'd *through* to its target, so a target
+  content change moved its (mtime, size) and rebuilt normally. The subtle hole:
+  a symlink **repointed** to a *different* file sharing the old target's
+  (mtime, size) — the release-style `current -> vN` swap, with mtimes preserved
+  by `tar`/`rsync -a`, which turns an astronomically-rare stat collision into a
+  plausible one — collided and served the old target's cached hash (a stale
+  output; reproduced before fixing). Fix: `TimeAndHashChangeDetector.stat_signature`
+  now folds the link target into the signature (`_symlink_target_sig`: the first
+  8 bytes of sha256 of the `readlink` target, appended *only* when
+  `path.is_symlink()`), so repointing busts the hash cache even under a stat
+  collision. It is **symlink-only** — a regular file's signature and its cached
+  hash are untouched, so nothing re-hashes spuriously — and a **pure performance
+  layer**: it validates the stat cache and never enters a fingerprint (like the
+  git detector), so it needs no Fable review. Mirrored natively in the Rust
+  detector under the byte-identical rule (both compute the same target int; a
+  non-UTF-8 target may diverge across engines, which only forces a safe re-hash,
+  never a stale hit). `tests/test_symlink_detection.py` — repoint-with-colliding-
+  stat rebuilds, target-content-change rebuilds, stable-target replays — runs on
+  both engines. `src/brix/metadata.py`, `rust/brix-core/src/detector.rs`.
+
 - **Doc-generation actions for the *user's* project (javadoc/typedoc/doxygen).**
   Three typed actions that run an ecosystem's own API-doc generator over a
   project's sources as an ordinary, tracked, incremental build step:
