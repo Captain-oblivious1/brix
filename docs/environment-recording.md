@@ -15,11 +15,13 @@ needs **no fingerprint-path change** (Opus, not Fable), proven equivalent in
 default overlays for **java** (`JAVA_HOME`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`)
 and **rust** (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `CARGO_HOME`, `CARGO_NET_OFFLINE`)
 — tracked by `SYSTEM`, so silent drift closes automatically; user `env=` wins
-(`tests/test_env_defaults.py`, both engines). These modules are not referenced by
-the goldens, so no regeneration was needed. **Remaining:** the **cpp** overlay
-(its actions *are* in the goldens, so it needs a golden regeneration — the tracked
-vars are unset there, so the regen is clean/portable), plus `PASS`/`UNSET` and
-scrub — *those* get the Fable review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+(`tests/test_env_defaults.py`, both engines). The **cpp** overlay followed (`CPATH`, `C_INCLUDE_PATH`,
+`CPLUS_INCLUDE_PATH`, `LIBRARY_PATH`, `SOURCE_DATE_EPOCH` → `SYSTEM` on compile and
+link): its actions *are* in the goldens, so the fixtures were regenerated — the
+tracked vars are unset at generation, so every snapshot is `null` (deterministic,
+portable), and the cross-engine golden test confirms Rust reproduces the new
+fingerprints byte-for-byte. **Remaining:** `PASS`/`UNSET` and scrub — the new
+process-env mechanisms — *those* get the Fable review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion

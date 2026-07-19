@@ -26,6 +26,21 @@ import subprocess
 from .actions import Action, ExpandAll, ExternalProcessAction
 from .data import DataExpr, FileData, GlobData, ToolData, ValueData
 from .deps import DepSet
+from .env import SYSTEM
+
+# Behaviour-affecting C/C++ toolchain environment, tracked (SYSTEM) so a change
+# re-stales the compile/link — the phase-3 per-language default overlay
+# (docs/environment-recording.md). CPATH/*_INCLUDE_PATH add include search dirs,
+# LIBRARY_PATH adds link search dirs, and SOURCE_DATE_EPOCH is embedded for
+# reproducibility — each can change output invisibly. (LANG/locale is deferred to
+# the base-map increment; it is usually set and would make fingerprints noisy.)
+_TOOLCHAIN_ENV = {
+    "CPATH": SYSTEM,
+    "C_INCLUDE_PATH": SYSTEM,
+    "CPLUS_INCLUDE_PATH": SYSTEM,
+    "LIBRARY_PATH": SYSTEM,
+    "SOURCE_DATE_EPOCH": SYSTEM,
+}
 
 
 # Public API surface (curated for documentation and as a contract).
@@ -146,6 +161,7 @@ class CompileSourceAction(Action):
                         "depfile": FileData(depfile),
                     },
                     depfile=depfile,
+                    env=_TOOLCHAIN_ENV,
                 ),
             )
         ]
@@ -191,6 +207,7 @@ class LinkApplicationAction(Action):
                     "dep_lflags": ValueData(dep_lflags),
                 },
                 outputs={"output": self.output_file},
+                env=_TOOLCHAIN_ENV,
             )
         ]
 

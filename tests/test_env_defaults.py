@@ -15,7 +15,7 @@ import shutil
 
 import pytest
 
-from brix import Graph, IncrementalBuilder, java, rust
+from brix import Graph, IncrementalBuilder, cpp, java, rust
 from brix.actions import _ENV_USED_KEY
 
 data = Graph().data
@@ -38,6 +38,22 @@ def test_jaraction_tracks_jvm_behaviour_vars():
     )
     tracked = _env_used_of(action, "javac")
     assert {"JAVA_HOME", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS"} <= tracked
+
+
+def test_cpp_compile_and_link_track_toolchain_vars():
+    compile_action = cpp.CompileSourceAction(
+        source_files=data.glob("src/{name}.cpp"),
+        object_files=data.glob("build/obj/{name}.o"),
+    )
+    tracked = _env_used_of(compile_action, "compile")
+    assert {"CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH",
+            "LIBRARY_PATH", "SOURCE_DATE_EPOCH"} <= tracked
+
+    link_action = cpp.LinkApplicationAction(
+        object_files=data.glob("build/obj/{name}.o"),
+        output_file=data.file("build/app"),
+    )
+    assert {"CPATH", "LIBRARY_PATH", "SOURCE_DATE_EPOCH"} <= _env_used_of(link_action, "link")
 
 
 def test_cargo_tracks_rustc_behaviour_vars():
