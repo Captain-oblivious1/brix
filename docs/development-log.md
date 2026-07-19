@@ -1,5 +1,24 @@
 # Development log
 
+- **`ts.npm` — the node_modules dependency resolver for TypeScript.** Fills the
+  one ecosystem the resolver adapters were missing (Java had `pom`/`maven`/`gradle`,
+  C++ had `pkg_config`, TS had nothing). `ts.npm([names])` reads an installed
+  `node_modules` and collects each package's `.d.ts` type declarations — its own
+  type tree plus `@types/<name>` for DefinitelyTyped packages, with scoped names
+  (`@scope/pkg`) mapped to DefinitelyTyped's mangled `scope__pkg` and nested
+  `node_modules` skipped — into a `DepSet`. `ts.CompileAction(deps=…)` folds them
+  into the dependency list, **ts-dts-lensed**, so a dependency upgrade whose
+  types changed re-stales the compile while a comment-only `.d.ts` change
+  replays. The design mirrors C headers and TS imports: **tsc resolves
+  `node_modules` off the real filesystem itself**, so the `.d.ts` are *tracked
+  inputs*, not command arguments — which also means no new fingerprint material
+  and no new lens, so it is Opus work, not a Fable review (the `java.pom` /
+  `cpp.pkg_config` adapter pattern, applied to npm). brix does not run npm; you
+  `npm install` and the adapter consumes the result, raising actionably on a
+  package with no discoverable types. `tests/test_ts_npm.py` lays out a fake
+  `node_modules` (own-types, `@types`, scoped, nested) and checks resolution and
+  the ts-dts tracking with no tsc needed. `src/brix/ts.py`, `docs/dependencies.md`.
+
 - **Polyglot Java+TS monorepo dogfood — cross-language lazy loading.** The
   single-language dogfoods (`hierarchical/` for the generic tool, `monorepo_dogfood.py`
   for C) never exercised the trial's actual shape: a mixed Java+TS workspace.

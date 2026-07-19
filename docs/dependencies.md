@@ -51,6 +51,7 @@ is the *greenfield / single-file* path.
 
 - `java.maven([coords])` — resolve `"group:artifact:version"` via Maven (implemented)
 - `cpp.pkg_config([names])` — query installed system libraries (implemented)
+- `ts.npm([names])` — collect installed `node_modules` packages' type declarations (implemented)
 - `java.coursier([coords])` (planned)
 - `cpp.conan([refs])` / `cpp.vcpkg([ports])` (planned)
 
@@ -62,6 +63,18 @@ unit; `LinkApplicationAction(deps=...)` adds the link flags *after* the objects
 flags, not file paths, so they are not fingerprinted — a system-lib upgrade is
 outside the project (a Conan/vcpkg adapter yielding concrete `.a`/`.so` paths
 would populate `artifacts`, which the link step does track).
+
+`ts.npm([names])` returns a `DepSet` whose `artifacts` are the resolved
+packages' `.d.ts` type declarations under `node_modules` (each package's own
+type tree plus `@types/<name>` for DefinitelyTyped packages; scoped names map to
+DefinitelyTyped's mangled `scope__pkg`). It follows the same principle as C
+headers and TS imports: **`tsc` resolves the `import`s off the real filesystem
+itself**, so the `.d.ts` are *tracked inputs*, not command arguments —
+`CompileAction(deps=...)` folds them into the dependency list, ts-dts-lensed, so
+a dependency upgrade whose types changed re-stales the compile while a
+comment-only `.d.ts` change replays. brix does not run npm; you `npm install`
+and the adapter consumes the result. A named package with no discoverable
+`.d.ts` raises (installed? ships types, or needs `@types/<name>`?).
 
 Naming the engine on the coordinate case is deliberate, not cosmetic: **Maven and
 Gradle apply different transitive-version-conflict rules** (Maven "nearest wins",

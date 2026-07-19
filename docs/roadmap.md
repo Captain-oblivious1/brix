@@ -431,8 +431,16 @@ These are self-contained and come with tests. No Fable needed.
   the impl-only-change replay). Gated real-tsc test plus a self-contained
   fake-tsc integration test (`tests/test_ts_import_tracking.py`) that runs on
   both engines. Separate from the [Blocked] track-3 item of *writing build
-  files* in TS. **Follow-up:** an `ts.npm`/`node_modules` resolver is still
-  planned (docs/dependencies.md).
+  files* in TS. **Follow-up done (2026-07-19, Opus):** the `ts.npm` resolver —
+  `ts.npm([names])` collects installed `node_modules` packages' `.d.ts` (own
+  types + `@types/<name>`, scoped names handled) into a `DepSet`, consumed by
+  `ts.CompileAction(deps=…)` and tracked through the ts-dts lens so a dependency
+  upgrade re-stales the compile while a comment-only `.d.ts` change replays. Like
+  C headers, tsc self-resolves `node_modules` on disk, so the `.d.ts` are tracked
+  inputs, not command args — no new fingerprint material (Opus, not Fable), the
+  `java.pom`/`cpp.pkg_config` adapter pattern for the JS ecosystem.
+  `tests/test_ts_npm.py` (fake `node_modules`, no tsc needed);
+  `docs/dependencies.md`.
 
 **Bigger, but still Opus** (sketch the design first):
 

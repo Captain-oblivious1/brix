@@ -58,6 +58,7 @@ from pathlib import Path
 
 from .actions import Action, ExternalProcessAction
 from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .deps import DepSet
 
 # brix's tsc wrapper: runs the compile with --listFiles and records the files
 # tsc actually read as a Makefile depfile (the TS counterpart of `cc -MMD`).
@@ -65,7 +66,71 @@ _LISTFILES_WRAPPER = Path(__file__).parent / "_ts" / "tsc_listfiles.py"
 
 
 # Public API surface (curated for documentation and as a contract).
-__all__ = ['CompileAction', 'TypedocAction', 'dts', 'DtsFile', 'DtsGlob']
+__all__ = ['CompileAction', 'TypedocAction', 'npm', 'dts', 'DtsFile', 'DtsGlob']
+
+
+def _resolve_npm_types(base: Path, node_modules: str, name: str) -> list[str]:
+    """The workspace-relative ``.d.ts`` files a package contributes: the
+    package's own type tree plus its DefinitelyTyped ``@types/<name>`` tree, if
+    present. Nested ``node_modules`` are skipped (modern npm hoists transitive
+    deps to the top level, and descending would over-track wildly). Scoped names
+    map to DefinitelyTyped's mangled directory (``@scope/pkg`` -> ``scope__pkg``).
+    """
+    at_types = name[1:].replace("/", "__") if name.startswith("@") else name
+    candidates = [
+        Path(node_modules) / name,
+        Path(node_modules) / "@types" / at_types,
+    ]
+    out: list[str] = []
+    for rel_dir in candidates:
+        abs_dir = base / rel_dir
+        if not abs_dir.is_dir():
+            continue
+        for p in sorted(abs_dir.rglob("*.d.ts")):
+            if "node_modules" in p.relative_to(abs_dir).parts:
+                continue  # a nested install; the top-level one is tracked already
+            out.append(p.relative_to(base).as_posix())
+    return out
+
+
+def npm(
+    names: list[str],
+    *,
+    node_modules: str = "node_modules",
+    root: str | Path = ".",
+) -> DepSet:
+    """Resolve npm packages' TypeScript type declarations into a `DepSet`.
+
+    brix does not run npm — you ``npm install`` and this adapter consumes the
+    result (the `java.pom`/`cpp.pkg_config` pattern for the JS ecosystem). For
+    each package it collects that package's ``.d.ts`` under ``node_modules``
+    (and ``@types/<name>`` for DefinitelyTyped packages), so upgrading a
+    dependency whose types changed re-stales the compile.
+
+    ``tsc`` still resolves the ``import``s off the real filesystem at compile
+    time; these are *tracked inputs*, not command arguments. Pass the result as
+    ``ts.CompileAction(deps=…)`` — the consumer applies the **ts-dts** lens, so a
+    comment-only change to a dependency's ``.d.ts`` lets the module replay while
+    a real type change rebuilds it.
+
+    Resolution reads the real filesystem now (per build, like the Maven
+    adapters). Paths are returned relative to ``root`` (the workspace root the
+    build runs from). Raises if a named package has no discoverable ``.d.ts``.
+    """
+    base = Path(root)
+    artifacts: list[str] = []
+    for name in names:
+        found = _resolve_npm_types(base, node_modules, name)
+        if not found:
+            raise FileNotFoundError(
+                f"ts.npm: no .d.ts type declarations for {name!r} under "
+                f"{node_modules}/ — is it installed, and does it ship types "
+                f"(or need @types/{name})?"
+            )
+        artifacts.extend(found)
+    # Order-preserving de-dup: overlapping names (or a package listed twice)
+    # otherwise repeat .d.ts. DepSet's constructor does not de-dup; `+` does.
+    return DepSet(tuple(dict.fromkeys(artifacts)))
 
 
 class DtsFile(FileData):
@@ -127,6 +192,7 @@ class CompileAction(Action):
         options: list[str] | DataExpr | None = None,
         declaration: bool = True,
         dependencies: list[DataExpr] | None = None,
+        deps: DepSet | None = None,
         track_imports: bool = True,
         python: ToolData | None = None,
     ) -> None:
@@ -147,7 +213,12 @@ class CompileAction(Action):
         # upstream out_dir this module imports from), so no classpath flag is
         # needed — declaring them as inputs is what makes brix rebuild this
         # module on an upstream API change and replay on an impl-only one.
-        self.dependencies = dependencies or []
+        # `deps` is a resolved npm DepSet (ts.npm): its .d.ts artifacts join the
+        # dependency list and are tracked exactly like an upstream module's
+        # declaration — ts-dts-lensed, resolved on disk by tsc, and excluded from
+        # the import-tracking depfile so the lens governs them (not byte-tracking).
+        resolved_deps = list(deps.files()) if deps is not None else []
+        self.dependencies = list(dependencies or []) + resolved_deps
 
     def lower(self) -> list[Action]:
         # Recursive `{name}` globs reach nested emit (`sub/mod.js`), like

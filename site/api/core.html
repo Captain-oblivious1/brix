@@ -1803,6 +1803,7 @@ only; the Python engine always terminates workers at build end.</p>
     <span class="n">root</span><span class="o">=</span><span class="s2">&quot;.&quot;</span><span class="p">,</span>
     <span class="n">metadata_dir</span><span class="o">=</span><span class="s2">&quot;build/.brix&quot;</span><span class="p">,</span>
     <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">verify_contents</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 
@@ -3158,7 +3159,8 @@ build full-loads and heals them (edges depend only on the patterns).</p>
     <span class="n">cache_dir</span><span class="o">=</span><span class="s2">&quot;build/.brix-cache&quot;</span><span class="p">,</span>
     <span class="n">store</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">staging_dir</span><span class="o">=</span><span class="s2">&quot;build/staging&quot;</span><span class="p">,</span>
-    <span class="n">detector</span><span class="o">=</span><span class="kc">None</span>
+    <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">verify_contents</span><span class="o">=</span><span class="kc">False</span>
 <span class="p">)</span>
 </code></pre></div>
 
@@ -3172,8 +3174,11 @@ drop the cache, <code>staging_dir=None</code> to drop atomic staging (e.g. a
 cross-module compiler that self-resolves its classpath, which atomic
 staging can't support — see <code>examples/kotlin_multimodule</code>). <code>detector</code> is
 the change-detector factory threaded to the <code>IncrementalBuilder</code> (e.g.
-<code>GitChangeDetector</code>); <code>None</code> uses the default stat detector. Defaults
-give the full recommended stack.</p>
+<code>GitChangeDetector</code>); <code>None</code> uses the default stat detector.
+<code>verify_contents=True</code> makes the default detector re-hash every file
+instead of trusting its <code>(mtime, size)</code> cache — slower, but it catches a
+content change that leaves size and mtime unchanged. Defaults give the full
+recommended stack.</p>
 <p>Returns a builder; for <code>cli.main</code>'s <code>builder_factory</code> (called fresh per
 invocation, so <code>commit</code>/<code>discard</code> rebuild cleanly), pass a thunk::</p>
 <div class="highlight"><pre><span></span><code>cli.main(create_graph, builder_factory=lambda: build_stack(create_graph, root=ROOT))
