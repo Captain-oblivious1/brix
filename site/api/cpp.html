@@ -496,6 +496,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#brix.cpp.DoxygenAction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;DoxygenAction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#brix.cpp.pkg_config" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -711,7 +722,8 @@
 <p>Typed C/C++ actions — compile, archive, link — plus a <code>pkg-config</code> resolver.
 They lower to the generic action model, so they compose with any other language
 in one graph, and compilation automatically tracks <code>#include</code> headers through
-the compiler's depfile.</p>
+the compiler's depfile. <code>DoxygenAction</code> runs <code>doxygen</code> over a project's own
+sources as a tracked, incremental step.</p>
 
 
 <div class="doc doc-object doc-module">
@@ -904,6 +916,74 @@ rebuilding it. Under the atomic layer (the recommended stack) the archive
 is written into fresh staging each build, so a deleted source cannot
 leave a stale member. Without atomic, run <code>clean</code> after removing a
 source that fed the library.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="brix.cpp.DoxygenAction" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">DoxygenAction</span>
+
+
+<a href="#brix.cpp.DoxygenAction" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">DoxygenAction</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">source_files</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">,</span> <span class="n">doxygen</span><span class="o">=</span><span class="kc">None</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="brix.actions.Action">Action</span></code></p>
+
+
+
+        <p>Generate HTML API docs for a project's <em>own</em> C/C++ sources with
+<code>doxygen</code>.</p>
+<p>Documentation <em>of the user's code</em>, run as an ordinary tracked step.
+doxygen is config-driven (<code>doxygen &lt;Doxyfile&gt;</code>), so unlike javadoc/typedoc
+there are no source arguments on the command line — the <code>Doxyfile</code> names
+the <code>INPUT</code> directories and the <code>OUTPUT_DIRECTORY</code>. brix cannot read
+those out of the config, so you declare both to it: <code>source_files</code> (the
+inputs, tracked so an edited header rebuilds the docs) and <code>output_dir</code>
+(which <strong>must</strong> match the Doxyfile's <code>OUTPUT_DIRECTORY</code>/<code>HTML_OUTPUT</code>, so
+brix tracks and stages the tree doxygen actually writes). The config file is
+itself an input — changing a Doxyfile setting regenerates.</p>
+<p>::</p>
+<div class="highlight"><pre><span></span><code>cpp.DoxygenAction(
+    config=&quot;Doxyfile&quot;,
+    source_files=data.glob(&quot;src/{name}.h&quot;) + data.glob(&quot;src/{name}.cpp&quot;),
+    output_dir=&quot;build/docs/html&quot;,
+)
+</code></pre></div>
 
 
 

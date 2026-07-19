@@ -1,5 +1,27 @@
 # Development log
 
+- **Doc-generation actions for the *user's* project (javadoc/typedoc/doxygen).**
+  Three typed actions that run an ecosystem's own API-doc generator over a
+  project's sources as an ordinary, tracked, incremental build step:
+  `java.JavadocAction`, `ts.TypedocAction`, `cpp.DoxygenAction`. Each lowers to
+  a single `ExternalProcessAction` that declares the sources as **inputs** (so
+  the doc set rebuilds only when a source changes, replays otherwise, and caches
+  like any output) and its whole emitted tree as one `FileData` output dir plus
+  a recursive `{name}` glob (so it stages atomically; a removed page is
+  reflected). `JavadocAction` accepts an abi-lensed `classpath` (impl-only
+  dependency change → replay); `DoxygenAction` is config-driven
+  (`doxygen <Doxyfile>`), so the sources are declared inputs but not command
+  arguments, and the caller passes `output_dir` explicitly to match the
+  Doxyfile's `OUTPUT_DIRECTORY` since brix can't read it out of the config. All
+  three are added to their modules' curated `__all__`, so they land in the
+  public API site automatically (verified in the rebuilt `site/`). Tests:
+  lowering-shape assertions for all three plus a real-`javadoc` end-to-end test
+  proving regenerate-on-edit / replay-on-no-op (`tests/test_docgen.py`). This is
+  doc generation offered *to* the projects brix builds — distinct from brix's
+  own HTML site below. v1 threads no classpath/tool-path resolution and has no
+  warm daemon; a Python `pdoc` action is a follow-up. `src/brix/java.py`,
+  `src/brix/ts.py`, `src/brix/cpp.py`, `tests/test_docgen.py`.
+
 - **HTML documentation site (public API only), first version.** A MkDocs +
   Material + mkdocstrings site: a hand-written landing page (purpose + tenets,
   distilled from the spec's design rules into user-facing form) plus an API

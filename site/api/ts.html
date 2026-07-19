@@ -580,6 +580,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#brix.ts.TypedocAction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;TypedocAction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#brix.ts.dts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -711,7 +722,8 @@
 <p>Typed TypeScript actions built on <code>tsc</code>, with the <strong>ts-dts</strong> lens (<code>dts</code>) so a
 dependent recompiles only on a public-declaration change, plus automatic import
 tracking (a <code>--listFiles</code> depfile) so editing a source a module imports —
-even outside its own tree — re-stales it.</p>
+even outside its own tree — re-stales it. <code>TypedocAction</code> runs <code>typedoc</code> over
+a project's own sources as a tracked, incremental step.</p>
 
 
 <div class="doc doc-object doc-module">
@@ -924,6 +936,70 @@ default, so the module is usable as a dependency), a <code>.d.ts</code> beside e
 <code>dependencies</code> is the list of upstream modules' built <code>.d.ts</code> this module
 type-checks against; they are tracked through the <strong>ts-dts</strong> lens, so an
 implementation-only change upstream lets this module replay.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="brix.ts.TypedocAction" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">TypedocAction</span>
+
+
+<a href="#brix.ts.TypedocAction" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">TypedocAction</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span> <span class="n">entry_points</span><span class="p">,</span> <span class="n">output_dir</span><span class="p">,</span> <span class="n">typedoc</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="kc">None</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="brix.actions.Action">Action</span></code></p>
+
+
+
+        <p>Generate HTML API docs for a project's <em>own</em> TypeScript sources with
+<code>typedoc</code>.</p>
+<p>Documentation <em>of the user's code</em>, run as an ordinary tracked step: the
+declared <code>entry_points</code> (the sources) are inputs, so the doc set rebuilds
+on a source change and replays when nothing changed. Pass typedoc flags
+(<code>--name</code>, <code>--excludePrivate</code>, <code>--tsconfig …</code>) through <code>options</code>.</p>
+<p>typedoc is usually a local install, not global; pass
+<code>typedoc=data.tool(".../node_modules/.bin/typedoc")</code> to point at it.</p>
+<p>::</p>
+<div class="highlight"><pre><span></span><code>ts.TypedocAction(
+    entry_points=data.glob(&quot;src/{name}.ts&quot;),
+    output_dir=&quot;build/docs/api&quot;,
+)
+</code></pre></div>
 
 
 

@@ -524,6 +524,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#brix.java.JavadocAction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;JavadocAction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#brix.java.JUnitTestAction" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -766,7 +777,9 @@
 <p>Typed Java actions — compilation through a warm <code>javac</code> worker, jar assembly,
 JUnit test runs — with the <strong>jvm-abi</strong> lens (<code>abi</code>) so a dependent recompiles
 only when an upstream module's public API changes, and resolver adapters
-(<code>pom</code>, <code>maven</code>, <code>gradle</code>) that adopt an existing build's classpath.</p>
+(<code>pom</code>, <code>maven</code>, <code>gradle</code>) that adopt an existing build's classpath.
+<code>JavadocAction</code> runs <code>javadoc</code> over a project's own sources as a tracked,
+incremental step.</p>
 
 
 <div class="doc doc-object doc-module">
@@ -959,6 +972,77 @@ matched jar/class.</p>
 these are tracked by their complete bytes: changing processor
 implementation must recompile sources even when the processor's Java ABI
 did not change.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="brix.java.JavadocAction" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">JavadocAction</span>
+
+
+<a href="#brix.java.JavadocAction" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">JavadocAction</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">source_files</span><span class="p">,</span>
+    <span class="n">output_dir</span><span class="p">,</span>
+    <span class="n">javadoc</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">classpath</span><span class="o">=</span><span class="kc">None</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="brix.actions.Action">Action</span></code></p>
+
+
+
+        <p>Generate HTML API docs for a project's <em>own</em> Java sources with <code>javadoc</code>.</p>
+<p>This is documentation <em>of the user's code</em>, run as an ordinary tracked step
+— not the same thing as brix's own docs. Declaring the sources as inputs is
+what makes it incremental: the doc set rebuilds when a source changes and
+replays untouched when nothing did, like any other action.</p>
+<p><code>classpath</code> (a <code>DepSet</code> or list of resolved deps) is passed to javadoc so
+it can resolve referenced types; it is tracked through the <strong>abi</strong> lens, so
+an implementation-only change in a dependency lets the docs replay. Pass
+extra flags (<code>-quiet</code>, <code>-Xdoclint:none</code>, <code>-link …</code>) through
+<code>options</code>.</p>
+<p>::</p>
+<div class="highlight"><pre><span></span><code>java.JavadocAction(
+    source_files=data.glob(&quot;src/main/java/{name}.java&quot;),
+    output_dir=&quot;build/docs/api&quot;,
+)
+</code></pre></div>
 
 
 

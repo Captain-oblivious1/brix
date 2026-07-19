@@ -65,7 +65,7 @@ _LISTFILES_WRAPPER = Path(__file__).parent / "_ts" / "tsc_listfiles.py"
 
 
 # Public API surface (curated for documentation and as a contract).
-__all__ = ['CompileAction', 'dts', 'DtsFile', 'DtsGlob']
+__all__ = ['CompileAction', 'TypedocAction', 'dts', 'DtsFile', 'DtsGlob']
 
 
 class DtsFile(FileData):
@@ -220,5 +220,59 @@ class CompileAction(Action):
                 outputs=outputs,
                 self_resolved_inputs=self_resolved,
                 depfile=depfile,
+            )
+        ]
+
+
+class TypedocAction(Action):
+    """Generate HTML API docs for a project's *own* TypeScript sources with
+    ``typedoc``.
+
+    Documentation *of the user's code*, run as an ordinary tracked step: the
+    declared ``entry_points`` (the sources) are inputs, so the doc set rebuilds
+    on a source change and replays when nothing changed. Pass typedoc flags
+    (``--name``, ``--excludePrivate``, ``--tsconfig …``) through ``options``.
+
+    typedoc is usually a local install, not global; pass
+    ``typedoc=data.tool(".../node_modules/.bin/typedoc")`` to point at it.
+
+    ::
+
+        ts.TypedocAction(
+            entry_points=data.glob("src/{name}.ts"),
+            output_dir="build/docs/api",
+        )
+    """
+
+    def __init__(
+        self,
+        *,
+        entry_points: DataExpr,
+        output_dir: str,
+        typedoc: ToolData | None = None,
+        options: list[str] | DataExpr | None = None,
+    ) -> None:
+        self.entry_points = entry_points
+        self.output_dir = output_dir
+        self.typedoc = typedoc if typedoc is not None else ToolData("typedoc")
+        self.options = options
+
+    def lower(self) -> list[Action]:
+        # One declared output tree: a recursive `{name}` glob under output_dir
+        # captures every emitted page and asset, so a removed page is reflected
+        # and the tree stages atomically (mirrors JavadocAction).
+        return [
+            ExternalProcessAction(
+                name=f"typedoc -> {self.output_dir}",
+                command_line="{typedoc} --out {output_dir} {options} {entry_points}",
+                inputs={
+                    "typedoc": self.typedoc,
+                    "options": _options_expr(self.options),
+                    "entry_points": self.entry_points,
+                },
+                outputs={
+                    "output_dir": FileData(self.output_dir),
+                    "files": GlobData(f"{self.output_dir}/{{name}}"),
+                },
             )
         ]

@@ -29,7 +29,13 @@ from .deps import DepSet
 
 
 # Public API surface (curated for documentation and as a contract).
-__all__ = ['CompileSourceAction', 'LinkApplicationAction', 'ArchiveAction', 'pkg_config']
+__all__ = [
+    'CompileSourceAction',
+    'LinkApplicationAction',
+    'ArchiveAction',
+    'DoxygenAction',
+    'pkg_config',
+]
 
 
 def _options_expr(options: list[str] | DataExpr | None) -> DataExpr:
@@ -224,5 +230,62 @@ class ArchiveAction(Action):
                 command_line="{ar} Dcrs {output} {objects}",
                 inputs={"ar": self.ar, "objects": self.object_files},
                 outputs={"output": self.output_file},
+            )
+        ]
+
+
+class DoxygenAction(Action):
+    """Generate HTML API docs for a project's *own* C/C++ sources with
+    ``doxygen``.
+
+    Documentation *of the user's code*, run as an ordinary tracked step.
+    doxygen is config-driven (``doxygen <Doxyfile>``), so unlike javadoc/typedoc
+    there are no source arguments on the command line — the ``Doxyfile`` names
+    the ``INPUT`` directories and the ``OUTPUT_DIRECTORY``. brix cannot read
+    those out of the config, so you declare both to it: ``source_files`` (the
+    inputs, tracked so an edited header rebuilds the docs) and ``output_dir``
+    (which **must** match the Doxyfile's ``OUTPUT_DIRECTORY``/``HTML_OUTPUT``, so
+    brix tracks and stages the tree doxygen actually writes). The config file is
+    itself an input — changing a Doxyfile setting regenerates.
+
+    ::
+
+        cpp.DoxygenAction(
+            config="Doxyfile",
+            source_files=data.glob("src/{name}.h") + data.glob("src/{name}.cpp"),
+            output_dir="build/docs/html",
+        )
+    """
+
+    def __init__(
+        self,
+        *,
+        config: str,
+        source_files: DataExpr,
+        output_dir: str,
+        doxygen: ToolData | None = None,
+    ) -> None:
+        self.config = config
+        self.source_files = source_files
+        self.output_dir = output_dir
+        self.doxygen = doxygen if doxygen is not None else ToolData("doxygen")
+
+    def lower(self) -> list[Action]:
+        # The sources are declared inputs but not command arguments — doxygen
+        # reads them via the Doxyfile's INPUT. A recursive `{name}` glob under
+        # output_dir captures the whole emitted tree (mirrors JavadocAction).
+        return [
+            ExternalProcessAction(
+                name=f"doxygen -> {self.output_dir}",
+                command_line="{doxygen} {config}",
+                inputs={
+                    "doxygen": self.doxygen,
+                    "config": FileData(self.config),
+                    "sources": self.source_files,
+                },
+                outputs={
+                    "output_dir": FileData(self.output_dir),
+                    "files": GlobData(f"{self.output_dir}/{{name}}"),
+                },
             )
         ]

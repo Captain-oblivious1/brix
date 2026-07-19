@@ -60,6 +60,7 @@ _WORKER_SOURCE = Path(__file__).parent / "_java" / "JavacWorker.java"
 __all__ = [
     'JarAction',
     'JUnitTestAction',
+    'JavadocAction',
     'javac_worker',
     'abi',
     'AbiFile',
@@ -585,6 +586,73 @@ class JarAction(Action):
             outputs={"output": self.output_file},
         )
         return [compile_java, package]
+
+
+class JavadocAction(Action):
+    """Generate HTML API docs for a project's *own* Java sources with ``javadoc``.
+
+    This is documentation *of the user's code*, run as an ordinary tracked step
+    — not the same thing as brix's own docs. Declaring the sources as inputs is
+    what makes it incremental: the doc set rebuilds when a source changes and
+    replays untouched when nothing did, like any other action.
+
+    ``classpath`` (a `DepSet` or list of resolved deps) is passed to javadoc so
+    it can resolve referenced types; it is tracked through the **abi** lens, so
+    an implementation-only change in a dependency lets the docs replay. Pass
+    extra flags (``-quiet``, ``-Xdoclint:none``, ``-link …``) through
+    ``options``.
+
+    ::
+
+        java.JavadocAction(
+            source_files=data.glob("src/main/java/{name}.java"),
+            output_dir="build/docs/api",
+        )
+    """
+
+    def __init__(
+        self,
+        *,
+        source_files: DataExpr,
+        output_dir: str,
+        javadoc: ToolData | None = None,
+        options: list[str] | DataExpr | None = None,
+        classpath: "DepSet | list[DataExpr] | None" = None,
+    ) -> None:
+        self.source_files = source_files
+        self.output_dir = output_dir
+        self.javadoc = javadoc if javadoc is not None else ToolData("javadoc")
+        self.options = options
+        self.classpath = _as_classpath_list(classpath)
+
+    def lower(self) -> list[Action]:
+        # The whole output tree is one declared output: a recursive `{name}`
+        # glob under output_dir captures every emitted file (index.html, the
+        # per-class pages under package dirs, the resource .css/.js), so a
+        # deleted or renamed page is reflected and the tree stages atomically.
+        inputs: dict[str, DataExpr] = {
+            "javadoc": self.javadoc,
+            "options": _options_expr(self.options),
+            "sources": self.source_files,
+        }
+        parts = ["{javadoc}", "-d {output_dir}"]
+        if self.classpath:
+            # ABI lens: docs describe the *interface*, so an impl-only change in
+            # a referenced dependency replays rather than regenerates.
+            inputs["classpath"] = _classpath_union(self.classpath)
+            parts.append("-classpath {classpath}")
+        parts += ["{options}", "{sources}"]
+        return [
+            ExternalProcessAction(
+                name=f"javadoc -> {self.output_dir}",
+                command_line=" ".join(parts),
+                inputs=inputs,
+                outputs={
+                    "output_dir": FileData(self.output_dir),
+                    "files": GlobData(f"{self.output_dir}/{{name}}"),
+                },
+            )
+        ]
 
 
 def _runtime_union(classpath: list[DataExpr]) -> DataExpr:
