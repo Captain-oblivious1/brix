@@ -11,9 +11,15 @@ section below). **First increment shipped (2026-07-19):** the `SYSTEM` sentinel
 (`env={"X": SYSTEM}`, opt-in inherit-and-track) desugars to the phase-2
 `env_used` mechanism, producing byte-identical fingerprint material — so it
 needs **no fingerprint-path change** (Opus, not Fable), proven equivalent in
-`tests/test_env_system.py`. The **fingerprint-changing** parts — per-language
-default maps, `PASS`/`UNSET`, and scrub — remain, and *those* get the Fable
-review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+`tests/test_env_system.py`. **Increment 2 shipped (2026-07-19):** the per-language
+default overlays for **java** (`JAVA_HOME`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`)
+and **rust** (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `CARGO_HOME`, `CARGO_NET_OFFLINE`)
+— tracked by `SYSTEM`, so silent drift closes automatically; user `env=` wins
+(`tests/test_env_defaults.py`, both engines). These modules are not referenced by
+the goldens, so no regeneration was needed. **Remaining:** the **cpp** overlay
+(its actions *are* in the goldens, so it needs a golden regeneration — the tracked
+vars are unset there, so the regen is clean/portable), plus `PASS`/`UNSET` and
+scrub — *those* get the Fable review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion

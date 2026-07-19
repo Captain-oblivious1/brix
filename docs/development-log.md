@@ -1,5 +1,24 @@
 # Development log
 
+- **Env phase-3, increment 2: per-language default env maps (java, rust).** Each
+  language module now tracks its toolchain's behaviour-affecting environment by
+  default, via `SYSTEM` — `brix.java` compiles track `JAVA_HOME`,
+  `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS` (the last two are applied to *every* JVM
+  launch, so they silently reach `javac`); `brix.rust` cargo builds track
+  `RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `CARGO_HOME`, `CARGO_NET_OFFLINE`. So editing
+  one re-stales the build automatically — the module names the latent trap for
+  the user, and the payoff lands even with scrub off. User `env=` layers on top
+  (a pinned var wins and moves from tracked to set). It reuses the blessed
+  `SYSTEM`≡`env_used` path (no new mechanism, no Rust change), and the tracked
+  vars are unset in a normal environment (null snapshot → no spurious rebuilds),
+  proven on both engines in `tests/test_env_defaults.py`. **cpp's overlay is
+  deferred**: its actions appear in the cross-engine goldens, so it needs a
+  golden regeneration (clean, since the vars — `CPATH`, `SOURCE_DATE_EPOCH`, … —
+  are unset at generation → null), handled with the `PASS`/`UNSET`/scrub work
+  under the Fable review. `LANG`/locale is also deferred (usually set → would make
+  cross-machine fingerprints noisy; it belongs with the plumbing base map).
+  `src/brix/java.py`, `src/brix/rust.py`.
+
 - **Env phase-3, increment 1: the `SYSTEM` sentinel (opt-in inherit-and-track).**
   First buildable piece of the phase-3 env design (`docs/environment-recording.md`).
   `env={"X": SYSTEM}` on an `ExternalProcessAction` means "take X from the ambient

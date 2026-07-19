@@ -38,6 +38,19 @@ from typing import TYPE_CHECKING
 
 from .actions import Action, ExternalProcessAction
 from .data import DataAtom, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .env import SYSTEM
+
+# Behaviour-affecting JVM environment, tracked (SYSTEM) so a change re-stales the
+# compile — the phase-3 per-language default overlay (docs/environment-recording.md).
+# JAVA_TOOL_OPTIONS/_JAVA_OPTIONS are applied to *every* JVM launch, so they
+# silently reach javac; JAVA_HOME selects the JDK. Fingerprint-only, so it is safe
+# on the warm-worker path too. (LANG/locale is deferred to the base-map increment,
+# since it is usually set and would make cross-machine fingerprints noisy.)
+_JVM_ENV = {
+    "JAVA_HOME": SYSTEM,
+    "JAVA_TOOL_OPTIONS": SYSTEM,
+    "_JAVA_OPTIONS": SYSTEM,
+}
 from .deps import DepSet
 
 if TYPE_CHECKING:
@@ -545,6 +558,7 @@ class JarAction(Action):
                     "classes_dir": FileData(self.classes_dir),
                     "classes": classes,
                 },
+                env=_JVM_ENV,
             )
         else:
             compile_java = ExternalProcessAction(
@@ -559,6 +573,7 @@ class JarAction(Action):
                     "classes_dir": FileData(self.classes_dir),
                     "classes": classes,
                 },
+                env=_JVM_ENV,
             )
         if self.entry_point:
             jar_command = "{jar} cfe {output} {entry_point} -C {classes_dir} ."

@@ -34,8 +34,21 @@ from pathlib import Path
 
 from .actions import Action, ExternalProcessAction
 from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .env import SYSTEM
 
 __all__ = ['CargoBuildAction', 'cargo']
+
+# Behaviour-affecting cargo/rustc environment, tracked (SYSTEM) so a change
+# re-stales the build — the phase-3 per-language default overlay
+# (docs/environment-recording.md). RUSTFLAGS changes codegen; RUSTUP_TOOLCHAIN
+# selects the compiler; CARGO_HOME/CARGO_NET_OFFLINE affect resolution. Merged
+# under any user `env=` (the user's entry for a name wins).
+_CARGO_ENV = {
+    "RUSTFLAGS": SYSTEM,
+    "RUSTUP_TOOLCHAIN": SYSTEM,
+    "CARGO_HOME": SYSTEM,
+    "CARGO_NET_OFFLINE": SYSTEM,
+}
 
 
 class CargoBuildAction(Action):
@@ -93,7 +106,9 @@ class CargoBuildAction(Action):
                     "options": ValueData(" ".join(flags)),
                 },
                 outputs={"artifact": self.artifact},
-                env=self.env or {},
+                # Default cargo/rustc behaviour vars (tracked), with any user
+                # env= layered on top (the user's entry for a name wins).
+                env={**_CARGO_ENV, **(self.env or {})},
                 env_used=self.env_used,
             )
         ]

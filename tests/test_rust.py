@@ -43,8 +43,8 @@ def test_env_and_env_used_are_threaded():
         env_used=["RUSTFLAGS"],
     )
     (proc,) = action.lower()
-    assert "CARGO_NET_OFFLINE" in proc.env            # set + fingerprinted
-    assert proc.env_used == ("RUSTFLAGS",)            # tracked, not set
+    assert "CARGO_NET_OFFLINE" in proc.env            # user literal wins over the default
+    assert "RUSTFLAGS" in proc.env_used               # tracked (alongside the cargo defaults)
 
 
 def test_adapter_infers_self_host_artifact_from_the_real_manifest():
