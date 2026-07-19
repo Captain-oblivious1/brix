@@ -220,9 +220,22 @@ class TimeAndHashChangeDetector:
     unchanged file costs one stat per build.
     """
 
-    def __init__(self, root: Path | str = ".", metadata: BuildMetadata | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | str = ".",
+        metadata: BuildMetadata | None = None,
+        verify_contents: bool = False,
+    ) -> None:
         self.root = Path(root)
         self.metadata = metadata if metadata is not None else BuildMetadata(self.root)
+        # "Always re-check file contents": when set, ignore the (mtime, size)
+        # stat cache and re-read+hash every file, so a content change that leaves
+        # size and mtime unchanged is still caught (the rare stat collision, e.g.
+        # a same-size in-place edit that restores the mtime). Trades speed for
+        # certainty; opt-in. It never changes the *returned* digest for an
+        # actually-unchanged file, so it stays fingerprint-compatible with the
+        # fast path. Mirrored natively in the Rust detector.
+        self.verify_contents = verify_contents
 
     def stat_signature(self, path: Path) -> list[int] | None:
         try:
@@ -250,9 +263,10 @@ class TimeAndHashChangeDetector:
         if signature is None:
             return None
         key = str(path)
-        cached = self.metadata.cached_hash(key, signature)
-        if cached is not None:
-            return cached
+        if not self.verify_contents:
+            cached = self.metadata.cached_hash(key, signature)
+            if cached is not None:
+                return cached
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         self.metadata.store_hash(key, signature, digest)
         return digest
@@ -271,9 +285,10 @@ class TimeAndHashChangeDetector:
             return None
         key = str(path)
         tag = identity_tag(identity)
-        cached = self.metadata.cached_identity(key, signature, tag)
-        if cached is not None:
-            return cached
+        if not self.verify_contents:
+            cached = self.metadata.cached_identity(key, signature, tag)
+            if cached is not None:
+                return cached
         digest = identity.digest(path)  # may raise; caller falls back to :raw
         self.metadata.store_identity(key, signature, tag, digest)
         return digest

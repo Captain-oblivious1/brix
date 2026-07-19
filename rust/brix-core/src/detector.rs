@@ -27,6 +27,12 @@ pub struct TimeAndHashChangeDetector {
     /// since the last build returns its cached hash without a `stat`. A pure
     /// performance layer — never changes a returned digest.
     pub git: Option<Arc<crate::gitdetect::GitVouch>>,
+    /// "Always re-check file contents": when set, ignore the `(mtime, size)`
+    /// stat cache (and git vouch) and re-read+hash every file, so a content
+    /// change that leaves size and mtime unchanged is still caught. Trades speed
+    /// for certainty; opt-in. Never changes a *returned* digest for an actually-
+    /// unchanged file, so it stays fingerprint-compatible with the fast path.
+    pub verify_contents: bool,
 }
 
 impl TimeAndHashChangeDetector {
@@ -35,7 +41,18 @@ impl TimeAndHashChangeDetector {
     }
 
     pub fn with_metadata(metadata: Arc<BuildMetadata>) -> Self {
-        Self { metadata: Some(metadata), custom_identities: None, git: None }
+        Self {
+            metadata: Some(metadata),
+            custom_identities: None,
+            git: None,
+            verify_contents: false,
+        }
+    }
+
+    /// Enable "always re-check file contents" (see [`Self::verify_contents`]).
+    pub fn with_verify_contents(mut self, verify: bool) -> Self {
+        self.verify_contents = verify;
+        self
     }
 
     /// Attach git vouching (or clear it with `None`); the returned detector
@@ -107,10 +124,13 @@ impl TimeAndHashChangeDetector {
     pub fn hash_file(&self, path: &Path) -> Option<String> {
         // Git vouch: a tracked+unmodified file's last-build hash is still valid,
         // so return it without a stat or read (mirrors GitChangeDetector).
-        if let (Some(git), Some(meta)) = (&self.git, &self.metadata) {
-            if git.vouch_unchanged(path) {
-                if let Some(cached) = meta.hash_by_path(&path.to_string_lossy()) {
-                    return Some(cached);
+        // verify_contents forces a real read, so it skips the vouch.
+        if !self.verify_contents {
+            if let (Some(git), Some(meta)) = (&self.git, &self.metadata) {
+                if git.vouch_unchanged(path) {
+                    if let Some(cached) = meta.hash_by_path(&path.to_string_lossy()) {
+                        return Some(cached);
+                    }
                 }
             }
         }
@@ -121,8 +141,10 @@ impl TimeAndHashChangeDetector {
         let sig = self.stat_signature(path)?;
         if let Some(meta) = &self.metadata {
             let key = path.to_string_lossy();
-            if let Some(cached) = meta.cached_hash(&key, &sig) {
-                return Some(cached);
+            if !self.verify_contents {
+                if let Some(cached) = meta.cached_hash(&key, &sig) {
+                    return Some(cached);
+                }
             }
             let digest = hash_bytes(path)?;
             meta.store_hash(&key, &sig, &digest);
@@ -141,11 +163,14 @@ impl TimeAndHashChangeDetector {
     pub fn content_key_digest(&self, path: &Path, name: &str) -> Result<Option<String>, String> {
         // Git vouch: the last-build content-key digest is still valid for a
         // tracked+unmodified file — return it without a stat or re-derive.
-        if let (Some(git), Some(meta)) = (&self.git, &self.metadata) {
-            if git.vouch_unchanged(path) {
-                if let Some(tag) = self.content_key_tag(name) {
-                    if let Some(cached) = meta.identity_by_path(&path.to_string_lossy(), &tag) {
-                        return Ok(Some(cached));
+        // verify_contents forces a re-derive, so it skips the vouch.
+        if !self.verify_contents {
+            if let (Some(git), Some(meta)) = (&self.git, &self.metadata) {
+                if git.vouch_unchanged(path) {
+                    if let Some(tag) = self.content_key_tag(name) {
+                        if let Some(cached) = meta.identity_by_path(&path.to_string_lossy(), &tag) {
+                            return Ok(Some(cached));
+                        }
                     }
                 }
             }
@@ -159,8 +184,10 @@ impl TimeAndHashChangeDetector {
         let tag = self.content_key_tag(name).expect("caller gates on content_key_tag");
         if let Some(meta) = &self.metadata {
             let key = path.to_string_lossy();
-            if let Some(cached) = meta.cached_identity(&key, &sig, &tag) {
-                return Ok(Some(cached));
+            if !self.verify_contents {
+                if let Some(cached) = meta.cached_identity(&key, &sig, &tag) {
+                    return Ok(Some(cached));
+                }
             }
             let digest = self.compute_content_key(name, path)?; // caller falls back to :raw
             meta.store_identity(&key, &sig, &tag, &digest);

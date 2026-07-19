@@ -1,5 +1,21 @@
 # Development log
 
+- **"Always re-check file contents" mode — the general stat-collision escape
+  hatch.** The default detector trusts `(mtime, size)` to skip re-hashing, so a
+  content change that leaves both unchanged is missed — the general form of the
+  collision the symlink-repoint fix closed for one case. `verify_contents=True`
+  (on `IncrementalBuilder`/`build_stack`) forces a re-read+re-hash of every file,
+  trading speed for certainty. Opt-in and **fingerprint-compatible**: it never
+  changes the returned digest for an actually-unchanged file, so a genuine no-op
+  still replays (proven), and it only changes *when* brix reads, never *what* it
+  computes. Both hash paths (`hash_file`, `identity_digest`/`content_key_digest`)
+  skip the stat cache — and the git vouch — when set. Configures the default
+  detector and crosses the boundary as a `verify_contents` wire flag so the Rust
+  detector honors it natively. `tests/test_verify_contents.py` documents the
+  fast-path blind spot and proves the mode catches it, on both engines. Follow-up:
+  a `build --verify-contents` CLI flag for one-off runs. `src/brix/metadata.py`,
+  `src/brix/builders.py`, `rust/brix-core/src/detector.rs`, `rust/brix-py/src/lib.rs`.
+
 - **Symlink repoint detection — close a stale-build hole in the stat cache.** A
   symlinked source was already stat'd *through* to its target, so a target
   content change moved its (mtime, size) and rebuilt normally. The subtle hole:

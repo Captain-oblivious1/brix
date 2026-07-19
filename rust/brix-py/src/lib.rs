@@ -329,9 +329,14 @@ fn build_layers(
             } else {
                 None
             };
+            let verify_contents = entry
+                .get("verify_contents")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let detector = brix_core::TimeAndHashChangeDetector::with_metadata(metadata.clone())
                 .with_custom_identities(custom.clone())
-                .with_git(git);
+                .with_git(git)
+                .with_verify_contents(verify_contents);
             incremental = Some(IncrementalLayer::with_detector(metadata, detector));
         }
     }

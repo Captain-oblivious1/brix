@@ -121,6 +121,14 @@ skin emits this flag when a `GitChangeDetector` is configured — the detector
 object itself is a skin concern and does not cross the boundary, only the
 intent does.
 
+The `incremental` entry also takes an optional `"verify_contents": true`. When
+set, the detector re-reads and re-hashes every file instead of trusting its
+`(mtime, size)` stat cache (and skips the git vouch), so a content change that
+leaves size and mtime unchanged is still caught — a speed-for-certainty
+trade-off. Like `git_detection` it never changes the digest returned for an
+actually-unchanged file, so it is fingerprint-compatible with the fast path; the
+skin emits it when `verify_contents=True` is set on the builder.
+
 **Ordering rule — the atomic layer must be outermost.** If a `{ "kind":
 "atomic" }` entry is present it must be the **last** entry (outermost, since the
 list is innermost-first); the core rejects any other position. The atomic layer

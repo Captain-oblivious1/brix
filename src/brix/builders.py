@@ -122,10 +122,19 @@ class IncrementalBuilder(NestableBuilder):
         root: str | Path = ".",
         metadata_dir: str | Path = "build/.brix",
         detector=None,
+        verify_contents: bool = False,
     ) -> None:
         self._supplier = graph_supplier if callable(graph_supplier) else lambda: graph_supplier
         self.root = Path(root).resolve()
         self.metadata_dir = metadata_dir
+        # "Always re-check file contents": force the default detector to re-hash
+        # every file instead of trusting its (mtime, size) stat cache, catching
+        # the rare content change that leaves size and mtime unchanged. Opt-in
+        # (slower); configures the default detector, and rides the boundary as a
+        # `verify_contents` flag so the Rust engine's native detector honors it
+        # too. When a custom `detector=` is supplied, that detector owns the
+        # policy and this flag only crosses the wire.
+        self._verify_contents = verify_contents
         # The change detector is an injected seam (one of brix's three: cache
         # store, content lens, change detector). Pass a factory `(root,
         # metadata) -> detector`; the builder owns the metadata lifecycle and
@@ -147,8 +156,12 @@ class IncrementalBuilder(NestableBuilder):
 
         metadata = BuildMetadata(self.root, self.metadata_dir)
         metadata.load()
-        factory = self._detector if self._detector is not None else TimeAndHashChangeDetector
-        detector = factory(self.root, metadata)
+        if self._detector is not None:
+            detector = self._detector(self.root, metadata)
+        else:
+            detector = TimeAndHashChangeDetector(
+                self.root, metadata, verify_contents=self._verify_contents
+            )
         return [IncrementalLayer(metadata, detector)]
 
     def source_graph(self) -> Graph:
@@ -162,6 +175,8 @@ class IncrementalBuilder(NestableBuilder):
         # the boundary — this flag is how the intent does).
         if getattr(self._detector, "wire_git_detection", False):
             spec["git_detection"] = True
+        if self._verify_contents:
+            spec["verify_contents"] = True
         return [spec]
 
     def build(self, jobs: int | None = None, reporter=None,
@@ -359,6 +374,7 @@ def build_stack(
     store: "CacheStoreProtocol | None" = None,
     staging_dir: str | Path | None = "build/staging",
     detector=None,
+    verify_contents: bool = False,
 ) -> "AtomicBuilder | NestableBuilder":
     """Assemble the standard builder stack in the correct order —
     ``AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))`` — so the ordering
@@ -369,8 +385,11 @@ def build_stack(
     cross-module compiler that self-resolves its classpath, which atomic
     staging can't support — see `examples/kotlin_multimodule`). ``detector`` is
     the change-detector factory threaded to the `IncrementalBuilder` (e.g.
-    ``GitChangeDetector``); ``None`` uses the default stat detector. Defaults
-    give the full recommended stack.
+    ``GitChangeDetector``); ``None`` uses the default stat detector.
+    ``verify_contents=True`` makes the default detector re-hash every file
+    instead of trusting its ``(mtime, size)`` cache — slower, but it catches a
+    content change that leaves size and mtime unchanged. Defaults give the full
+    recommended stack.
 
     Returns a builder; for `cli.main`'s ``builder_factory`` (called fresh per
     invocation, so ``commit``/``discard`` rebuild cleanly), pass a thunk::
@@ -378,7 +397,8 @@ def build_stack(
         cli.main(create_graph, builder_factory=lambda: build_stack(create_graph, root=ROOT))
     """
     inner: NestableBuilder = IncrementalBuilder(
-        graph_supplier, root=root, metadata_dir=metadata_dir, detector=detector
+        graph_supplier, root=root, metadata_dir=metadata_dir, detector=detector,
+        verify_contents=verify_contents,
     )
     if store is not None:
         inner = CacheBuilder(inner, store=store)

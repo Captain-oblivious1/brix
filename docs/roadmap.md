@@ -177,10 +177,21 @@ These are self-contained and come with tests. No Fable needed.
 
 **Correctness fixes** (holes found in the "what might we be missing?" review):
 
-- **An optional "always re-check file contents" mode.** To go fast, brix assumes a
-  file is unchanged when its size and timestamp both match. In rare cases a file's
-  contents can change while those stay the same; this mode would catch it, at the
-  cost of some speed.
+- **An optional "always re-check file contents" mode — done (2026-07-18, Opus).**
+  To go fast, the detector assumes a file is unchanged when its size and mtime
+  both match; a content change that leaves both unchanged (a same-size in-place
+  edit that restores the mtime, or a tool that rewrites preserving timestamps) is
+  missed. `verify_contents=True` (on `IncrementalBuilder` and `build_stack`)
+  makes the default detector re-read and re-hash every file, catching it, at the
+  cost of speed. Opt-in; it never changes the *returned* digest for an actually-
+  unchanged file, so it stays fingerprint-compatible with the fast path (a
+  no-op still replays). It configures the default detector and rides the boundary
+  as a `verify_contents` wire flag, so the Rust engine's native detector honors
+  it too (both hash paths skip the stat cache — and the git vouch — when set).
+  `tests/test_verify_contents.py` pins that the fast path *misses* the collision
+  and the mode *catches* it, on both engines. **Follow-up:** a `build
+  --verify-contents` CLI flag for a one-off paranoid run (today it is a
+  build-file/`build_stack` argument).
 - **Record the environment a build used.** An environment variable or machine
   setting that a tool reads, but that the build file didn't declare, can change a
   build's result without brix noticing — the classic "works on my machine, fails
