@@ -3,8 +3,10 @@
 Status: **phases 1–2 implemented (2026-07-17, Opus)** — phase 1 diagnostic
 capture + `brix.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
 and phase 2 the `env_used=` guard (`src/brix/actions.py`,
-`tests/test_env_used.py`, golden-pinned cross-engine); phase 3 deferred with its
-boundary drawn below. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+`tests/test_env_used.py`, golden-pinned cross-engine); phase 3 (automatic
+`getenv` discovery) **struck as unsound (2026-07-18)** and replaced by an
+isolation direction — scrub-to-allowlist — reasoned below. **Phase 2
+Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion
@@ -68,12 +70,88 @@ step to catching it."* That word — *first* — sets the order:
    build, is per build (a graph object constructed once and reused across env
    changes would hold a stale snapshot; the standard callable pattern does
    not).
-3. **Automatic detection (deferred, heavy).** Observe which variables the
-   process actually read (`getenv` via `ptrace`/`strace`, or a shim
-   environment) and fold them in like depfile-discovered headers
-   (`docs/…` incremental depfile path). Turns unknowns into tracked deps with
-   no declaration, but is platform-specific and fragile. Parked as the
-   "automatic" endgame.
+3. **Isolation, not automatic detection (the sound path; opt-in).** The
+   original plan here was to *discover* which variables a tool read (`getenv`
+   via `ptrace`/`strace`, or a shim environment) and fold them in like
+   depfile-discovered headers. **That is unsound, and is struck.** Observing
+   that a tool read `CFLAGS` on *this* build does not bound what it reads on the
+   *next* one: a tool can take a different branch on a different input and read a
+   variable it did not touch this time, so a discovered env set is only ever a
+   **lower bound**. Used as fingerprint material, a change to a variable the tool
+   *would* read slips through as an up-to-date cache hit — a silently wrong
+   build.
+
+   The depfile analogy is false, and the reason is worth recording. File
+   discovery is **self-healing**: when a source is edited to `#include` a new
+   header, that edit is *itself a tracked file change*, so the action re-runs,
+   re-emits its depfile, and re-discovers the new dependency — the trigger to
+   re-discover is always observed. Environment discovery has **no such
+   trigger**: flipping `EXPERIMENTAL=1` changes a tool's behavior with *zero*
+   change to any tracked file, so nothing re-runs and last build's stale env set
+   persists. Depfiles work precisely because the change that alters the
+   dependency set is visible; env "discovery" fails precisely because it is not.
+
+   So for the environment the sound design is **isolation, not detection**: run
+   each action with a scrubbed environment — empty except an explicit
+   **allowlist** — so an undeclared variable is simply *absent*, identical on
+   every build by construction, and *cannot* be a hidden input. This makes the
+   enumeration problem moot (you never have to know what a tool *might* read) and
+   flips the failure mode from silent-wrong to **loud-and-fixable**: a tool that
+   needs an undeclared variable fails immediately (add it to the allowlist)
+   rather than succeeding with a stale result. A sane build-wide default
+   (`PATH`, `HOME`, `LANG`, `TMPDIR`, …) means nobody starts from zero. The
+   mechanism is pure subprocess-environment manipulation, so — unlike a `ptrace`
+   tracer — it is **portable** across platforms. Opt-in, and a natural post-trial
+   item.
+
+   **Settled API shape (2026-07-18).** Rather than a second field, the allowlist
+   *is* the declared environment. Collapse today's two fields — `env=` (set a
+   variable to a value) and `env_used=` (track an ambient variable) — into a
+   single `env` dict whose **value** carries the intent, via module-level
+   sentinels:
+
+   - `env={"LANG": "C"}` — **set** the variable to a literal value (today's
+     `env=`); fingerprinted.
+   - `env={"JAVA_HOME": SYSTEM}` — **take it from the ambient environment**, use
+     that value, and fingerprint it, so a change since the last build re-stales
+     the action (today's `env_used=`, but it now also *supplies* the value, and
+     under scrub is what permits the variable through).
+   - `env={"SECRET": UNSET}` — **force-absent** for this subprocess, even when
+     the ambient environment or the build-wide default would otherwise supply it.
+     This is how you *withhold* a variable from one action (the question a pure
+     allowlist can't answer): with scrub on, not naming a variable already hides
+     it, and `UNSET` overrides the default allowlist for a single action; with
+     scrub off, `UNSET` is the only way to hide an inherited variable.
+
+   This **deletes** the `env_used` concept (and its awkward past-tense name)
+   instead of renaming it: one field, one mental model — *"here is this action's
+   environment; each variable is pinned, taken from the system, or hidden."* The
+   scrubbed environment a process sees is exactly `env`'s literal + `SYSTEM`
+   entries, plus the build-wide default allowlist, minus its `UNSET` entries.
+
+   Semantics to preserve when built: (a) **additive, not total** — declaring
+   `env` adds to the default allowlist rather than replacing the whole
+   environment, so today's no-scrub behavior is unchanged and *scrub* (the
+   opt-in mode) is what strips undeclared variables; the sentinels work in both
+   modes (scrub only changes the fate of variables you did *not* name).
+   (b) **`SYSTEM` preserves unset-vs-empty** — an ambient-unset variable resolves
+   to *absent*, not `""` (the phase-2 review's invariant), via the same per-build
+   snapshot `env_used` does today (resolved when `graph_supplier` runs, so a
+   changed value re-stales). (c) **`SYSTEM` is declared, not discovered** — so it
+   does not reintroduce the unsoundness struck above; the completeness burden is
+   the bounded, loud-under-scrub one, not path-dependent auto-detect.
+
+   This is presentational with respect to fingerprints — a `SYSTEM` entry
+   fingerprints as `env_used` does today, a literal as `env=` does today, `UNSET`
+   is absence — so the *shape* introduces no new fingerprint hazard. The real
+   subtleties (scrub × fingerprint, cross-engine byte-identity, the guard-bypass
+   surface the phase-2 review probed) live in the **implementation**, which
+   crosses the fingerprint path and is therefore reserved for a **Fable review**
+   when built — the same gate phase 2 passed, not something to spend before code
+   exists. Merging a shipped, golden-pinned field costs more than a rename
+   (`actions.py`, the reserved-key plumbing, `tests/test_env_used.py`, the
+   golden, these docs), but it is a net *simplification* (one field, one model,
+   one fewer concept), and pre-1.0 is when to do it.
 
 Phase 1 alone is the piece that de-risks the air-gapped monorepo trial: when a
 build there behaves differently and the operator is debugging **without AI**,
@@ -180,8 +258,9 @@ semantics.
 - It does **not** rebuild on an environment change (that is phase 2's guard).
 - It does **not** fingerprint anything, split any cache, or enter the Rust
   path.
-- It does **not** try to detect which variables a tool *read* (phase 3); it
-  records the whole filtered environment and lets the diff speak.
+- It does **not** try to detect which variables a tool *read* (that ambition is
+  struck as unsound — see Phasing §3, which replaces it with scrub-to-allowlist
+  isolation); it records the whole filtered environment and lets the diff speak.
 
 ## Verification plan
 

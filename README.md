@@ -1,27 +1,112 @@
 # Brix
 
-Brix is a build-system toolkit for defining build graphs in ordinary Python.
-You describe the files and data each step uses; Brix plans the work, infers
-dependencies, runs independent steps in parallel, and avoids work whose inputs
-have not meaningfully changed.
+Brix is a library for building your project from your own Python code — an API
+small enough to read in a sitting, yet comprehensive enough to express a real,
+multi-language build. You describe the files and data each step uses; Brix plans
+the work, infers dependencies, runs independent steps in parallel, and avoids
+work whose inputs have not meaningfully changed.
 
-The Python API is the build language. A shared Rust engine handles planning,
-dependency inference, scheduling, incremental rebuilds, caching, atomic
-staging, persistent workers, and content-aware comparisons. That engine is the
-default today and is designed to support a future JavaScript/TypeScript API as
-well.
+The Python API is the build language; the engine underneath gives you three
+things a serious build needs:
+
+- **Fast.** The engine is written in Rust and owns the planning, scheduling, and
+  change detection, and it keeps compiler processes warm between builds — so even
+  large builds, and every edit-compile loop, stay quick.
+- **Atomic.** A build is all-or-nothing, like a `git` commit — it either applies
+  in full or leaves your workspace exactly as it was, so a failure never leaves a
+  half-built tree.
+- **Incremental builds that match a clean build, exactly.** Rebuilding only what
+  changed is never a correctness compromise: an incremental build produces the
+  same result a from-scratch build would — down to removing outputs whose source
+  is gone.
+
+That engine is the default today and is designed to back a future
+JavaScript/TypeScript API as well.
+
+## In plain terms
+
+A build tool turns your source code into the finished program. The slow way is
+to rebuild everything from scratch every time you change one file. The fast way
+is to redo only the parts your change affects — but most tools that try to be
+fast sometimes get it wrong and hand you a stale or broken result.
+
+Brix is the fast way *without* the wrong. You write a short Python file that
+says, for each step, which files go in and which come out. Brix reads that and
+works out the rest: the right order to do things, what can run at the same time,
+and — the important part — exactly what needs redoing when you change something.
+Change one file and only the steps that truly depend on it run again; change
+nothing that matters and it does no work at all. Think of a recipe with many
+steps: swap one ingredient and you only redo the steps that used it, not the
+whole meal.
+
+And because the build file is just a small, plain Python file, you don't even
+have to write it yourself — an AI assistant can write it for you and check it by
+running the build.
 
 ## Why Brix
 
-Brix aims to combine a small, readable authoring experience with the safety and
-speed expected from a serious build system:
+Almost nobody wants to become an expert in their build system. People want it to
+be easy to write, fast, and correct — and to otherwise stay out of the way.
+
+Yet build tools make you pick the wrong trade-off. On one side, simple-but-unsafe: a
+Makefile is quick to write but silently wrong — it misses a changed header, has
+no real notion of what "changed" means, and happily ships a stale build. On the
+other, correct-but-heavy: Bazel and Buck are correct, but they are a sealed world
+with their own language, their own sandbox, and a rewrite-everything migration;
+Gradle is powerful, but that power turns build files into imperative code that
+rots.
+
+Brix takes a different bet: **write your build in ordinary Python — declare what
+each step reads and writes — and get the incremental correctness and safety of
+the heavy tools without the DSL, the sandbox, or the migration cliff.** You
+author with Python's full power (a loop to stamp out fifty services, a function
+to factor a shared pattern), but a step's *meaning* is a small, declarative
+vocabulary: its inputs and its outputs — declared coarsely, as patterns, not
+file-by-file. You name `src/*.c`; Brix discovers each file's actual `#include`
+headers (and a TypeScript module's imports) for you, so you never hand-maintain a
+dependency list. From there the engine infers the dependency edges, runs
+independent work in parallel, skips anything whose meaning has not changed, and
+refuses any graph it cannot build correctly. Expressiveness for assembling the
+build; rails around what the build means.
+
+This is not aspirational. The engine is cross-checked between a Python and a Rust
+implementation that must produce byte-identical decisions; content-key *lenses*
+compare a Java jar by its ABI and a TypeScript module by its declared types, so
+an implementation-only edit lets dependents replay instead of rebuild; atomic
+staging means a failed build never half-updates your tree; and on JUnit 5's
+platform modules the warm edit-compile loop runs 5–12× faster than Gradle. Brix
+can adopt an existing project's Maven or Gradle classpath, so you migrate
+incrementally rather than all at once.
+
+And because those build files are small, declarative Python — the language coding
+assistants know best — an assistant can *write and maintain them for you*, and
+check its own work by running the build: `status` explains what would happen
+before it does, and the planner rejects an ambiguous graph outright. It is not
+raw configurability that makes this work but expressiveness with rails — a small,
+checkable vocabulary over a language the model already knows. The examples in
+this repository were themselves authored this way.
+
+## What you get
+
+A small, readable authoring experience with the safety and speed expected from a
+serious build system:
 
 - Build steps declare logical inputs and outputs instead of hand-written order.
 - Dependencies are inferred from overlapping data sets.
+- Transitive dependencies are discovered automatically — a C file's `#include`
+  headers, a TypeScript module's imports — so you declare intent coarsely, never
+  a file-by-file dependency list.
 - Java ABI and TypeScript declaration lenses avoid downstream rebuilds when a
   public interface did not change.
 - Incremental metadata handles changed and deleted sources.
-- A shared result cache can restore builds across workspaces.
+- On a large monorepo, Brix loads and builds only the slice a change affects,
+  not the whole repository.
+- Persistent compiler workers stay warm between builds, so the edit-compile loop
+  does not pay compiler startup each time.
+- A shared result cache can restore builds across workspaces — a build CI or a
+  teammate already ran restores instantly instead of rebuilding.
+- Generate your project's own API docs (`javadoc`, `typedoc`, `doxygen`) as
+  tracked, incremental build outputs, like anything else in the graph.
 - Atomic staging prevents failed builds from partly changing the workspace.
 - `status` explains what would run and why.
 - `Graph.force_order()` covers the exceptional case where two steps need an

@@ -202,9 +202,25 @@ These are self-contained and come with tests. No Fable needed.
   pins the cross-engine parity. It never *sets* the variable (unlike `env=`) or
   reaches the command; unset is distinct from empty. **Phase 2 crosses the
   fingerprint path, so it is queued for a Fable review** (reserved role, as with
-  `content_key`). **Deferred:** phase 3 auto-detects which variables a tool read
-  (`getenv` tracing, folded in like depfile headers). See
-  `docs/environment-recording.md`.
+  `content_key`). **Phase 3 struck as unsound (2026-07-18):** the old plan was to
+  auto-*detect* which variables a tool read (`getenv` tracing, folded in like
+  depfile headers), but env discovery is path-dependent — a variable read on one
+  input isn't read on another, so a discovered set is only a lower bound and a
+  changed-but-unread-this-time variable slips through as a stale cache hit. The
+  depfile analogy fails because file discovery is self-healing (the source edit
+  that adds an `#include` is itself a tracked change that forces re-discovery)
+  while env has no such trigger (flipping a variable changes behavior with no
+  tracked-file change). The sound replacement is **isolation, not detection**:
+  scrub each action's environment to an explicit **allowlist**, so undeclared
+  variables are simply absent and the failure mode flips from silent-wrong to
+  loud-and-fixable. **Settled API shape (2026-07-18):** collapse `env=` (set) and
+  `env_used=` (track) into a single `env` dict whose value carries the intent via
+  sentinels — a literal *sets*, `SYSTEM` *takes it from the ambient environment*
+  and fingerprints it, `UNSET` *withholds* it from that action — which deletes
+  the `env_used` concept (and its awkward name) rather than renaming it. Portable
+  (pure env manipulation, no `ptrace`), opt-in, post-trial. The implementation
+  crosses the fingerprint path, so it is **reserved for a Fable review when
+  built** (same gate phase 2 passed). See `docs/environment-recording.md`.
 
 **Making Kotlin builds fast:**
 
@@ -340,17 +356,25 @@ These are self-contained and come with tests. No Fable needed.
 - **The "did the meaningful part change?" trick for Go and Protobuf.** brix already
   does this for Java and TypeScript (skip rebuilding users when only internals
   changed). Add it for Go and Protobuf when those languages show up in a project.
-- **Generate API docs for the *user's* project as a build step.** A brix helper
-  that runs the ecosystem's doc generator over a project's own sources —
-  `javadoc` for Java, `typedoc`/`tsdoc` for TypeScript, `doxygen` for C/C++,
-  `pydoc`/`pdoc` for Python — as an ordinary action, so a project's API docs are
-  a tracked, incremental build output like anything else (rebuilt only when the
-  sources that feed them change, cacheable, composable with the rest of the
-  graph). Distinct from brix's *own* documentation (that is the "generate HTML
+- **Generate API docs for the *user's* project as a build step — done
+  (2026-07-18, Opus).** brix now ships typed actions that run the ecosystem's
+  doc generator over a project's own sources as ordinary, tracked, incremental
+  steps: `java.JavadocAction` (`javadoc`), `ts.TypedocAction` (`typedoc`), and
+  `cpp.DoxygenAction` (`doxygen`). Each declares the sources as inputs (so the
+  doc set rebuilds only when a source changes and replays otherwise) and its
+  whole output tree as one `FileData` dir + recursive `{name}` glob (so it
+  stages atomically and caches like any other output). `JavadocAction` also
+  takes a `classpath` (abi-lensed, so an impl-only dependency change replays);
+  `DoxygenAction` is config-driven (`doxygen <Doxyfile>`), declaring the
+  `Doxyfile` and `output_dir` explicitly since brix can't read them out of the
+  config. Distinct from brix's *own* documentation (the "generate HTML
   documentation" item below); this is doc generation offered *to* the projects
-  brix builds. Likely shapes: `java.javadoc(sources=…, out=…)`,
-  `ts.typedoc(…)`, `cpp.doxygen(…)` — each just an `ExternalProcessAction` with
-  the right declared inputs/outputs, so incrementality and caching come for free.
+  brix builds. All three are curated into the modules' `__all__`, so they appear
+  in the public API site automatically. Lowering-shape tests plus a real-`javadoc`
+  end-to-end incremental test in `tests/test_docgen.py`. **Follow-up:** a
+  `pydoc`/`pdoc` action for Python and a warm-daemon path are still open, and no
+  classpath/tool-path resolution is threaded in v1 (users pass tool flags via
+  `options=`).
 - **TypeScript: automatic import-dependency tracking — done (2026-07-18,
   Opus).** A `ts.CompileAction` already tracked *declared* cross-module deps
   (another module's built `.d.ts`, ts-dts-lensed); it now also discovers the
