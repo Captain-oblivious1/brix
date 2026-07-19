@@ -1,5 +1,5 @@
 site_name: Brix
-site_description: A build-system toolkit for defining build graphs in ordinary Python.
+site_description: A library for building your project from your own Python code — a small, readable API for fast, correct, multi-language builds.
 docs_dir: docs/site
 site_dir: site
 use_directory_urls: false
