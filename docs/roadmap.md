@@ -107,7 +107,15 @@ compile + package + incremental rebuild (a comment-only edit recompiles but does
 *not* re-jar, since the class bytes are unchanged). Newest: **the_silver_searcher**
 (`ag`) — a real C tool whose PCRE/zlib/lzma system-library deps resolve via
 `cpp.pkg_config`; brix compiles its 12 TUs (win32 one dropped with glob `-`) and
-links a working `ag 2.2.0` (`examples/the_silver_searcher/`).
+links a working `ag 2.2.0` (`examples/the_silver_searcher/`). Newest
+(2026-07-18): **polyglot Java+TS monorepo** (`examples/polyglot_monorepo/`) — a
+synthetic stand-in for the access-gated air-gapped target, and the first dogfood
+of a *mixed-language* workspace. A Java backend (`libs/model`, `services/orders`)
+and a TypeScript frontend (`shared`, `app`) load into one `load_workspace`;
+`verify_polyglot.py` proves lazy loading partitions across languages (a backend
+edit loads no frontend package and vice versa; the ts-dts `shared → app` edge
+still pulls in the dependent), building the Java slice for real. Guarded by
+`tests/test_polyglot_monorepo.py` on both engines.
 
 Completed: **multi-module cross-suite test selection** — the Jackson dogfood
 now builds real 2.19.4 annotations, core, and databind jars plus one smoke suite

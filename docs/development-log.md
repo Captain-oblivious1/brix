@@ -1,5 +1,24 @@
 # Development log
 
+- **Polyglot Java+TS monorepo dogfood — cross-language lazy loading.** The
+  single-language dogfoods (`hierarchical/` for the generic tool, `monorepo_dogfood.py`
+  for C) never exercised the trial's actual shape: a mixed Java+TS workspace.
+  `examples/polyglot_monorepo/` fills that — a Java backend (`libs/model`,
+  `services/orders`, `java.JarAction`) and a TypeScript frontend (`shared`,
+  `app` where `app` depends on `shared` via the ts-dts lens, `ts.CompileAction`)
+  in one `load_workspace`. The claim it proves that the others don't: **lazy
+  loading partitions a *mixed-language* workspace** — `load_affected` on a
+  backend edit loads no frontend package and vice versa, while the intra-stack
+  `shared → app` edge is still honored. Selection is graph structure, so it is
+  verified with no build tools (proven here for all five change sets); the
+  harness then builds for real what the toolchain allows — the Java slice here,
+  the TS slice where `tsc` is present. Git-driven selection (`changed=None`) is
+  the same call, already proven in `monorepo_dogfood.py`, so this uses explicit
+  change sets for determinism. Built as the closest available rehearsal of the
+  air-gapped ~50-service Java+TS target while that repo is access-gated.
+  `verify_polyglot.py`; `tests/test_polyglot_monorepo.py` guards the partition
+  (both engines) and the Java build.
+
 - **Starter templates — a copy-and-go Java service and TypeScript service.**
   `examples/templates/java-service/` and `examples/templates/typescript-service/`:
   minimal, generic, *working* projects to copy as the start of your own, not
