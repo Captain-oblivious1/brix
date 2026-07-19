@@ -429,6 +429,17 @@ fn build(
     let layers = build_layers(&config, &root, &stores.unwrap_or_default(), custom.clone())
         .map_err(PyValueError::new_err)?;
     let layer_refs: Vec<&dyn BuildLayer> = layers.iter().map(|b| b.as_ref()).collect();
+    // Scrub is a build-wide policy carried on the incremental layer spec.
+    let scrub = config
+        .get("layers")
+        .and_then(|v| v.as_array())
+        .map(|entries| {
+            entries.iter().any(|e| {
+                e.get("kind").and_then(|k| k.as_str()) == Some("incremental")
+                    && e.get("scrub").and_then(|s| s.as_bool()).unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
 
     // Cross-build worker daemons (docs/java-fast-builds.md v2): one knob.
     // 0 = no persistence (v1 pipes, terminate at build end). The registry
@@ -470,7 +481,7 @@ fn build(
 
     let result = py.detach(|| match &reporter {
         Some(bridge) => {
-            brix_core::execute_with_workers(&mut plan, jobs, &layer_refs, bridge, workers)
+            brix_core::execute_with_workers(&mut plan, jobs, &layer_refs, bridge, workers, scrub)
         }
         None => brix_core::execute_with_workers(
             &mut plan,
@@ -478,6 +489,7 @@ fn build(
             &layer_refs,
             &NullReporter,
             workers,
+            scrub,
         ),
     });
 

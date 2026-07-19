@@ -33,12 +33,21 @@ variable through *without* fingerprinting it — deliberately absent from
 `action_key` (proven), since fingerprinting `PATH` would break cross-machine
 caching. The scrub-allowlist names (`env_pass`, `env_used`) now cross the wire for
 the executor to consume; Rust tolerates them (golden regenerated, values
-unchanged). **Remaining — the one piece left:** the **scrub runtime** itself
-(authoritative env: a build-wide `scrub` flag threaded to both process executors,
-which then build the environment from `BASE_ENV` + the declared allowlist instead
-of inheriting everything). That is the largest single sub-piece — it touches build
-orchestration on both engines — and it completes the phase, at which point the
-whole phase-3 diff gets the **Fable review**. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+unchanged). **Increment 5 shipped (2026-07-19) — phase-3 functionally complete.**
+The **scrub runtime**: `build_stack(scrub=True)` / `IncrementalBuilder(scrub=True)`
+runs each process with an *authoritative* environment. The flag rides the
+incremental layer (Python: `execute` reads it → `NodeContext.scrub`; Rust: a
+`scrub` layer-spec flag read in `lib.rs` → the `NodeContext`), and both executors
+build the env from scratch via `scrub_env` — `BASE_ENV` plumbing
+(`PATH`/`HOME`/`TMPDIR`) + the action's allowlist (`env_used` SYSTEM + `env_pass`
+PASS names, resolved from ambient) + literal `env=`, minus `UNSET` — nothing
+inherited (`env_clear` in Rust; build-from-empty in Python). Proven identical on
+both engines (`tests/test_env_system.py`): an undeclared ambient variable is
+**absent** under scrub while a declared `SYSTEM` var and `PATH` remain, and with
+scrub off it leaks through (the counterpart that makes the guarantee meaningful).
+Goldens unaffected. **The whole phase-3 diff is now ready for the Fable review**
+(it crosses the fingerprint path via the per-language `SYSTEM` defaults, the
+`UNSET` identity, and the `env-vocab` golden). **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion

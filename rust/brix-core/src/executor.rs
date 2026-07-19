@@ -113,7 +113,19 @@ fn run_process_node(node: &Node, ctx: &NodeContext, workers: &WorkerRegistry) ->
         Action::Process { env_unset, .. } => env_unset.as_slice(),
         _ => empty.as_slice(),
     };
-    run_process(&label, &command, &ctx.workspace_root, &env, env_unset)
+    if ctx.scrub {
+        // Authoritative environment: BASE_ENV + the action's SYSTEM/PASS allowlist
+        // + literal env=, minus UNSET; nothing inherited. Mirrors the Python path.
+        let (env_used, env_pass) = match action {
+            Action::Process { env_used, env_pass, .. } => (env_used.as_slice(), env_pass.as_slice()),
+            _ => (empty.as_slice(), empty.as_slice()),
+        };
+        let mut allow: Vec<String> = env_used.to_vec();
+        allow.extend_from_slice(env_pass);
+        let scrubbed = crate::process::scrub_env(&env, &allow, env_unset);
+        return run_process(&label, &command, &ctx.workspace_root, &scrubbed, &[], true);
+    }
+    run_process(&label, &command, &ctx.workspace_root, &env, env_unset, false)
 }
 
 /// Run the node through the layer stack, innermost first in the given list
@@ -229,7 +241,7 @@ pub fn execute(
     layers: &[&dyn BuildLayer],
     reporter: &dyn Reporter,
 ) -> BuildResult {
-    execute_with_workers(plan, jobs, layers, reporter, WorkerRegistry::new())
+    execute_with_workers(plan, jobs, layers, reporter, WorkerRegistry::new(), false)
 }
 
 /// `execute` with a caller-built worker registry — how the boundary turns
@@ -242,9 +254,11 @@ pub fn execute_with_workers(
     layers: &[&dyn BuildLayer],
     reporter: &dyn Reporter,
     workers: WorkerRegistry,
+    scrub: bool,
 ) -> BuildResult {
     let mut states = NodeStateTable::new();
     let mut ctx = NodeContext::for_root(std::path::PathBuf::from(&plan.root));
+    ctx.scrub = scrub;
     // Python: `jobs or min(32, cpu_count or 4)` — 0 is falsy and falls back.
     let max_workers = jobs.filter(|&j| j > 0).unwrap_or_else(|| {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(32)

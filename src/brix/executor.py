@@ -75,6 +75,13 @@ def _run_process_node(node: ExecutionNode, ctx: NodeContext, workers) -> Process
         env = render_env(action, ctx)
     except RenderError as exc:
         return ProcessResult(action_name=action.label, command="", stderr=f"brix: {exc}")
+    if ctx.scrub:
+        from .process import scrub_env
+
+        env = scrub_env(env, set(action.env_used) | set(action.env_pass), action.env_unset)
+        return run_process(
+            action.label, command, cwd=ctx.workspace_root, env=env, authoritative=True,
+        )
     return run_process(
         action.label, command, cwd=ctx.workspace_root,
         env=env or None, env_unset=action.env_unset or None,
@@ -172,6 +179,9 @@ def execute(
     reporter = reporter if reporter is not None else Reporter()
     states = NodeStateTable()
     ctx = NodeContext.for_root(plan.root)
+    # Scrub is a build-wide policy carried by the incremental layer (the parallel
+    # of the Rust engine reading it from the incremental layer spec).
+    ctx.scrub = any(getattr(layer, "scrub", False) for layer in layers)
     workers = WorkerRegistry()
     max_workers = jobs or min(32, os.cpu_count() or 4)
     pending: set[int] = {n.id for n in plan.nodes}

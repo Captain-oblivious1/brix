@@ -49,6 +49,10 @@ class NodeContext:
     workspace_root: Path
     output_root: Path
     deletions_root: Path | None = None
+    # Scrub mode: run each process with an *authoritative* environment (only the
+    # plumbing base plus the action's declared allowlist), not the inherited one.
+    # Set once per build from the incremental layer; see `process.scrub_env`.
+    scrub: bool = False
 
     @classmethod
     def for_root(cls, root: Path) -> "NodeContext":

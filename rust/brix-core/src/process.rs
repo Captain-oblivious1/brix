@@ -67,12 +67,44 @@ impl ProcessResult {
 /// would crash the build on invalid bytes; lossy is the deliberate, gentler
 /// divergence — invalid output bytes become U+FFFD instead of an engine
 /// error).
+/// Universal plumbing an authoritative (scrub) environment always includes, so a
+/// scrubbed build still finds its tools/caches. Must match `brix.env.BASE_ENV`.
+pub const BASE_ENV: &[&str] = &["PATH", "HOME", "TMPDIR"];
+
+/// The authoritative environment for scrub mode: only `BASE_ENV` plus the
+/// action's declared allowlist (`allow_names` = its SYSTEM + PASS names), each
+/// resolved from this process's ambient env, with `literal_env` layered on and
+/// `env_unset` removed. Mirrors `brix.process.scrub_env`.
+pub fn scrub_env(
+    literal_env: &[(String, String)],
+    allow_names: &[String],
+    env_unset: &[String],
+) -> Vec<(String, String)> {
+    use std::collections::BTreeMap;
+    let mut allow: Vec<&str> = BASE_ENV.to_vec();
+    allow.extend(allow_names.iter().map(|s| s.as_str()));
+    let mut final_env: BTreeMap<String, String> = BTreeMap::new();
+    for name in allow {
+        if let Ok(v) = std::env::var(name) {
+            final_env.insert(name.to_string(), v);
+        }
+    }
+    for (k, v) in literal_env {
+        final_env.insert(k.clone(), v.clone());
+    }
+    for name in env_unset {
+        final_env.remove(name);
+    }
+    final_env.into_iter().collect()
+}
+
 pub fn run_process(
     action_name: &str,
     command: &str,
     cwd: &Path,
     env: &[(String, String)],
     env_unset: &[String],
+    authoritative: bool,
 ) -> ProcessResult {
     let argv = match crate::shlex::split(command) {
         Ok(argv) => argv,
@@ -93,6 +125,11 @@ pub fn run_process(
     }
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..]).current_dir(cwd);
+    if authoritative {
+        // Scrub: the passed env is the *complete* environment; drop the inherited
+        // one entirely (mirrors Python building full_env from scratch).
+        cmd.env_clear();
+    }
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -154,7 +191,7 @@ mod tests {
 
     #[test]
     fn ok_run_captures_stdout() {
-        let r = run_process("echo", "echo hello", &cwd(), &[], &[]);
+        let r = run_process("echo", "echo hello", &cwd(), &[], &[], false);
         assert_eq!(r.exit_code, Some(0));
         assert!(r.ok());
         assert_eq!(r.stdout, "hello\n");
@@ -163,7 +200,7 @@ mod tests {
 
     #[test]
     fn nonzero_exit_is_failure() {
-        let r = run_process("false", "false", &cwd(), &[], &[]);
+        let r = run_process("false", "false", &cwd(), &[], &[], false);
         assert_eq!(r.exit_code, Some(1));
         assert!(!r.ok());
         assert_eq!(r.summary(), "FAILED (exit 1): false");
@@ -171,10 +208,10 @@ mod tests {
 
     #[test]
     fn empty_and_unsplittable_commands_never_ran() {
-        let r = run_process("x", "", &cwd(), &[], &[]);
+        let r = run_process("x", "", &cwd(), &[], &[], false);
         assert_eq!(r.exit_code, None);
         assert_eq!(r.stderr, "brix: empty command line");
-        let r = run_process("x", "'unterminated", &cwd(), &[], &[]);
+        let r = run_process("x", "'unterminated", &cwd(), &[], &[], false);
         assert_eq!(r.exit_code, None);
         assert!(r.stderr.starts_with("brix: bad command line:"));
         assert_eq!(r.summary(), "FAILED (did not run): x");
@@ -182,7 +219,7 @@ mod tests {
 
     #[test]
     fn missing_binary_cannot_execute() {
-        let r = run_process("x", "/no/such/binary-brix-test", &cwd(), &[], &[]);
+        let r = run_process("x", "/no/such/binary-brix-test", &cwd(), &[], &[], false);
         assert_eq!(r.exit_code, None);
         assert!(r.stderr.starts_with("brix: cannot execute:"));
     }
@@ -195,6 +232,7 @@ mod tests {
             &cwd(),
             &[("BRIX_TEST_VAR".to_string(), "shadowed".to_string())],
             &[],
+            false,
         );
         assert_eq!(r.stdout, "shadowed\n");
     }
@@ -210,6 +248,7 @@ mod tests {
             &cwd(),
             &[],
             &["BRIX_TEST_UNSET".to_string()],
+            false,
         );
         std::env::remove_var("BRIX_TEST_UNSET");
         assert_eq!(r.stdout, "[]\n");

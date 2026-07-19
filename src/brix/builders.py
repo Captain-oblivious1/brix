@@ -123,10 +123,18 @@ class IncrementalBuilder(NestableBuilder):
         metadata_dir: str | Path = "build/.brix",
         detector=None,
         verify_contents: bool = False,
+        scrub: bool = False,
     ) -> None:
         self._supplier = graph_supplier if callable(graph_supplier) else lambda: graph_supplier
         self.root = Path(root).resolve()
         self.metadata_dir = metadata_dir
+        # Scrub mode (opt-in): run each process with an *authoritative* environment
+        # — only the plumbing base (brix.env.BASE_ENV) plus each action's declared
+        # allowlist (SYSTEM/PASS names) and literal env=, minus UNSET — so an
+        # undeclared ambient variable is simply absent and cannot silently affect
+        # the build. Carried on the incremental layer (Python) and emitted as a
+        # `scrub` wire flag (Rust). See docs/environment-recording.md.
+        self._scrub = scrub
         # "Always re-check file contents": force the default detector to re-hash
         # every file instead of trusting its (mtime, size) stat cache, catching
         # the rare content change that leaves size and mtime unchanged. Opt-in
@@ -162,7 +170,7 @@ class IncrementalBuilder(NestableBuilder):
             detector = TimeAndHashChangeDetector(
                 self.root, metadata, verify_contents=self._verify_contents
             )
-        return [IncrementalLayer(metadata, detector)]
+        return [IncrementalLayer(metadata, detector, scrub=self._scrub)]
 
     def source_graph(self) -> Graph:
         return self._supplier()
@@ -177,6 +185,8 @@ class IncrementalBuilder(NestableBuilder):
             spec["git_detection"] = True
         if self._verify_contents:
             spec["verify_contents"] = True
+        if self._scrub:
+            spec["scrub"] = True
         return [spec]
 
     def build(self, jobs: int | None = None, reporter=None,
@@ -375,6 +385,7 @@ def build_stack(
     staging_dir: str | Path | None = "build/staging",
     detector=None,
     verify_contents: bool = False,
+    scrub: bool = False,
 ) -> "AtomicBuilder | NestableBuilder":
     """Assemble the standard builder stack in the correct order —
     ``AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))`` — so the ordering
@@ -388,8 +399,10 @@ def build_stack(
     ``GitChangeDetector``); ``None`` uses the default stat detector.
     ``verify_contents=True`` makes the default detector re-hash every file
     instead of trusting its ``(mtime, size)`` cache — slower, but it catches a
-    content change that leaves size and mtime unchanged. Defaults give the full
-    recommended stack.
+    content change that leaves size and mtime unchanged. ``scrub=True`` runs each
+    process with an *authoritative* environment (only the plumbing base plus each
+    action's declared allowlist), so an undeclared ambient variable can't silently
+    affect the build. Defaults give the full recommended stack.
 
     Returns a builder; for `cli.main`'s ``builder_factory`` (called fresh per
     invocation, so ``commit``/``discard`` rebuild cleanly), pass a thunk::
@@ -398,7 +411,7 @@ def build_stack(
     """
     inner: NestableBuilder = IncrementalBuilder(
         graph_supplier, root=root, metadata_dir=metadata_dir, detector=detector,
-        verify_contents=verify_contents,
+        verify_contents=verify_contents, scrub=scrub,
     )
     if store is not None:
         inner = CacheBuilder(inner, store=store)

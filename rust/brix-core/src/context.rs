@@ -21,6 +21,10 @@ pub struct NodeContext {
     pub workspace_root: PathBuf,
     pub output_root: PathBuf,
     pub deletions_root: Option<PathBuf>,
+    /// Scrub mode: run each process with an *authoritative* environment (only the
+    /// plumbing base plus the action's declared allowlist), not the inherited one.
+    /// Set once per build from the incremental layer spec's `scrub` flag.
+    pub scrub: bool,
 }
 
 impl NodeContext {
@@ -31,6 +35,7 @@ impl NodeContext {
             workspace_root: root.clone(),
             output_root: root,
             deletions_root: None,
+            scrub: false,
         }
     }
 

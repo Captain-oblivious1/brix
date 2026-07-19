@@ -1,5 +1,24 @@
 # Development log
 
+- **Env phase-3 complete: the scrub runtime (authoritative environment).** The
+  final piece, and what turns "no silent env" from *mitigated* into *guaranteed*.
+  `build_stack(scrub=True)` / `IncrementalBuilder(scrub=True)` runs each process
+  with an environment built **from scratch** — `BASE_ENV` plumbing
+  (`PATH`/`HOME`/`TMPDIR`, PASS) + the action's declared allowlist (its `SYSTEM`
+  and `PASS` names, resolved from the ambient env) + literal `env=`, minus
+  `UNSET` — with nothing inherited. So an undeclared ambient variable is simply
+  **absent** and cannot silently affect the build. Opt-in; scrub off is the
+  unchanged additive default. The build-wide flag rides the incremental layer:
+  Python's `execute` reads it and sets `NodeContext.scrub`; the Rust engine emits
+  a `scrub` layer-spec flag read in `lib.rs` and set on its `NodeContext`. Both
+  executors share the same `scrub_env` construction (`env_clear` in Rust,
+  build-from-empty in Python), the allowlist names (`env_pass`/`env_used`)
+  crossing the wire. Proven identical on both engines in `tests/test_env_system.py`
+  (an undeclared var absent under scrub, declared `SYSTEM` + `PATH` present; and
+  the scrub-off counterpart where it leaks). Goldens unaffected. **The whole
+  phase-3 env diff (SYSTEM/UNSET/PASS + scrub + per-language defaults) is now ready
+  for the Fable review**, since it crosses the fingerprint path.
+
 - **Env phase-3, increment 2: per-language default env maps (java, rust).** Each
   language module now tracks its toolchain's behaviour-affecting environment by
   default, via `SYSTEM` — `brix.java` compiles track `JAVA_HOME`,

@@ -39,18 +39,40 @@ class ProcessResult:
         return f"FAILED (did not run): {self.action_name}"
 
 
+def scrub_env(
+    literal_env: dict[str, str],
+    allow_names: set[str],
+    env_unset: tuple[str, ...] | list[str],
+) -> dict[str, str]:
+    """The **authoritative** environment for scrub mode: only the plumbing base
+    (`brix.env.BASE_ENV`) and the action's declared allowlist (`allow_names` =
+    its SYSTEM + PASS names), each resolved from the ambient environment, with
+    literal ``env=`` values layered on and ``UNSET`` names removed. Everything
+    undeclared is simply absent, so it cannot silently affect the build."""
+    from .env import BASE_ENV
+
+    allow = set(BASE_ENV) | allow_names
+    final = {name: os.environ[name] for name in allow if name in os.environ}
+    final.update(literal_env or {})
+    for name in env_unset or ():
+        final.pop(name, None)
+    return final
+
+
 def run_process(
     action_name: str,
     command: str,
     cwd: Path,
     env: dict[str, str] | None = None,
     env_unset: tuple[str, ...] | list[str] | None = None,
+    authoritative: bool = False,
 ) -> ProcessResult:
     """Run a rendered command line, capturing stdout/stderr/exit status.
 
     ``env`` entries extend (and shadow) the inherited environment; ``env_unset``
     names are removed from it (force-absent), which also forces a full inherited
-    environment to be built so the removal takes effect.
+    environment to be built so the removal takes effect. With ``authoritative``
+    (scrub mode) ``env`` is the *complete* environment — nothing is inherited.
     """
     try:
         argv = shlex.split(command)
@@ -58,7 +80,9 @@ def run_process(
         return ProcessResult(action_name, command, stderr=f"brix: bad command line: {exc}")
     if not argv:
         return ProcessResult(action_name, command, stderr="brix: empty command line")
-    if env or env_unset:
+    if authoritative:
+        full_env = dict(env or {})  # complete environment; nothing inherited
+    elif env or env_unset:
         full_env = {**os.environ, **(env or {})}
         for name in env_unset or ():
             full_env.pop(name, None)

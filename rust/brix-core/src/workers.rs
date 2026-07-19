@@ -297,6 +297,8 @@ impl WorkerPool {
             outputs: Vec::new(),
             env: Vec::new(),
             env_unset: Vec::new(),
+            env_pass: Vec::new(),
+            env_used: Vec::new(),
             depfile: None,
             worker: None,
         };

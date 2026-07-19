@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-from brix import Graph, IncrementalBuilder, SYSTEM, UNSET
+from brix import Graph, IncrementalBuilder, SYSTEM, UNSET, build_stack
 from brix.env import PASS
 from brix.actions import _ENV_USED_KEY, ExternalProcessAction
 from brix.data import FileData, ValueData
@@ -128,6 +128,68 @@ def test_pass_collects_into_env_pass_and_is_not_fingerprinted():
     # PASS is deliberately absent from the action identity (its value must not
     # enter the cache key — that would break cross-machine caching).
     assert action_key(_action(env={"PATH": PASS})) == action_key(_action())
+
+
+# --- scrub: authoritative environment, on both engines ----------------------
+
+_SCRUB_PROBE = """\
+import os, sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(
+    "undeclared=" + os.environ.get("BRIX_SCRUB_UNDECLARED", "<absent>")
+    + " tracked=" + os.environ.get("BRIX_SCRUB_TRACKED", "<absent>")
+    + " path=" + ("yes" if os.environ.get("PATH") else "no")
+)
+"""
+
+
+def _scrub_graph():
+    graph = Graph()
+    d = graph.data
+    graph.add(
+        ExternalProcessAction(
+            name="probe",
+            command_line="{python} {tool} {dst}",
+            inputs={"python": d.tool(sys.executable), "tool": d.file("probe.py")},
+            outputs={"dst": d.file("out.txt")},
+            env={"BRIX_SCRUB_TRACKED": SYSTEM},
+        )
+    )
+    return graph
+
+
+@pytest.mark.parametrize("engine", ["rust", "py"])
+def test_scrub_gives_an_authoritative_environment(tmp_path, monkeypatch, engine):
+    monkeypatch.setenv("BRIX_ENGINE", engine)
+    monkeypatch.setenv("BRIX_SCRUB_UNDECLARED", "leaked")   # undeclared ambient
+    monkeypatch.setenv("BRIX_SCRUB_TRACKED", "tracked")     # declared SYSTEM
+    (tmp_path / "probe.py").write_text(_SCRUB_PROBE)
+
+    builder = build_stack(
+        _scrub_graph, root=tmp_path, cache_dir=None, staging_dir=None, scrub=True
+    )
+    assert builder.build().success
+    out = (tmp_path / "out.txt").read_text()
+    # Undeclared var scrubbed; declared var and PATH (base plumbing) present.
+    assert "undeclared=<absent>" in out
+    assert "tracked=tracked" in out
+    assert "path=yes" in out
+
+
+@pytest.mark.parametrize("engine", ["rust", "py"])
+def test_without_scrub_undeclared_vars_leak_through(tmp_path, monkeypatch, engine):
+    # The default (additive) behavior — the counterpart that makes the scrub
+    # guarantee meaningful: with scrub off, the undeclared var is visible.
+    monkeypatch.setenv("BRIX_ENGINE", engine)
+    monkeypatch.setenv("BRIX_SCRUB_UNDECLARED", "leaked")
+    monkeypatch.setenv("BRIX_SCRUB_TRACKED", "tracked")
+    (tmp_path / "probe.py").write_text(_SCRUB_PROBE)
+
+    builder = build_stack(
+        _scrub_graph, root=tmp_path, cache_dir=None, staging_dir=None  # scrub off
+    )
+    assert builder.build().success
+    assert "undeclared=leaked" in (tmp_path / "out.txt").read_text()
 
 
 # --- behavioral: SYSTEM re-stales exactly like env_used, on both engines ----

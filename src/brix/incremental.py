@@ -259,9 +259,17 @@ def remove_outputs(action: ExternalProcessAction, ctx: NodeContext) -> None:
 class IncrementalLayer(BuildLayer):
     """Skip fresh nodes; record fingerprints and results after real runs."""
 
-    def __init__(self, metadata: BuildMetadata, detector: TimeAndHashChangeDetector) -> None:
+    def __init__(
+        self, metadata: BuildMetadata, detector: TimeAndHashChangeDetector,
+        scrub: bool = False,
+    ) -> None:
         self.metadata = metadata
         self.detector = detector
+        # Build-wide scrub policy, read by the executor (executor.execute) to run
+        # each process with an authoritative environment. Carried on the layer so
+        # it reaches the executor the same way the Rust engine reads it from the
+        # incremental layer spec.
+        self.scrub = scrub
         # Current-build membership, applied to metadata only if the build
         # succeeds: a failed build must re-detect deletions next time.
         self._pending_memberships: dict[str, list[str]] = {}
