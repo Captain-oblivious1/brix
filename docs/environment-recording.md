@@ -5,10 +5,15 @@ capture + `brix.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
 and phase 2 the `env_used=` guard (`src/brix/actions.py`,
 `tests/test_env_used.py`, golden-pinned cross-engine); phase 3 (automatic
 `getenv` discovery) **struck as unsound (2026-07-18)** and replaced by an
-isolation direction — scrub-to-allowlist — now **fully spec'd (2026-07-19)**:
-the four-way `env` vocabulary + per-language default maps (see the phase-3 spec
-section below), ready to build (Fable-reviewed at implementation). **Phase 2
-Fable-reviewed (2026-07-18), verdict positive**:
+isolation direction — scrub-to-allowlist — **fully spec'd (2026-07-19)**: the
+four-way `env` vocabulary + per-language default maps (see the phase-3 spec
+section below). **First increment shipped (2026-07-19):** the `SYSTEM` sentinel
+(`env={"X": SYSTEM}`, opt-in inherit-and-track) desugars to the phase-2
+`env_used` mechanism, producing byte-identical fingerprint material — so it
+needs **no fingerprint-path change** (Opus, not Fable), proven equivalent in
+`tests/test_env_system.py`. The **fingerprint-changing** parts — per-language
+default maps, `PASS`/`UNSET`, and scrub — remain, and *those* get the Fable
+review. **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion

@@ -112,9 +112,20 @@ class ExternalProcessAction(Expandable):
                 f"input key {_ENV_USED_KEY!r} is reserved: it is materialized "
                 f"by env_used=, never supplied directly"
             )
+        # An `env` value may be a literal (set + fingerprint, below) or the
+        # `SYSTEM` sentinel — "take it from the ambient environment and track
+        # it, don't pin it". `SYSTEM` desugars to `env_used`: the process still
+        # inherits the ambient value, brix just fingerprints it. Being
+        # fingerprint-only, `SYSTEM` is also safe on the warm-worker path, where
+        # `env=` setting is ignored. See `brix.env` and docs/environment-recording.md.
+        from .env import SYSTEM
+
+        _env_items = env or {}
+        _system_tracked = tuple(k for k, v in _env_items.items() if v is SYSTEM)
         self.env: dict[str, DataExpr] = {
             k: v if isinstance(v, DataExpr) else ValueData(v)
-            for k, v in (env or {}).items()
+            for k, v in _env_items.items()
+            if v is not SYSTEM
         }
         # `env_used` names ambient environment variables this action's output
         # depends on but does not *set* (unlike `env=`). They are snapshotted
@@ -122,8 +133,11 @@ class ExternalProcessAction(Expandable):
         # — the guard, not a declaration of process env. Materialized once, at
         # first construction; `substitute` passes the frozen snapshot back via
         # `_env_used_snapshot`, so it is never re-read during expansion.
-        # See `_resolve_env_used`.
-        self.env_used: tuple[str, ...] = tuple(env_used or ())
+        # See `_resolve_env_used`. `SYSTEM` entries fold in here (order-preserving,
+        # de-duplicated).
+        self.env_used: tuple[str, ...] = tuple(
+            dict.fromkeys(tuple(env_used or ()) + _system_tracked)
+        )
         if self.env_used:
             self.inputs[_ENV_USED_KEY] = (
                 _env_used_snapshot

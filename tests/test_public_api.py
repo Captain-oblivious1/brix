@@ -30,6 +30,7 @@ EXPECTED = {
     "ProcessResult",
     "Reporter",
     "StatusReport",
+    "SYSTEM",
     "TwoTierCacheStore",
     "WorkerSpec",
     "Workspace",

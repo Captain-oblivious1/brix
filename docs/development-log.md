@@ -1,5 +1,23 @@
 # Development log
 
+- **Env phase-3, increment 1: the `SYSTEM` sentinel (opt-in inherit-and-track).**
+  First buildable piece of the phase-3 env design (`docs/environment-recording.md`).
+  `env={"X": SYSTEM}` on an `ExternalProcessAction` means "take X from the ambient
+  environment and fingerprint it, so a change re-stales the action" — without
+  pinning it to a constant. It is implemented as pure **desugaring into the
+  phase-2 `env_used` mechanism** (`brix.env.SYSTEM`; `actions.py` folds `SYSTEM`
+  entries into `env_used`), so it produces **byte-identical fingerprint material**
+  to `env_used=["X"]` — the already-Fable-reviewed, cross-engine path. That's the
+  safety argument for shipping it as Opus work with **no fresh fingerprint-path
+  review**: `tests/test_env_system.py` pins the equivalence, the env-vs-env_used
+  split, and the behavioral re-stale on both engines. Being fingerprint-only,
+  `SYSTEM` also works on the warm-worker path (a persistent worker can be tracked
+  but not set). **Deferred to the next, Fable-gated increment** (they change
+  fingerprints): the per-language default maps (auto-`SYSTEM` the behaviour vars —
+  changes every Java/C++/Rust action's fingerprint, needs golden regen), the
+  `PASS`/`UNSET` sentinels, and the authoritative-env scrub. `src/brix/env.py`,
+  `src/brix/actions.py`.
+
 - **`brix.rust` — wrap cargo, and self-host (brix builds brix).** brix supported
   C/C++/Java/Kotlin/TS but not Rust — the language its own engine is written in.
   `brix.rust` closes that. It is deliberately a *different* model from the others:
