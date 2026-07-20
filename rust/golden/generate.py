@@ -589,7 +589,7 @@ def gen_fs():
 
 
 def gen_fingerprints():
-    from brix import ExternalProcessAction, Graph, WorkerSpec
+    from brix import ExternalProcessAction, Graph, UNSET, WorkerSpec
     from brix.data import FileData
     from brix.incremental import action_fingerprint
     from brix.java import AbiFile, AbiGlob
@@ -697,6 +697,18 @@ def gen_fingerprints():
             inputs={"src": d.file("src/a.txt")},
             outputs={"out": d.file("build/a.o")},
             env_used=["BRIX_GOLDEN_ENV"],
+        ),
+        # UNSET (phase 3): forced-absent names are fingerprint material — they
+        # change what the process sees, so a fingerprint-keyed cache must never
+        # serve an artifact across an UNSET flip. Names only (no ambient value
+        # is read), so the case is deterministic on any machine. Pins the
+        # cross-engine bytes of the `env_unset` fingerprint section.
+        ExternalProcessAction(
+            name="env_unset forced absent",
+            command_line="cc {src} {out}",
+            inputs={"src": d.file("src/a.txt")},
+            outputs={"out": d.file("build/a.o")},
+            env={"FORBIDDEN_VAR": UNSET, "ALSO_FORBIDDEN": UNSET},
         ),
     ]
     return [

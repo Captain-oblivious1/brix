@@ -85,6 +85,126 @@ def test_unset_is_part_of_the_action_identity():
     assert without != with_unset
 
 
+def test_unset_is_fingerprint_material(tmp_path):
+    # UNSET must also enter the *fingerprint*, not just action_key: the cache
+    # layer keys on fingerprint alone, so if the two actions shared one, adding
+    # UNSET would replay a cached artifact produced WITH the variable visible
+    # (proven stale before the fix — the phase-3 Fable review's finding).
+    from brix.incremental import action_fingerprint
+    from brix.layers import NodeContext
+    from brix.metadata import TimeAndHashChangeDetector
+
+    (tmp_path / "a.c").write_text("int main;")
+    ctx = NodeContext.for_root(tmp_path)
+    det = TimeAndHashChangeDetector(tmp_path)
+    without = action_fingerprint(_action(), ctx, det)
+    with_unset = action_fingerprint(_action(env={"X": UNSET}), ctx, det)
+    assert without != with_unset
+
+
+UNSET_CACHE_TOOL = """\
+import os, sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(os.environ.get("BRIX_TEST_ENVVAR", "<absent>"))
+"""
+
+
+@pytest.mark.parametrize("engine", ["rust", "py"])
+def test_unset_flip_misses_the_cache(tmp_path, monkeypatch, engine):
+    # End-to-end pin of the same hole across the wire: an artifact cached
+    # without UNSET (ambient var visible to the tool) must NOT be served once
+    # the action declares the var UNSET — the declared "I must not be affected
+    # by X" would be silently defeated by a fingerprint-keyed cache hit.
+    monkeypatch.setenv("BRIX_ENGINE", engine)
+    monkeypatch.setenv("BRIX_TEST_ENVVAR", "ambient-value")
+    cache = tmp_path / "cache"
+
+    def graph_for(env):
+        def supplier():
+            graph = Graph()
+            d = graph.data
+            graph.add(
+                ExternalProcessAction(
+                    name="probe",
+                    command_line="{python} {tool} {dst}",
+                    inputs={"python": d.tool(sys.executable), "tool": d.file("tool.py")},
+                    outputs={"dst": d.file("out.txt")},
+                    env=env,
+                )
+            )
+            return graph
+        return supplier
+
+    ws1 = tmp_path / "ws1"
+    ws1.mkdir()
+    (ws1 / "tool.py").write_text(UNSET_CACHE_TOOL)
+    builder = build_stack(graph_for(None), root=ws1, cache_dir=cache, staging_dir=None)
+    assert builder.build().success
+    assert (ws1 / "out.txt").read_text() == "ambient-value"
+
+    ws2 = tmp_path / "ws2"  # fresh workspace: only the cache could answer
+    ws2.mkdir()
+    (ws2 / "tool.py").write_text(UNSET_CACHE_TOOL)
+    builder = build_stack(
+        graph_for({"BRIX_TEST_ENVVAR": UNSET}), root=ws2, cache_dir=cache, staging_dir=None
+    )
+    result = builder.build()
+    assert result.success
+    assert (ws2 / "out.txt").read_text() == "<absent>"
+    assert all(r.source == "process" for r in result.process_results)
+
+
+# --- the worker set-vs-track asymmetry ---------------------------------------
+
+def test_worker_routed_action_rejects_pinned_env():
+    # A warm worker's environment is fixed at launch: a literal pin or an UNSET
+    # can never reach it, so silently accepting one would fingerprint an
+    # environment the process never saw (the guard-bypass class). It must fail
+    # loudly at construction; SYSTEM/PASS (fingerprint/scrub-side only) stay legal.
+    from brix import WorkerSpec
+
+    spec = WorkerSpec(name="w", command_line="run {jar}", inputs={"jar": FileData("w.jar")})
+
+    def worker_action(env):
+        return ExternalProcessAction(
+            name="compile",
+            command_line="--sources {src} -d {out}",
+            inputs={"src": FileData("a.java")},
+            outputs={"out": FileData("classes")},
+            worker=spec,
+            env=env,
+        )
+
+    with pytest.raises(ValueError, match="fixed at launch"):
+        worker_action({"LANG": "C"})
+    with pytest.raises(ValueError, match="fixed at launch"):
+        worker_action({"JAVA_TOOL_OPTIONS": UNSET})
+    # Tracking is fingerprint-only and letting-through is scrub-only: both legal.
+    action = worker_action({"JAVA_HOME": SYSTEM, "PATH": PASS})
+    assert action.env_used == ("JAVA_HOME",)
+    assert action.env_pass == ("PATH",)
+
+
+def test_base_env_matches_the_rust_engine():
+    # brix.env.BASE_ENV (Python scrub) and process.rs BASE_ENV (Rust scrub) must
+    # stay in sync, or the two engines would hand a scrubbed process different
+    # plumbing. Pinned by scraping the constant out of the Rust source — the
+    # cheap cross-language parity check.
+    import re
+    from pathlib import Path
+
+    from brix.env import BASE_ENV
+
+    source = (
+        Path(__file__).resolve().parents[1] / "rust/brix-core/src/process.rs"
+    ).read_text()
+    match = re.search(r"pub const BASE_ENV: &\[&str\] = &\[([^\]]*)\];", source)
+    assert match is not None, "BASE_ENV constant not found in process.rs"
+    rust_names = re.findall(r'"([^"]+)"', match.group(1))
+    assert sorted(BASE_ENV) == sorted(rust_names)
+    assert len(rust_names) == len(set(rust_names))
+
+
 TOOL_PROBE = """\
 import os, sys
 from pathlib import Path

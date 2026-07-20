@@ -24,7 +24,12 @@
       "Bash(time timeout 590 venv/bin/python brix.py --dryRun build --quiet-replays)",
       "Bash(time timeout 590 venv/bin/python brix.py --dryRun build)",
       "Bash(venv/bin/python brix.py status)",
-      "Bash(venv/bin/python brix.py --dryRun build wealth)"
+      "Bash(venv/bin/python brix.py --dryRun build wealth)",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(python -m pytest tests/test_docgen.py tests/test_public_api.py -q)",
+      "Bash(python -m pytest tests/test_docgen.py -q)",
+      "Bash(python -m pytest tests/test_cpp.py tests/test_ts.py tests/test_java.py tests/test_public_api.py -q)"
     ]
   }
 }

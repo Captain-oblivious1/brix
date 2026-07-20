@@ -46,5 +46,9 @@
   {
     "spec": "{\"kind\": \"process\", \"command_line\": \"cc {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}], \"_brix_env_used\": [{\"kind\": \"value\", \"text\": \"{\\\"BRIX_GOLDEN_ENV\\\": \\\"golden-value\\\"}\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"env_used tracked variable\", \"env_used\": [\"BRIX_GOLDEN_ENV\"]}",
     "fingerprint": "58ec081e05b9b50587d938f47da5ac0d236b50204a35bfa70d7d94708b6d58d2"
+  },
+  {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"cc {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"env_unset forced absent\", \"env_unset\": [\"ALSO_FORBIDDEN\", \"FORBIDDEN_VAR\"]}",
+    "fingerprint": "22152d854d09b981c000611d6b4d98873a135ae531b150e8ff12ff0de67b3718"
   }
 ]
