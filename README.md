@@ -12,15 +12,16 @@ things a serious build needs:
 - **Fast.** The engine is written in Rust and owns the planning, scheduling, and
   change detection, and it keeps compiler processes warm between builds — so even
   large builds, and every edit-compile loop, stay quick.
-- **Atomic.** A build is all-or-nothing, like a `git` commit — it either applies
+  // Mention that the below are optional and configurable
+- **Atomic.** A build is all-or-nothing, like a `git` commit — it either applies  // Maybe also mention that this is inspired by git in that users can get status, stage, and commit builds
   in full or leaves your workspace exactly as it was, so a failure never leaves a
   half-built tree.
-- **Incremental builds that match a clean build, exactly.** Rebuilding only what
+- **Incremental builds that match a clean build, exactly.** Rebuilding only what  // Make clear the *why*. That users no longer fall back to clean builds out of fear of an incorrect build
   changed is never a correctness compromise: an incremental build produces the
   same result a from-scratch build would — down to removing outputs whose source
   is gone.
 
-That engine is the default today and is designed to back a future
+That engine is the default today and is designed to back a future  // This makes it seem like the above features won't exist in Javascript/Typescript API
 JavaScript/TypeScript API as well.
 
 ## In plain terms
@@ -28,10 +29,10 @@ JavaScript/TypeScript API as well.
 A build tool turns your source code into the finished program. The slow way is
 to rebuild everything from scratch every time you change one file. The fast way
 is to redo only the parts your change affects — but most tools that try to be
-fast sometimes get it wrong and hand you a stale or broken result.
+fast sometimes get it wrong and hand you a stale or broken result.  // losing confidence and resulting in reliance of clean builds all the time
 
 Brix is the fast way *without* the wrong. You write a short Python file that
-says, for each step, which files go in and which come out. Brix reads that and
+says, for each step, which files go in and which come out. Brix reads that and  // Not sure what you mean by "which files go in and which come out"
 works out the rest: the right order to do things, what can run at the same time,
 and — the important part — exactly what needs redoing when you change something.
 Change one file and only the steps that truly depend on it run again; change
@@ -56,9 +57,9 @@ with their own language, their own sandbox, and a rewrite-everything migration;
 Gradle is powerful, but that power turns build files into imperative code that
 rots.
 
-Brix takes a different bet: **write your build in ordinary Python — declare what
+Brix takes a different bet: **write your build in ordinary Python — declare what  // Mention that brix provides users the building blocks (thus the name brix.. as in bricks) to make a simple and/or powerful build system as they want.
 each step reads and writes — and get the incremental correctness and safety of
-the heavy tools without the DSL, the sandbox, or the migration cliff.** You
+the heavy tools without the DSL, the sandbox, or the migration cliff.** You  // What is DSL?0
 author with Python's full power (a loop to stamp out fifty services, a function
 to factor a shared pattern), but a step's *meaning* is a small, declarative
 vocabulary: its inputs and its outputs — declared coarsely, as patterns, not
@@ -70,8 +71,8 @@ refuses any graph it cannot build correctly. Expressiveness for assembling the
 build; rails around what the build means.
 
 This is not aspirational. The engine is cross-checked between a Python and a Rust
-implementation that must produce byte-identical decisions; content-key *lenses*
-compare a Java jar by its ABI and a TypeScript module by its declared types, so
+implementation that must produce byte-identical decisions; content-key *lenses*  // I know that you use "lenses" a lot, but is that a common term (that I'm unfamiliar with)?  Will users know what that means? Or are you defining a new meaning here?
+compare a Java jar by its ABI and a TypeScript module by its declared types, so  // Things like ABI seems to be advanced. It seems like these techincal details (lenses, ABI, etc. maybe should be put in a details section.)
 an implementation-only edit lets dependents replay instead of rebuild; atomic
 staging means a failed build never half-updates your tree; and on JUnit 5's
 platform modules the warm edit-compile loop runs 5–12× faster than Gradle. Brix
@@ -81,9 +82,9 @@ incrementally rather than all at once.
 And because those build files are small, declarative Python — the language coding
 assistants know best — an assistant can *write and maintain them for you*, and
 check its own work by running the build: `status` explains what would happen
-before it does, and the planner rejects an ambiguous graph outright. It is not
+before it does, and the planner rejects an ambiguous graph outright. It is not  // You mention "planner" but is that detail that the users needs? What if we just say "brix"?
 raw configurability that makes this work but expressiveness with rails — a small,
-checkable vocabulary over a language the model already knows. The examples in
+checkable vocabulary over a language the model already knows. The examples in   // language model and most users already know
 this repository were themselves authored this way.
 
 ## What you get
@@ -99,7 +100,7 @@ serious build system:
 - Java ABI and TypeScript declaration lenses avoid downstream rebuilds when a
   public interface did not change.
 - Incremental metadata handles changed and deleted sources.
-- On a large monorepo, Brix loads and builds only the slice a change affects,
+- On a large monorepo, Brix loads and builds only the slice a change affects,  // maybe word this that "in order to support large monorepos, brix enables brix.py files to be spread across the repository. And only the ones necessesssary are read and executed.
   not the whole repository.
 - Persistent compiler workers stay warm between builds, so the edit-compile loop
   does not pay compiler startup each time.
@@ -114,6 +115,8 @@ serious build system:
 - Planning rejects two steps that may write the same output.
 
 ## A small example
+
+// Add comments to this code:
 
 ```python
 from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph
