@@ -1439,6 +1439,8 @@ been added to this graph exactly once.</p>
     <span class="n">outputs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">env</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">env_used</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">env_unset</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">env_pass</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">worker</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">depfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">self_resolved_inputs</span><span class="o">=</span><span class="p">(),</span>
@@ -1804,6 +1806,7 @@ only; the Python engine always terminates workers at build end.</p>
     <span class="n">metadata_dir</span><span class="o">=</span><span class="s2">&quot;build/.brix&quot;</span><span class="p">,</span>
     <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">verify_contents</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">scrub</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 
@@ -2273,7 +2276,10 @@ consumers.</p>
 
 <a href="#brix.NodeContext" class="headerlink" title="Permanent link">&para;</a></h2>
 <div class="doc-signature highlight"><pre><span></span><code><span class="nf">NodeContext</span><span class="p">(</span>
-    <span class="n">workspace_root</span><span class="p">,</span> <span class="n">output_root</span><span class="p">,</span> <span class="n">deletions_root</span><span class="o">=</span><span class="kc">None</span>
+    <span class="n">workspace_root</span><span class="p">,</span>
+    <span class="n">output_root</span><span class="p">,</span>
+    <span class="n">deletions_root</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">scrub</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 
@@ -3160,7 +3166,8 @@ build full-loads and heals them (edges depend only on the patterns).</p>
     <span class="n">store</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">staging_dir</span><span class="o">=</span><span class="s2">&quot;build/staging&quot;</span><span class="p">,</span>
     <span class="n">detector</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-    <span class="n">verify_contents</span><span class="o">=</span><span class="kc">False</span>
+    <span class="n">verify_contents</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">scrub</span><span class="o">=</span><span class="kc">False</span>
 <span class="p">)</span>
 </code></pre></div>
 
@@ -3177,8 +3184,10 @@ the change-detector factory threaded to the <code>IncrementalBuilder</code> (e.g
 <code>GitChangeDetector</code>); <code>None</code> uses the default stat detector.
 <code>verify_contents=True</code> makes the default detector re-hash every file
 instead of trusting its <code>(mtime, size)</code> cache — slower, but it catches a
-content change that leaves size and mtime unchanged. Defaults give the full
-recommended stack.</p>
+content change that leaves size and mtime unchanged. <code>scrub=True</code> runs each
+process with an <em>authoritative</em> environment (only the plumbing base plus each
+action's declared allowlist), so an undeclared ambient variable can't silently
+affect the build. Defaults give the full recommended stack.</p>
 <p>Returns a builder; for <code>cli.main</code>'s <code>builder_factory</code> (called fresh per
 invocation, so <code>commit</code>/<code>discard</code> rebuild cleanly), pass a thunk::</p>
 <div class="highlight"><pre><span></span><code>cli.main(create_graph, builder_factory=lambda: build_stack(create_graph, root=ROOT))

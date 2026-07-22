@@ -115,27 +115,26 @@ if __name__ == "__main__":
     raise SystemExit(cli.main(create_graph, root=ROOT))
 ```
 
-The default CLI uses incremental builds and is already runnable:
+The CLI is now installed for this project. Verify the setup before adding any
+build actions:
 
 ```sh
 python build.py help       # show this project's live Brix configuration
-python build.py build      # run the build
-python build.py status     # explain what would run now
 ```
 
 Now replace the empty `create_graph()` body with the actions for your project.
-Caching and atomic updates can be added later with `build_stack`; they are not
-boilerplate a new project must understand before its first build.
 The [starter templates](examples/templates/) provide complete Java and
 TypeScript projects to copy, and the [examples index](examples/README.md) covers
 progressively larger builds.
 
 ## A small C++ build
 
-Add `cpp` to the import from `brix`, then replace the empty `create_graph()`
-above with this complete C++ build definition:
+Use this exact import line, then replace the empty `create_graph()` above with
+the complete C++ build definition:
 
 ```python
+from brix import Graph, cli, cpp
+
 def create_graph() -> Graph:
     graph = Graph()
     data = graph.data
@@ -152,13 +151,21 @@ def create_graph() -> Graph:
     return graph
 ```
 
+With one or more `.cpp` files under `src/`:
+
+```sh
+python build.py build
+./build/app
+```
+
 ## A small Java build
 
-Java is the same shape. Add `java` to the import from `brix`, then use this
-`create_graph()` to compile every source under `src/main/java` into a runnable
-jar (a JDK must be on `PATH`):
+Java is the same shape. Use this import and `create_graph()` to compile every
+source under `src/main/java` into a runnable jar (a JDK must be on `PATH`):
 
 ```python
+from brix import Graph, cli, java
+
 def create_graph() -> Graph:
     graph = Graph()
     data = graph.data
@@ -172,12 +179,47 @@ def create_graph() -> Graph:
     return graph
 ```
 
-The typed language helpers are optional. `ExternalProcessAction` is the escape
-hatch for any application, existing build tool, or project-specific generator.
-For example, add `ExternalProcessAction` to the imports in `build.py`, then add
-these actions after `graph` and `data` are created in `create_graph()`:
+Set `entry_point` to the class containing `public static void main`, then run:
+
+```sh
+python build.py build
+java -jar build/app.jar
+```
+
+After the first successful build, you can add caching and atomic updates by
+changing the import and final call:
 
 ```python
+from brix import Graph, build_stack, cli, java  # or cpp
+
+# create_graph() stays exactly the same
+
+if __name__ == "__main__":
+    raise SystemExit(
+        cli.main(
+            create_graph,
+            root=ROOT,
+            builder_factory=lambda: build_stack(create_graph, root=ROOT),
+        )
+    )
+```
+
+`build_stack` supplies the recommended incremental + cache + atomic ordering.
+Pass `cache_dir=None` or `staging_dir=None` to disable either optional layer.
+
+The typed language helpers are optional. `ExternalProcessAction` is the escape
+hatch for any application, existing build tool, or project-specific generator.
+For example, add it to the import in `build.py`:
+
+```python
+from brix import ExternalProcessAction, Graph, cli
+```
+
+Then put these actions inside `create_graph()`, after `graph` and `data` are
+created and before `return graph`:
+
+```python
+# Inside create_graph()
 graph.add(
     ExternalProcessAction(
         name="generate protocol sources",
