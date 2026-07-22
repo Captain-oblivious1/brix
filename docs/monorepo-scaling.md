@@ -56,7 +56,7 @@ the adoption template: the shape a real service tree copies.
 
 ## The problem
 
-With a single root `brix.py`, every build — even a no-op — runs `create_graph`
+With a single root `brix_build.py`, every build — even a no-op — runs `create_graph`
 for the *whole* repo: it constructs every service's action objects and plans
 across the entire tree. On a ~50-service monorepo that O(whole-repo) **graph
 construction** is the cost that doesn't shrink with the size of the change.
@@ -66,19 +66,19 @@ almost entirely *building the graph it then mostly ignores*.
 
 ## The model: hierarchical build files (the Bazel package model)
 
-Split the monolith into `brix.py` files placed at natural module/service
+Split the monolith into `brix_build.py` files placed at natural module/service
 boundaries. Each is a **package**: it is responsible for the files in its
-subtree **until interrupted by another `brix.py` deeper down**, which carves out
+subtree **until interrupted by another `brix_build.py` deeper down**, which carves out
 its own sub-responsibility. Not every directory needs one — placement is sparse,
 at boundaries.
 
-- **Ownership is "nearest ancestor."** The `brix.py` owning a path is the
+- **Ownership is "nearest ancestor."** The `brix_build.py` owning a path is the
   closest one at or above that path's directory. A whole service's changed files
-  collapse to that service's single `brix.py`.
-- **One `brix.py` per boundary** so ownership is unambiguous (a file belongs to
+  collapse to that service's single `brix_build.py`.
+- **One `brix_build.py` per boundary** so ownership is unambiguous (a file belongs to
   exactly one package, as in Bazel).
-- **The monolith is the degenerate case.** One root `brix.py` = today's
-  behavior, exactly. Adding a deeper `brix.py` is a purely incremental opt-in to
+- **The monolith is the degenerate case.** One root `brix_build.py` = today's
+  behavior, exactly. Adding a deeper `brix_build.py` is a purely incremental opt-in to
   finer granularity — no migration, no all-or-nothing switch. A repo sits
   anywhere on the spectrum from "one file, load everything" to "fully
   distributed" and moves gradually. This is the adoption path for the air-gapped
@@ -95,7 +95,7 @@ respect that or it wastes effort on the thin tier:
    fingerprint-walk of unaffected nodes — but git already made that walk cheap,
    so the marginal win is **thin**. *Deprioritized: build only if a measurement
    shows the fingerprint-walk is a real bottleneck.*
-3. **Lazy loading — don't construct the unaffected `brix.py` at all.** This is
+3. **Lazy loading — don't construct the unaffected `brix_build.py` at all.** This is
    the tier that removes the O(whole-repo) construction cost, i.e. **the actual
    monorepo win.** It is also the correctness-critical, Fable-worthy part.
 
@@ -105,7 +105,7 @@ maybe, not a stepping stone.
 ## The mechanism: derive dependencies, never redeclare them
 
 The cross-module dependency information **is already present** in the data
-references — `app`'s `brix.py` declares `classpath=[core.jar]`, `core`'s declares
+references — `app`'s `brix_build.py` declares `classpath=[core.jar]`, `core`'s declares
 it builds `core.jar`, and brix already infers that edge when both are loaded.
 So there is **no need for explicit cross-module dependency declarations.**
 Instead:
@@ -118,10 +118,10 @@ Instead:
   input/output patterns (or construction footprint) match any changed path,
   plus their **transitive dependents** walked from the persisted index. The
   index is flat persisted data, so the match and the reverse-dep walk need no
-  `brix.py` loaded; only the affected set is then loaded to build.
+  `brix_build.py` loaded; only the affected set is then loaded to build.
 
 **Correction discovered during tier 3 (load-bearing):** the original sketch
-said "the `brix.py` files that *own* any changed file (locality)". That is
+said "the `brix_build.py` files that *own* any changed file (locality)". That is
 **unsound**, because tier 1 deliberately does not enforce a locality rule —
 packages may reference paths outside their subtree (a shared `tools/` script is
 an input of many packages, and lives in *no* package's subtree in a sparse
@@ -138,7 +138,7 @@ edges stay consistent without loading anything else.
 ## The correctness crux: completeness under partial loading
 
 Loading a subset is correctness-critical in the worst way — **load too few
-`brix.py` files and you silently ship a stale build.** The governing invariant
+`brix_build.py` files and you silently ship a stale build.** The governing invariant
 is an asymmetry:
 
 > **Over-loading is a wasted parse (harmless); under-loading is a stale build
@@ -152,12 +152,12 @@ testable property.
 Two dependency-change cases, and why the index alone isn't quite enough:
 
 - **Static deps** (`classpath=[core.jar]`): changing them means *editing the
-  `brix.py`*, so that file is in the change set and gets loaded anyway. Airtight
+  `brix_build.py`*, so that file is in the change set and gets loaded anyway. Airtight
   with the index alone.
 - **Dynamic deps** (`classpath=glob("vendor/*.jar")`, or deps read from a config
   file): the dependency set changes when a *file* changes, not when the
-  `brix.py` text does. A stale index could miss it. **Fix: track each
-  `brix.py`'s loading footprint** — the globs and files it read while
+  `brix_build.py` text does. A stale index could miss it. **Fix: track each
+  `brix_build.py`'s loading footprint** — the globs and files it read while
   constructing its slice — and reload it if its own file *or* any footprint
   entry changed. This is brix's existing discovered-inputs mechanism (compiler
   depfiles) turned on the build files themselves — **meta-incrementality**, not
@@ -166,7 +166,7 @@ Two dependency-change cases, and why the index alone isn't quite enough:
 Together — persisted per-package patterns + derived reverse-dep index + loading
 footprints — the affected set is provably complete. The shipped selector
 (`brix.affected.select_affected`) adds the remaining FULL-load fallbacks:
-no index; any `brix.py` itself added/removed/edited (structure may have
+no index; any `brix_build.py` itself added/removed/edited (structure may have
 changed); a changed path in the discovered-deps table (compiler-scanned inputs
 are keyed per action, unattributable to a package without loading it); a
 changed path outside the workspace; and failed-build recovery (the previous
@@ -231,7 +231,7 @@ sequence).
      `tests/test_affected.py`: the real selector replayed against a full load
      across the whole edit alphabet — multi-hop ripple, shared out-of-subtree
      tool edit, dynamic-config (footprint) change, glob-member deletion, new
-     package, dependency rewired via `brix.py` edit, irrelevant edit — plus a
+     package, dependency rewired via `brix_build.py` edit, irrelevant edit — plus a
      negative control proving the harness still catches an under-selector, and
      unit tests for every FULL fallback. Index format v2
      (`workspace-index.json`): per-package patterns + footprint entries,
@@ -266,6 +266,6 @@ packages and runs nothing, and every edit rebuilds exactly its affected set.
 
 - **No redundant cross-module dependency declarations** — derived from the data
   references that already exist.
-- **No `brix.py` in every directory** — sparse placement at package boundaries.
+- **No `brix_build.py` in every directory** — sparse placement at package boundaries.
 - **No pre-trial adoption** — the monolithic full-load path is the safe floor;
   distribution is grown into afterward.

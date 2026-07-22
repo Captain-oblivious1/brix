@@ -9,7 +9,7 @@ backend/   Java   libs/model, services/orders          (java.JarAction)
 frontend/  TS     shared, app  (app depends on shared)  (ts.CompileAction, ts-dts lens)
 ```
 
-Each package is a sparse `brix.py` exposing `create_graph()`; the workspace
+Each package is a sparse `brix_build.py` exposing `create_graph()`; the workspace
 loader (`load_workspace`) merges them and builds identically to a monolith.
 
 ## What it proves that the single-language dogfoods don't

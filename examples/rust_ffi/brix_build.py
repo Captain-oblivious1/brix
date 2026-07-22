@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-language FFI: a Rust library linked into a C program, both built by brix.
 
-    python3 examples/rust_ffi/brix.py build
+    python3 examples/rust_ffi/brix_build.py build
     ./examples/rust_ffi/build/app        # -> Rust says the answer is 42
 
 `brix.rust` wraps **cargo** to build the crate as a C-ABI `staticlib`

@@ -28,7 +28,7 @@ entry points.
 with; its `aliases=` and `commands=` add target shorthands and build-then-act
 subcommands. An alias may be a bare path (or list of paths) or a
 `cli.Alias(target, description)` when a one-line explanation is worth surfacing
-in `brix.py help`, which prints the live builder stack, aliases, and commands.
+in `brix_build.py help`, which prints the live builder stack, aliases, and commands.
 
 ## Results and reporting
 

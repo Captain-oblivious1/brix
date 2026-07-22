@@ -112,7 +112,7 @@ clean, incremental, cached, atomic, or cached-atomic-incremental.
 
 ## Expected user file shape
 
-A project usually has a `brix.py` with three independent responsibilities
+A project usually has a `brix_build.py` with three independent responsibilities
 (in any order):
 
 1. **Capabilities** — which builder/layers are used.
@@ -378,13 +378,13 @@ live tracker, source-control based, remote metadata service.
 ## Modular build files
 
 A graph-construction feature, orthogonal to incremental builds. Simple
-projects: one `brix.py`, ordinary Python imports. Large projects (later):
+projects: one `brix_build.py`, ordinary Python imports. Large projects (later):
 `ChangeSet → DistributedGraphLoader → affected logical graph →
 IncrementalBuilder`.
 
 ## CLI direction
 
-Brix is primarily a library; projects may expose `brix.py`. CLI parsing
+Brix is primarily a library; projects may expose `brix_build.py`. CLI parsing
 (`build`, `status`, `clean`, `graph`, alias→target mapping, project
 arguments) stays out of `Graph` and builders.
 

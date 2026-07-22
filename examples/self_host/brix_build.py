@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """brix builds brix: compile brix's own Rust engine with `brix.rust`.
 
-    python3 examples/self_host/brix.py build     # -> rust/target/release/libbrix_py.so
-    python3 examples/self_host/brix.py status
+    python3 examples/self_host/brix_build.py build     # -> rust/target/release/libbrix_py.so
+    python3 examples/self_host/brix_build.py status
 
 brix's engine (`rust/brix-py`, a PyO3 `cdylib`, on top of `rust/brix-core`) is
 normally built by cargo directly. `brix.rust` wraps cargo, so brix can build its

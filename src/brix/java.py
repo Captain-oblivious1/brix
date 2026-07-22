@@ -196,7 +196,7 @@ def maven(
 ) -> DepSet:
     """Resolve inline Maven coordinates (``"group:artifact:version"``) to a
     classpath via Maven, returned as a `DepSet`. The declarations live in
-    ``brix.py`` — the *greenfield / single-file* path. Editing the list
+    ``brix_build.py`` — the *greenfield / single-file* path. Editing the list
     re-resolves. Naming the engine (``maven``) is deliberate: Maven and Gradle
     apply different version-conflict rules, so this gives Maven's resolution."""
     key = _key("maven", "\n".join(coords), scope)

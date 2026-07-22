@@ -1,9 +1,9 @@
 """Hierarchical build files: discovery, ownership, and full-merge loading.
 
 Tier 1 of the monorepo-scaling plan (docs/monorepo-scaling.md). A large repo can
-split its one root ``brix.py`` into several placed at module/service boundaries,
+split its one root ``brix_build.py`` into several placed at module/service boundaries,
 each a **package** responsible for its subtree until interrupted by a deeper
-``brix.py``. This module discovers those packages, resolves which one *owns* a
+``brix_build.py``. This module discovers those packages, resolves which one *owns* a
 given path (nearest ancestor), and loads them.
 
 Loading here is the **safe, non-lazy** foundation: every package is loaded and
@@ -14,7 +14,7 @@ it is built and tested now, but nothing yet skips a load.
 
 Conventions:
 
-* A package ``brix.py`` exposes ``create_graph() -> Graph`` (configurable). When
+* A package ``brix_build.py`` exposes ``create_graph() -> Graph`` (configurable). When
   loaded as a package it must not run a build itself — the usual
   ``if __name__ == "__main__": cli.main(...)`` guard already prevents that on
   import, so a file can be both a standalone entry point and a package.
@@ -36,11 +36,11 @@ from .graph import Graph
 from .patterns import PathPattern
 
 _INDEX_FILE = "workspace-index.json"
-_INDEX_VERSION = 3
+_INDEX_VERSION = 4
 
 # Directories never scanned for packages: brix's own storage and the usual
 # heavy/generated trees. A package's build outputs live under these, and they
-# never contain a package's authoring brix.py.
+# never contain a package's authoring brix_build.py.
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv"}
 
 
@@ -48,7 +48,7 @@ def _is_skipped(name: str) -> bool:
     return name in _SKIP_DIRS or name == "build" or name.startswith(".brix")
 
 
-def find_packages(root: str | Path, *, brix_file: str = "brix.py") -> list[Path]:
+def find_packages(root: str | Path, *, build_file: str = "brix_build.py") -> list[Path]:
     """Absolute directories under ``root`` that contain a package build file,
     sorted (shallowest-first, then lexicographic). Skips brix's own storage and
     common generated trees."""
@@ -56,7 +56,7 @@ def find_packages(root: str | Path, *, brix_file: str = "brix.py") -> list[Path]
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if not _is_skipped(d))
-        if brix_file in filenames:
+        if build_file in filenames:
             found.append(Path(dirpath))
     found.sort(key=lambda p: (len(p.parts), p.as_posix()))
     return found
@@ -91,12 +91,12 @@ def merge_graphs(graphs: list[Graph]) -> Graph:
     return combined
 
 
-def _load_module(package_dir: Path, brix_file: str):
+def _load_module(package_dir: Path, build_file: str):
     """Import a package's build file under a unique synthetic module name (all
-    are literally ``brix.py``, so a shared name would collide in sys.modules)."""
+    are literally ``brix_build.py``, so a shared name would collide in sys.modules)."""
     import sys
 
-    path = package_dir / brix_file
+    path = package_dir / build_file
     mod_name = "brix_pkg_" + path.resolve().as_posix().replace("/", "_").replace(".", "_")
     spec = importlib.util.spec_from_file_location(mod_name, path)
     if spec is None or spec.loader is None:
@@ -288,7 +288,7 @@ class Workspace:
         (where ``depends_on`` is complete and authoritative) and persisted; a
         later subset build reads them O(packages) instead of re-deriving. A
         subset save carries the persisted edges forward — sound because a subset
-        build only happens when no ``brix.py`` changed, so patterns are stable —
+        build only happens when no ``brix_build.py`` changed, so patterns are stable —
         *unless* a footprint-driven reload actually changed a loaded package's
         input/output patterns, in which case the edges are dropped so the next
         build full-loads and heals them (edges depend only on the patterns)."""
@@ -431,7 +431,7 @@ def load_index(root: str | Path, metadata_dir: str | Path = "build/.brix") -> di
 def load_workspace(
     root: str | Path,
     *,
-    brix_file: str = "brix.py",
+    build_file: str = "brix_build.py",
     graph_attr: str = "create_graph",
     only: set[Path] | None = None,
 ) -> Workspace:
@@ -457,7 +457,7 @@ def load_workspace(
     standalone entry point that only wires `cli.main`, not a graph contributor).
     """
     root = Path(root).resolve()
-    packages = find_packages(root, brix_file=brix_file)
+    packages = find_packages(root, build_file=build_file)
     selected = None if only is None else {Path(p).resolve() for p in only}
     loaded: list[tuple[Path, Graph]] = []
     footprints: dict[Path, set[Path]] = {}
@@ -465,14 +465,14 @@ def load_workspace(
     for package_dir in packages:
         if selected is not None and package_dir.resolve() not in selected:
             continue
-        module = _load_module(package_dir, brix_file)
+        module = _load_module(package_dir, build_file)
         factory = getattr(module, graph_attr, None)
         if factory is None:
             continue
-        graph, footprint = _with_footprint(root, package_dir / brix_file, factory)
+        graph, footprint = _with_footprint(root, package_dir / build_file, factory)
         if not isinstance(graph, Graph):
             raise TypeError(
-                f"{package_dir / brix_file}: {graph_attr}() must return a Graph, "
+                f"{package_dir / build_file}: {graph_attr}() must return a Graph, "
                 f"got {type(graph).__name__}"
             )
         loaded.append((package_dir, graph))

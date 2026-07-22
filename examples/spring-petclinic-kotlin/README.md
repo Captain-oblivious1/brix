@@ -50,7 +50,7 @@ by ABI. This app is single-module, so the question barely arises here; see
     #    ~/.gradle/gradle.properties:
     #        org.gradle.java.installations.paths=/path/to/jdk-17
 
-Environment overrides (all optional; dev defaults in `brix.py`):
+Environment overrides (all optional; dev defaults in `brix_build.py`):
 
     BRIX_PETCLINIC_KOTLIN_ROOT   the checkout location
     BRIX_KOTLINC                 kotlinc launcher (default: on PATH)
@@ -59,8 +59,8 @@ Environment overrides (all optional; dev defaults in `brix.py`):
 
 ## Run
 
-    python examples/spring-petclinic-kotlin/brix.py build     # resolve + compile + jar
-    python examples/spring-petclinic-kotlin/brix.py status
+    python examples/spring-petclinic-kotlin/brix_build.py build     # resolve + compile + jar
+    python examples/spring-petclinic-kotlin/brix_build.py status
 
 The build uses the brix in this repo (it puts `../../src` on `sys.path`) and the
 Rust engine by default, through the full atomic/cache/incremental layer stack.

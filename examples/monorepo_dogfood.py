@@ -6,7 +6,7 @@ It stitches together everything the recent work added and runs it as a user
 would — no test scaffolding, real `cc`/`ar`, the default (Rust) engine:
 
 * **hierarchical build files** — two packages (`services/util`, `services/app`)
-  each with their own `brix.py`, discovered and merged (tier 1);
+  each with their own `brix_build.py`, discovered and merged (tier 1);
 * **derived cross-package dependency** — `app` links `util`'s static library,
   so brix infers app→util with no declaration (tier 2);
 * **git-driven lazy loading** — `load_affected(root)` asks git what changed
@@ -106,9 +106,9 @@ def make_workspace(root: Path, util_value: int, app_bump: int) -> None:
     write(root, ".gitignore", "build/\n")
     write(root, "services/util/include/util.h", UTIL_H)
     write(root, "services/util/src/util.c", UTIL_C.format(value=util_value))
-    write(root, "services/util/brix.py", UTIL_BRIX)
+    write(root, "services/util/brix_build.py", UTIL_BRIX)
     write(root, "services/app/src/app.c", APP_C.format(bump=app_bump))
-    write(root, "services/app/brix.py", APP_BRIX)
+    write(root, "services/app/brix_build.py", APP_BRIX)
 
 
 def git(root: Path, *args: str) -> None:
@@ -127,7 +127,7 @@ class Ran(Reporter):
 
 def run_build(root: Path):
     """One `load_affected` + git-accelerated incremental build, exactly as the
-    trial's root brix.py would. Returns (ran labels, loaded package names)."""
+    trial's root brix_build.py would. Returns (ran labels, loaded package names)."""
     rep = Ran()
     ws = load_affected(root)  # changed=None -> git enumerates what changed
     result = IncrementalBuilder(

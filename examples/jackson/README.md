@@ -53,8 +53,8 @@ checkouts. For compatibility, it may also point directly to `jackson-core`.
 ## Run
 
 ```sh
-python examples/jackson/brix.py build
-python examples/jackson/brix.py status
+python examples/jackson/brix_build.py build
+python examples/jackson/brix_build.py status
 python examples/jackson/verify_selection.py
 ```
 

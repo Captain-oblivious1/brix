@@ -123,16 +123,14 @@
 - **Starter templates — a copy-and-go Java service and TypeScript service.**
   `examples/templates/java-service/` and `examples/templates/typescript-service/`:
   minimal, generic, *working* projects to copy as the start of your own, not
-  feature demos. Each is a `brix.py` on the recommended `build_stack` (atomic +
+  feature demos. Each is a `brix_build.py` on the recommended `build_stack` (atomic +
   cache + incremental for Java; cache + incremental for TS, since `tsc`
   self-resolves imports off the real filesystem) with a `build`/`run`/`status`
   CLI, a target alias, and one placeholder source — change a couple of names and
   drop in your code. Two bootstrap subtleties are handled and documented: a
   marked "delete in your copy" block that only lets the template import brix from
-  this repo in-tree, and — kept even in a user's copy — the `sys.path` fix that a
-  file named `brix.py` inherently needs, since running `python brix.py` puts the
-  script's own directory first and would otherwise shadow the installed `brix`
-  package. `tests/test_templates.py` copies each template out (so the repo stays
+  this repo in-tree. The `brix_build.py` name avoids shadowing the installed
+  `brix` package. `tests/test_templates.py` copies each template out (so the repo stays
   clean and the copied-out path is what runs), does a tool-free parse-and-plan
   check on both, and a gated end-to-end build+`run` (Java verified here; TS gated
   on `tsc`/`node`). Indexed in `examples/README.md`. Follow-up: C++ and Kotlin
@@ -242,7 +240,7 @@
   has the complete graph) and stored, so `load_index_data` reads them
   O(packages) instead of re-deriving (`_derive_deps_from_entries` and its
   helper are gone). A subset save carries the persisted edges forward — sound
-  because a subset build only happens when no `brix.py` changed, so patterns are
+  because a subset build only happens when no `brix_build.py` changed, so patterns are
   stable — and drops them (so the next build full-loads and re-derives) only
   when a footprint-driven reload actually changed a loaded package's
   input/output patterns; edges depend solely on those patterns, so this is
@@ -323,11 +321,11 @@
   `tests/test_ts.py`.
 
 - **Worked example for hierarchical/lazy loading (`examples/hierarchical/`).**
-  The distributed-`brix.py` feature was tested but had no user-facing surface;
+  The distributed-`brix_build.py` feature was tested but had no user-facing surface;
   this is the runnable end-to-end demonstration and the adoption template a
   real service tree copies. A `core → api → web` dependency chain plus an
-  independent `docs` package, split into per-package `brix.py` files sharing
-  one `tools/step.py`; the root `brix.py` is the workspace entry point
+  independent `docs` package, split into per-package `brix_build.py` files sharing
+  one `tools/step.py`; the root `brix_build.py` is the workspace entry point
   (`load_workspace(ROOT).graph`, the safe full-load default) and documents the
   one-line `load_affected` opt-in. `verify_lazy.py` is the proof: it drives
   `load_affected` with explicit change sets (no git state needed) and checks
@@ -372,7 +370,7 @@
   cross-package edges are themselves derived from the persisted patterns
   (`patterns.overlaps`, no shared bindings — conservative), so matching and
   edges cannot drift apart and a subset load refreshes only its own entries
-  (`save_index` merges). FULL-load fallbacks: no index; any `brix.py`
+  (`save_index` merges). FULL-load fallbacks: no index; any `brix_build.py`
   added/removed/edited; a changed path in the discovered-deps table (per-action
   keys, unattributable without loading); out-of-tree changes; failed-build
   recovery via `last_selected` (written at load time, before the build).
@@ -388,7 +386,7 @@
   since the last build). Gate: `tests/test_affected.py` replays the real
   `load_affected` flow against a full load across the whole edit alphabet
   (multi-hop lib→mid→app ripple, shared-tool edit, dynamic-config footprint
-  reload, glob-member deletion, new package, dependency rewired via `brix.py`
+  reload, glob-member deletion, new package, dependency rewired via `brix_build.py`
   edit → FULL, irrelevant edit → empty selection), proves laziness (a lib edit
   selects exactly {lib, mid, app}), covers every FULL fallback, and keeps a
   negative control (footprint-blind selector must diverge). Opt-in; the full
@@ -438,8 +436,8 @@
   overlap, the reverse index, and the persistence round-trip).
 - **Hierarchical build files, tier 1 (monorepo scaling).** The safe foundation
   of the plan in `docs/monorepo-scaling.md`: a large repo can split its one root
-  `brix.py` into several placed at module/service boundaries, each a *package*
-  owning its subtree until interrupted by a deeper `brix.py` (the Bazel package
+  `brix_build.py` into several placed at module/service boundaries, each a *package*
+  owning its subtree until interrupted by a deeper `brix_build.py` (the Bazel package
   model). `brix.workspace` provides discovery (`find_packages`), nearest-ancestor
   ownership (`owner`), a graph union that remaps the index-based `forced_orders`
   (`merge_graphs`), and `load_workspace` — which imports every package's
@@ -511,7 +509,7 @@
   `build_stack(...)` factory came with it — it assembles the correct
   `AtomicBuilder(CacheBuilder(IncrementalBuilder(...)))` order and toggles
   layers by argument (`cache_dir=None` / `staging_dir=None`), so the common case
-  never hand-nests; dogfooded in `examples/leveldb/brix.py`.
+  never hand-nests; dogfooded in `examples/leveldb/brix_build.py`.
 - **Deleted-source cleanup after a failed build.** brix cleans up a deleted
   source's leftover outputs by remembering, between builds, which collection
   members existed. That record was committed only on *success*, so a member
@@ -564,7 +562,7 @@
   a tool reads from the *inherited* environment without anyone declaring it —
   `JAVA_HOME`, `CC`, a locale — which can change output while brix, seeing no
   declared change, serves the result as fresh. A build now captures its
-  filtered environment to `build/.brix/environment.json`, and `brix.py env`
+  filtered environment to `build/.brix/environment.json`, and `brix_build.py env`
   prints the last recorded build environment plus a diff against the current
   one (exit 1 when they differ, like `status`); a one-line note also folds into
   `status`. It is a *detective, not a guard*: it records and shows, and
@@ -617,8 +615,8 @@
   fold the compiler tool identity into the compile fingerprint (spawn does via
   the `{kotlinc}` tool), so a compiler upgrade is not tracked on the worker
   path — a cross-cutting item for both workers, not specific to Kotlin.
-  `tests/test_kotlin_worker.py`; `examples/kotlin_multimodule/brix.py`.
-- **`brix.py help` — the build file's live configuration.** `-h` only ever
+  `tests/test_kotlin_worker.py`; `examples/kotlin_multimodule/brix_build.py`.
+- **`brix_build.py help` — the build file's live configuration.** `-h` only ever
   listed the built-in subcommands; everything project-specific lived inside
   the `cli.main(...)` call and was invisible without opening the file. `help`
   introspects the builder chain — it walks each wrapper's `.inner` reading
@@ -633,7 +631,7 @@
   untouched — and each `commands=` callable's first docstring line as its
   one-line summary. It is a pure client printout (the engine never prints), so
   it is engine-agnostic — identical output under `BRIX_ENGINE=rust`.
-  `tests/test_cli_help.py`; dogfooded in `examples/leveldb/brix.py`.
+  `tests/test_cli_help.py`; dogfooded in `examples/leveldb/brix_build.py`.
 - **Fable review of the `content_key` relocation (`634c115`): verdict
   positive; one golden gap closed.** The reserved-Fable check on the
   fingerprint-byte-identical claim. Every load-bearing piece verified: the
@@ -1022,7 +1020,7 @@
   translation units in parallel (`cpp.CompileSourceAction`), bundles them with
   `cpp.ArchiveAction` into `libleveldb.a` (`ar Dcrs`, 38 members), and links a
   smoke program (open a DB, batch-put, get, iterate) against the archive via
-  `cpp.LinkApplicationAction` — run with `brix.py run smoke` (a build-then-act
+  `cpp.LinkApplicationAction` — run with `brix_build.py run smoke` (a build-then-act
   `commands=` subcommand). Header-dep tracking holds at scale: editing
   `db/skiplist.h` recompiled exactly the 5 TUs that transitively include it
   (33 skipped), and — being a comment-only edit — left the objects
@@ -1161,7 +1159,7 @@
   apply at commit. Commit is journaled (COMMIT marker written first, copy
   is idempotent): a crash mid-commit is finished by the next build's
   `on_build_begin`; failed-build staging stays inspectable
-  (`brix.py status` shows staged files/deletions and interrupted commits)
+  (`brix_build.py status` shows staged files/deletions and interrupted commits)
   and is discarded when the next build starts. Composes with
   IncrementalBuilder: unchanged rebuilds spawn nothing and stage nothing;
   a failed build leaves the workspace byte-identical — even the successful
@@ -1173,7 +1171,7 @@
   `cli.main` accepts `builder_factory` for a full custom stack.
   `examples/cpp_app/`: real C++ compiled with
   `AtomicBuilder(IncrementalBuilder(...))` and the CLI — break a source
-  and the old binary keeps working (atomic), `brix.py errors` replays the
+  and the old binary keeps working (atomic), `brix_build.py errors` replays the
   compiler diagnostics without rebuilding, fix it back and even the link
   stays fresh (byte-identical object).
 - **`brix.java` + the composability example**: `JarAction` lowers to one
@@ -1198,7 +1196,7 @@
   `PYTHONPATH`). `ExpandAll.child` is any `Expandable` (`substitute` +
   `label`); a nested ExpandAll becomes an EXPAND node expanded in turn.
   Project CLI flags need no brix feature: `parse_known_args()` in the
-  project's brix.py, rest to `cli.main(argv=...)`, flags become
+  project's brix_build.py, rest to `cli.main(argv=...)`, flags become
   fingerprinted `data.value` inputs. Still to come from that project:
   pluggable change detectors, a post-run `DependencyScanner` hook
   (gcc -MD style discovered dependencies; the scenes reference audio
@@ -1213,7 +1211,7 @@
   matching `wealth.raw.mpg` as `video=wealth.raw` manufactures an endless
   `.raw.raw...` chain — found live on the animation project). CLI: `build`
   and `status` accept targets and `aliases=`; unknown targets exit 2.
-  Verified on the animation project: `./brix.py build wealth` plans only
+  Verified on the animation project: `./brix_build.py build wealth` plans only
   that video's 12-node chain and replays against full-build records.
 - **Liveness reporting + custom subcommands** (`report.py`, `executor.py`,
   `cli.py`): new `Reporter.process_started` event emitted at the innermost
@@ -1224,7 +1222,7 @@
   the named targets (aliases apply), then call `fn` with the built
   absolute paths (exit code honored; requires at least one target). The
   animation `view` command (makefile `%.mpg.view`, plays via parole) is
-  three lines in its brix.py.
+  three lines in its brix_build.py.
 - **CacheBuilder** (`src/brix/cache.py`): `CacheStore` is content-
   addressed under one directory (`<fp[:2]>/<fp>/entry.json` + numbered
   output blobs; temp-dir-then-rename writes make concurrent sharing
@@ -1689,7 +1687,7 @@
   dryRun build (106 nodes), no-op rebuild all-replayed on *both* engines
   against the same metadata, targeted `build wealth` (12-node plan),
   `clean` then full cache restore (94 hits), `status`. Two animation
-  `brix.py` updates rode along (uncommitted there): `{video:*}` on the
+  `brix_build.py` updates rode along (uncommitted there): `{video:*}` on the
   videos glob — bare `{video}` would read every scene/helper/`__init__`
   as a video, and path shape alone cannot distinguish `rights3/Fence.py`
   (helper) from a future `rights/intro.py` (nested video); when videos

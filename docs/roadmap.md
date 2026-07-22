@@ -91,7 +91,7 @@ below is tagged with the model that should do it.
 ### Feature-completeness dogfooding (in progress — prove brix on real projects before starting track 3)
 
 Cloning real projects has been the best gap-finder (each one surfaced a real
-bug or missing feature). Clones live in `~/Projects/brix_test/`; our `brix.py`
+bug or missing feature). Clones live in `~/Projects/brix_test/`; our `brix_build.py`
 artifacts live in this repo under `examples/`. **Done:** JUnit 5 (Java compile
 graph; found the jvm-abi String-annotation bug; resources), fmt (C++ header-dep
 tracking), jackson-core (selective test running via `java.JUnitTestAction`;
@@ -212,7 +212,7 @@ These are self-contained and come with tests. No Fable needed.
   setting that a tool reads, but that the build file didn't declare, can change a
   build's result without brix noticing — the classic "works on my machine, fails
   on the server." **Phase 1 done (2026-07-17, Opus):** a build now captures its
-  filtered environment to `build/.brix/environment.json`, and `brix.py env`
+  filtered environment to `build/.brix/environment.json`, and `brix_build.py env`
   diffs the current environment against the last recorded build (exit 1 on a
   difference), with a one-line note folded into `status`. A *detective, not a
   guard* — it records and shows, never rebuilds or fingerprints, so it can't
@@ -274,18 +274,18 @@ These are self-contained and come with tests. No Fable needed.
   built with `--release 17` so it runs on whatever `java` launches it, which
   must be a JDK the Kotlin compiler supports. `tests/test_kotlin_worker.py`
   (unit + kotlinc-gated e2e, both engines); demonstrated in
-  `examples/kotlin_multimodule/brix.py`.
+  `examples/kotlin_multimodule/brix_build.py`.
 
 **Making it easy to start:**
 
-- **Machine-readable status.** Add a JSON form of `brix.py status` (for example,
-  `brix.py status --json`) with a documented, versioned schema. It should expose
+- **Machine-readable status.** Add a JSON form of `brix_build.py status` (for example,
+  `brix_build.py status --json`) with a documented, versioned schema. It should expose
   each action's state and explanation, pending/deleted outputs, staging state,
   and the relevant project paths without mixing human-readable text into
   stdout. This lets somebody build a web UI, IDE panel, CI report, or other
   frontend without scraping terminal output. Brix should provide the data, not
   require the core project to choose or host the frontend.
-- **`brix.py help` — show the *live* configuration, not just the command list.**
+- **`brix_build.py help` — show the *live* configuration, not just the command list.**
   **Done (2026-07-17, Opus).** Argparse's `-h` lists the built-in subcommands,
   but everything project-specific lived in the `cli.main(...)` call and was
   invisible without reading the file. `help` now introspects the builder chain
@@ -300,18 +300,17 @@ These are self-contained and come with tests. No Fable needed.
   `str`/`list[str]` mappings are untouched — and each `commands=` callable's
   first docstring line as its summary. Engine-agnostic (a pure client
   printout; identical under `BRIX_ENGINE=rust`). `tests/test_cli_help.py`;
-  demonstrated in `examples/leveldb/brix.py`.
+  demonstrated in `examples/leveldb/brix_build.py`.
 - **Draw a picture of the build.** Boxes for steps, arrows for what depends on
   what, instead of a text list.
 - **Ready-made starter templates — done (2026-07-18, Opus).**
   `examples/templates/java-service/` (→ runnable jar via `java.JarAction`) and
   `examples/templates/typescript-service/` (→ `dist/*.js` via `ts.CompileAction`):
-  minimal, generic, working projects meant to be *copied out*, each a `brix.py`
+  minimal, generic, working projects meant to be *copied out*, each a `brix_build.py`
   on the recommended `build_stack` with a `build`/`run`/`status` CLI and one
-  placeholder source. Each opens with a marked "delete in your copy" block (it
-  only lets the template run in-repo) plus the always-needed `sys.path` fix a
-  file named `brix.py` requires (the script's own dir would otherwise shadow the
-  installed `brix` package). `tests/test_templates.py` runs a tool-free
+  placeholder source. Each opens with a marked "delete in your copy" block that
+  only lets the template run in-repo. The `brix_build.py` name avoids shadowing
+  the installed `brix` package. `tests/test_templates.py` runs a tool-free
   parse-and-plan check on both and a gated end-to-end build+run (Java verified
   here; TS gated on `tsc`). Listed in `examples/README.md`. **Follow-up:** a C++
   and a Kotlin template could join them.
@@ -473,7 +472,7 @@ These are self-contained and come with tests. No Fable needed.
   patterns/footprints, gated by `tests/test_affected.py`'s full edit alphabet
   plus a negative control). **Opt-in**: `load_workspace` full load stays the
   default; relying on lazy loading is post-trial. **Design note:
-  `docs/monorepo-scaling.md`** — hierarchical `brix.py` files (a Bazel-style
+  `docs/monorepo-scaling.md`** — hierarchical `brix_build.py` files (a Bazel-style
   package model, monolith as the degenerate case), a *derived* reverse-dependency
   index + loading-footprint tracking (no redundant declarations), and lazy
   loading gated by an equivalence oracle. Key findings: the value is lopsided —

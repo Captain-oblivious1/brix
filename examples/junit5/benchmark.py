@@ -24,7 +24,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = Path(os.environ.get("BRIX_JUNIT5_ROOT", os.path.expanduser("~/Projects/brix_test/junit5")))
-BRIX = [sys.executable, str(HERE / "brix.py")]
+BRIX = [sys.executable, str(HERE / "brix_build.py")]
 COMMONS_REL = "junit-platform-commons/src/main/java/org/junit/platform/commons/util/Preconditions.java"
 COMMONS = ROOT / COMMONS_REL
 

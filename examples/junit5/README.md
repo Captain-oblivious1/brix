@@ -36,10 +36,10 @@ Override the checkout location with `BRIX_JUNIT5_ROOT`.
 
 ## Run
 
-    python examples/junit5/brix.py build            # all seven jars
-    python examples/junit5/brix.py build engine     # one module + its deps
-    python examples/junit5/brix.py status
-    python examples/junit5/brix.py build --no-daemon # no cross-build worker
+    python examples/junit5/brix_build.py build            # all seven jars
+    python examples/junit5/brix_build.py build engine     # one module + its deps
+    python examples/junit5/brix_build.py status
+    python examples/junit5/brix_build.py build --no-daemon # no cross-build worker
 
 The build uses the brix in this repo (it puts `../../src` on `sys.path`) and
 the Rust engine by default, with the warm javac worker persisting between

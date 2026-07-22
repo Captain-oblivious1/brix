@@ -1,4 +1,4 @@
-"""CLI helpers: the command-line section of a project's brix.py.
+"""CLI helpers: the command-line section of a project's brix_build.py.
 
 Brix is a library; the CLI is a thin client over builders, status, and
 metadata. A project's build file ends with:
@@ -8,15 +8,15 @@ metadata. A project's build file ends with:
 
 Commands (default: build):
 
-    brix.py [build] [-j N] [--silent | --quiet-replays] [--stage]
-    brix.py status      exit 0 = everything fresh, 1 = work pending
-    brix.py errors      replay last recorded failures; exit 1 if any
-    brix.py commit      apply staging held by `build --stage`
-    brix.py discard     throw held/failed staging away
-    brix.py clean       delete built outputs and metadata
-    brix.py graph       print the execution plan's structure
-    brix.py help        show this build file's live configuration
-    brix.py env         show the last build's environment and what changed
+    brix_build.py [build] [-j N] [--silent | --quiet-replays] [--stage]
+    brix_build.py status      exit 0 = everything fresh, 1 = work pending
+    brix_build.py errors      replay last recorded failures; exit 1 if any
+    brix_build.py commit      apply staging held by `build --stage`
+    brix_build.py discard     throw held/failed staging away
+    brix_build.py clean       delete built outputs and metadata
+    brix_build.py graph       print the execution plan's structure
+    brix_build.py help        show this build file's live configuration
+    brix_build.py env         show the last build's environment and what changed
 
 `env` reports the environment the most recent build ran under and diffs it
 against the current one (exit 1 if it differs) — the "works on my machine"
@@ -29,7 +29,7 @@ the workspace changes only at `commit`. Requires an atomic builder.
 
 Projects can add build-then-act subcommands via ``commands=`` — each
 builds its targets first, then hands the built paths to a project
-function (``brix.py view wealth`` → build wealth's video, then play it).
+function (``brix_build.py view wealth`` → build wealth's video, then play it).
 
 The engine never prints; this module is a client, so printing here is
 fine — it is the client.
@@ -93,14 +93,14 @@ def main(
     "output/videos/wealth.mpg"}`` lets users say ``build wealth``.
 
     ``commands`` (optional): build-then-act subcommands — ``{"view": fn}``
-    adds ``brix.py view <target>...``, which builds the targets (aliases
+    adds ``brix_build.py view <target>...``, which builds the targets (aliases
     apply) and, on success, calls ``fn(paths)`` with their absolute
     ``Path``s. ``fn`` may return an exit code.
 
     ``env_ignore`` (optional): extra environment-variable names/globs to drop
     from the recorded build environment, on top of the built-in ignore-list of
-    session noise (see ``brix.environment`` and ``brix.py env``)."""
-    parser = argparse.ArgumentParser(prog="brix.py")
+    session noise (see ``brix.environment`` and ``brix_build.py env``)."""
+    parser = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
     subparsers = parser.add_subparsers(dest="command")
 
     def add_build_options(sub, targets_nargs: str) -> None:
@@ -340,7 +340,7 @@ def _render_help(builder, aliases, commands) -> str:
     """The ``help`` printout: the live builder stack, the project's target
     aliases and build-then-act commands, and what `build` will therefore do
     — everything that lives in the ``cli.main(...)`` call and is otherwise
-    invisible without reading ``brix.py``."""
+    invisible without reading ``brix_build.py``."""
     stack = _describe_stack(builder)
     has_atomic = any(name == "Atomic" for name, _ in stack)
     lines: list[str] = []

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The raw C++ graph from the design doc: compile each src/*.cpp, link an app.
 
-Run from anywhere:  python3 examples/raw_cpp/brix.py
+Run from anywhere:  python3 examples/raw_cpp/brix_build.py
 Requires a C++ compiler on PATH as `c++`.
 """
 

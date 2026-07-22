@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Text-processing demo: uppercase each src/*.txt, then combine them.
 
-Run from anywhere:  python3 examples/hello_text/brix.py
+Run from anywhere:  python3 examples/hello_text/brix_build.py
 """
 
 import sys

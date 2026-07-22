@@ -142,7 +142,7 @@ def diff(recorded: dict[str, str], current: dict[str, str]) -> EnvDiff:
 
 
 def render(directory: str | Path, current: dict[str, str]) -> tuple[str, bool]:
-    """The `brix.py env` printout and whether the environment differs.
+    """The `brix_build.py env` printout and whether the environment differs.
 
     Returns (text, changed): `changed` is False when nothing is recorded yet or
     the environment is unchanged, True when it differs — the caller maps that to
@@ -190,5 +190,5 @@ def summary_line(directory: str | Path, current: dict[str, str]) -> str | None:
         return None
     return (
         f"environment: {delta.count} variable(s) changed since last build "
-        "— run 'brix.py env'"
+        "— run 'brix_build.py env'"
     )

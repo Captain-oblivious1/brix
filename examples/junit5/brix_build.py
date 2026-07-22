@@ -18,10 +18,10 @@ Setup (once):
     examples/junit5/fetch-deps.sh          # clones aren't committed; this
                                            # re-fetches the 2 external jars
 Run (from anywhere):
-    python examples/junit5/brix.py build           # all seven jars
-    python examples/junit5/brix.py build engine    # one module + its deps
-    python examples/junit5/brix.py status
-    python examples/junit5/brix.py --no-daemon build
+    python examples/junit5/brix_build.py build           # all seven jars
+    python examples/junit5/brix_build.py build engine    # one module + its deps
+    python examples/junit5/brix_build.py status
+    python examples/junit5/brix_build.py --no-daemon build
 
 The JUnit checkout defaults to ~/Projects/brix_test/junit5 (override with
 BRIX_JUNIT5_ROOT). This file uses the brix in this repo, not an installed
@@ -32,10 +32,8 @@ import os
 import sys
 from pathlib import Path
 
-# This file is named brix.py, so its own directory would shadow the brix
-# package on import — drop it, then point at this repo's src/.
+# Point at this repository's source tree for the in-tree example.
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import Graph, cli, java  # noqa: E402

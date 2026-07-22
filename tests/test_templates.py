@@ -4,7 +4,7 @@ Each template is a self-contained project a user copies out and builds with an
 installed brix. These tests copy a template to a temp dir (so nothing pollutes
 the repo, and the copied-out path is what runs), point it at this repo's ``src``
 via PYTHONPATH, and exercise it as a user would — a tool-free structural check
-that the ``brix.py`` parses and plans, plus a gated end-to-end build when the
+that the ``brix_build.py`` parses and plans, plus a gated end-to-end build when the
 language's toolchain is present.
 """
 
@@ -25,7 +25,7 @@ def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     # The copied-out template imports brix as if installed; point it here.
     env["PYTHONPATH"] = str(REPO / "src") + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.run(
-        [sys.executable, "brix.py", *args],
+        [sys.executable, "brix_build.py", *args],
         cwd=cwd,
         env=env,
         capture_output=True,

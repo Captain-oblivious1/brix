@@ -1,7 +1,7 @@
 """Hierarchical build files, tier 1: discovery, ownership, full-merge loading.
 
 The load-bearing test is the **equivalence to the monolith**: a workspace split
-into several package `brix.py` files must build identically to one root file with
+into several package `brix_build.py` files must build identically to one root file with
 the same actions. Tier 1 loads every package (no laziness), so this is where the
 "the monolith is the degenerate case" contract is pinned.
 """
@@ -40,7 +40,7 @@ def _upper_action(name, src, dest):
 
 
 def _pkg_source(name, src, dest):
-    """A package brix.py exposing create_graph() for one upper action."""
+    """A package brix_build.py exposing create_graph() for one upper action."""
     return (
         "import sys\n"
         "from brix import Graph, ExternalProcessAction\n"
@@ -76,10 +76,10 @@ def _write_common(root):
 
 def _write_hierarchical(root):
     _write_common(root)
-    # A package brix.py at the root (app) and one per service.
-    (root / "brix.py").write_text(_pkg_source(*SLICES[0]))
-    (root / "services/foo/brix.py").write_text(_pkg_source(*SLICES[1]))
-    (root / "services/bar/brix.py").write_text(_pkg_source(*SLICES[2]))
+    # A package brix_build.py at the root (app) and one per service.
+    (root / "brix_build.py").write_text(_pkg_source(*SLICES[0]))
+    (root / "services/foo/brix_build.py").write_text(_pkg_source(*SLICES[1]))
+    (root / "services/bar/brix_build.py").write_text(_pkg_source(*SLICES[2]))
 
 
 def _monolith(root):
@@ -94,7 +94,10 @@ def _monolith(root):
 def test_find_packages_discovers_all_and_skips_build(tmp_path):
     _write_hierarchical(tmp_path)
     (tmp_path / "build").mkdir(exist_ok=True)
-    (tmp_path / "build/brix.py").write_text("# stray file under build/, must be skipped\n")
+    (tmp_path / "build/brix_build.py").write_text("# stray file under build/, must be skipped\n")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/build.py").write_text("# unrelated Python build helper\n")
+    (tmp_path / "scripts/brix.py").write_text("# ordinary module using the old name\n")
     packages = find_packages(tmp_path)
     rels = sorted(p.relative_to(tmp_path).as_posix() for p in packages)
     assert rels == [".", "services/bar", "services/foo"]
@@ -114,7 +117,7 @@ def test_owner_deeper_package_carves_out_subtree(tmp_path):
     _write_hierarchical(tmp_path)
     # Add a nested package under services/foo/inner.
     (tmp_path / "services/foo/inner").mkdir()
-    (tmp_path / "services/foo/inner/brix.py").write_text("# inner package\n")
+    (tmp_path / "services/foo/inner/brix_build.py").write_text("# inner package\n")
     packages = find_packages(tmp_path)
     # A file under the nested package is owned by it, not services/foo.
     assert owner(tmp_path / "services/foo/inner/x.txt", packages) == tmp_path / "services/foo/inner"
@@ -189,16 +192,16 @@ def _write_dep_workspace(root):
     (root / "tools/upper.py").write_text(UPPER_TOOL)
     (root / "services/lib").mkdir(parents=True, exist_ok=True)
     (root / "services/lib/src.txt").write_text("lib source")
-    (root / "services/lib/brix.py").write_text(
+    (root / "services/lib/brix_build.py").write_text(
         _pkg_source("lib", "services/lib/src.txt", "build/lib/out.txt")
     )
     (root / "services/app").mkdir(parents=True, exist_ok=True)
     # app reads lib's output -> app depends on lib.
-    (root / "services/app/brix.py").write_text(
+    (root / "services/app/brix_build.py").write_text(
         _pkg_source("app", "build/lib/out.txt", "build/app/final.txt")
     )
     # root package: independent (reads a static tool file, produces its own out).
-    (root / "brix.py").write_text(
+    (root / "brix_build.py").write_text(
         _pkg_source("root", "tools/upper.py", "build/root/out.txt")
     )
 

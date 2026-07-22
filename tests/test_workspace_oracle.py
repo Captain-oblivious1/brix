@@ -87,11 +87,11 @@ def _setup_factory(tmp_path):
         (root / "tools/upper.py").write_text(UPPER_TOOL)
         (root / "services/lib").mkdir(parents=True)
         (root / "services/lib/src.txt").write_text("lib-v1")
-        (root / "services/lib/brix.py").write_text(
+        (root / "services/lib/brix_build.py").write_text(
             _pkg_source("lib", "services/lib/src.txt", "build/lib/out.txt")
         )
         (root / "services/app").mkdir(parents=True)
-        (root / "services/app/brix.py").write_text(
+        (root / "services/app/brix_build.py").write_text(
             _pkg_source("app", "build/lib/out.txt", "build/app/final.txt")
         )
         return root

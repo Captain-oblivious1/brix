@@ -686,7 +686,7 @@
 
 
 <h1 id="command-line">Command line<a class="headerlink" href="#command-line" title="Permanent link">&para;</a></h1>
-<p>A project's <code>brix.py</code> exposes a command-line interface by calling <code>cli.main</code>.
+<p>A project's <code>brix_build.py</code> exposes a command-line interface by calling <code>cli.main</code>.
 It provides <code>build</code>, <code>status</code>, <code>clean</code>, <code>help</code>, and related subcommands, plus
 project-defined target aliases and build-then-act commands.</p>
 
@@ -698,22 +698,22 @@ project-defined target aliases and build-then-act commands.</p>
 
     <div class="doc doc-contents first">
 
-        <p>CLI helpers: the command-line section of a project's brix.py.</p>
+        <p>CLI helpers: the command-line section of a project's brix_build.py.</p>
 <p>Brix is a library; the CLI is a thin client over builders, status, and
 metadata. A project's build file ends with:</p>
 <div class="highlight"><pre><span></span><code>if __name__ == &quot;__main__&quot;:
     sys.exit(brix.cli.main(create_graph))
 </code></pre></div>
 <p>Commands (default: build):</p>
-<div class="highlight"><pre><span></span><code>brix.py [build] [-j N] [--silent | --quiet-replays] [--stage]
-brix.py status      exit 0 = everything fresh, 1 = work pending
-brix.py errors      replay last recorded failures; exit 1 if any
-brix.py commit      apply staging held by `build --stage`
-brix.py discard     throw held/failed staging away
-brix.py clean       delete built outputs and metadata
-brix.py graph       print the execution plan&#39;s structure
-brix.py help        show this build file&#39;s live configuration
-brix.py env         show the last build&#39;s environment and what changed
+<div class="highlight"><pre><span></span><code>brix_build.py [build] [-j N] [--silent | --quiet-replays] [--stage]
+brix_build.py status      exit 0 = everything fresh, 1 = work pending
+brix_build.py errors      replay last recorded failures; exit 1 if any
+brix_build.py commit      apply staging held by `build --stage`
+brix_build.py discard     throw held/failed staging away
+brix_build.py clean       delete built outputs and metadata
+brix_build.py graph       print the execution plan&#39;s structure
+brix_build.py help        show this build file&#39;s live configuration
+brix_build.py env         show the last build&#39;s environment and what changed
 </code></pre></div>
 <p><code>env</code> reports the environment the most recent build ran under and diffs it
 against the current one (exit 1 if it differs) — the "works on my machine"
@@ -725,7 +725,7 @@ the file. <code>build --stage</code> builds fully but holds outputs in staging f
 the workspace changes only at <code>commit</code>. Requires an atomic builder.</p>
 <p>Projects can add build-then-act subcommands via <code>commands=</code> — each
 builds its targets first, then hands the built paths to a project
-function (<code>brix.py view wealth</code> → build wealth's video, then play it).</p>
+function (<code>brix_build.py view wealth</code> → build wealth's video, then play it).</p>
 <p>The engine never prints; this module is a client, so printing here is
 fine — it is the client.</p>
 
@@ -835,12 +835,12 @@ builder to use for <code>build</code> — e.g. the full
 <p><code>aliases</code> (optional): target shorthands — <code>{"wealth":
 "output/videos/wealth.mpg"}</code> lets users say <code>build wealth</code>.</p>
 <p><code>commands</code> (optional): build-then-act subcommands — <code>{"view": fn}</code>
-adds <code>brix.py view &lt;target&gt;...</code>, which builds the targets (aliases
+adds <code>brix_build.py view &lt;target&gt;...</code>, which builds the targets (aliases
 apply) and, on success, calls <code>fn(paths)</code> with their absolute
 <code>Path</code>s. <code>fn</code> may return an exit code.</p>
 <p><code>env_ignore</code> (optional): extra environment-variable names/globs to drop
 from the recorded build environment, on top of the built-in ignore-list of
-session noise (see <code>brix.environment</code> and <code>brix.py env</code>).</p>
+session noise (see <code>brix.environment</code> and <code>brix_build.py env</code>).</p>
 
 
     </div>

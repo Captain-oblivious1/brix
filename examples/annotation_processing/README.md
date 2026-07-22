@@ -4,7 +4,7 @@ This self-contained example builds a Java annotation processor, then compiles
 an application with that jar on both `classpath` and `processorpath`:
 
 ```sh
-python examples/annotation_processing/brix.py build app
+python examples/annotation_processing/brix_build.py build app
 java -jar examples/annotation_processing/build/app.jar
 ```
 

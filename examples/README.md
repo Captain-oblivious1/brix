@@ -2,7 +2,7 @@
 
 Two kinds: **teaching examples** are self-contained (their sources live here;
 run them directly), and **real-project dogfoods** build famous open-source
-projects you clone into `~/Projects/brix_test/` — the `brix.py` lives here,
+projects you clone into `~/Projects/brix_test/` — the `brix_build.py` lives here,
 pointed at the checkout. The dogfoods are how brix's real-world coverage gets
 proven (each one has found a real bug or missing feature).
 
@@ -21,27 +21,27 @@ proven (each one has found a real bug or missing feature).
 | `annotation_processing/` | a processor jar generates application source; processor implementation changes recompile the app even when its Java ABI stays unchanged |
 | `incremental_demo/` | build, rebuild, change a file, delete a source — watch what re-runs |
 | `layers_demo/` | the middleware layer stack (incremental / cache / atomic) on a live build |
-| `cli_demo/` | the CLI section of a project `brix.py` (`build`/`status`/`clean`/…) |
+| `cli_demo/` | the CLI section of a project `brix_build.py` (`build`/`status`/`clean`/…) |
 | `cache_store_demo/` | a pluggable two-tier team cache across machines |
-| `hierarchical/` | a monorepo split into per-package `brix.py` files (`core → api → web` plus an independent `docs`, one shared `tools/step.py`): `load_workspace` merges them to build identically to a monolith, and `load_affected` loads **only** the packages an edit touches. `verify_lazy.py` proves it: a leaf edit loads the chain and skips `docs`, an independent edit loads only `docs`, editing the shared tool loads everything (soundness), an unreferenced edit loads nothing — each checked byte-identical against a full build |
+| `hierarchical/` | a monorepo split into per-package `brix_build.py` files (`core → api → web` plus an independent `docs`, one shared `tools/step.py`): `load_workspace` merges them to build identically to a monolith, and `load_affected` loads **only** the packages an edit touches. `verify_lazy.py` proves it: a leaf edit loads the chain and skips `docs`, an independent edit loads only `docs`, editing the shared tool loads everything (soundness), an unreferenced edit loads nothing — each checked byte-identical against a full build |
 | `polyglot_monorepo/` | the same lazy-loading, but **across languages** — a Java backend (`libs/model`, `services/orders`) and a TypeScript frontend (`shared`, `app`) in one workspace. `verify_polyglot.py` proves the cross-language partition: a backend edit loads no frontend package and vice versa, while the TS `shared → app` edge (ts-dts) still pulls in the dependent. The closest miniature of the air-gapped Java+TS target; selection needs no tools, and it builds the Java slice for real (TS where `tsc` is present) |
 
-Run any of them directly, e.g. `python examples/hello_text/brix.py build`.
+Run any of them directly, e.g. `python examples/hello_text/brix_build.py build`.
 
 ## Starter templates (copy these to begin)
 
 Unlike the teaching examples (which *show* a feature), these are minimal,
 generic, working projects meant to be **copied out** as the start of your own —
-a `brix.py` wired with the recommended stack, a `build`/`run`/`status` CLI, and
+a `brix_build.py` wired with the recommended stack, a `build`/`run`/`status` CLI, and
 one placeholder source. Copy the directory, drop in your sources, adjust a
-couple of names in the `brix.py`, and build.
+couple of names in the `brix_build.py`, and build.
 
 | template | start here for |
 |---|---|
 | `templates/java-service/` | a Java service → runnable jar (`java.JarAction`); needs a JDK |
 | `templates/typescript-service/` | a TypeScript service → `dist/*.js` (`ts.CompileAction`); needs `tsc` |
 
-Each `brix.py` opens with a marked block to **delete in your copy** (it only
+Each `brix_build.py` opens with a marked block to **delete in your copy** (it only
 lets the template run from inside this repo); your own project imports an
 installed `brix`.
 
@@ -62,7 +62,7 @@ detection, and C header tracking all compose. Needs `cc`/`ar`/`git`.
 ## Real-project dogfoods (clone required)
 
 Each has its own `README.md` with clone + setup steps. Checkouts go in
-`~/Projects/brix_test/`; run with `python examples/<name>/brix.py build`.
+`~/Projects/brix_test/`; run with `python examples/<name>/brix_build.py build`.
 
 | example | project | proves |
 |---|---|---|

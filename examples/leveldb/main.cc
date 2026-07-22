@@ -1,6 +1,6 @@
 // Smoke test for a brix-built libleveldb.a: open a fresh database, write a
 // few keys, read one back, iterate, and confirm the round-trip. Exits non-zero
-// on any failure so `python brix.py smoke` doubles as a build acceptance test.
+// on any failure so `python brix_build.py smoke` doubles as a build acceptance test.
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>

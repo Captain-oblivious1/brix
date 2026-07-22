@@ -3,14 +3,14 @@
 
 Needs a c++ compiler on PATH. Try:
 
-    python3 examples/cpp_app/brix.py             # build (incremental + atomic)
+    python3 examples/cpp_app/brix_build.py             # build (incremental + atomic)
     ./examples/cpp_app/build/bin/app             # run the result
-    python3 examples/cpp_app/brix.py             # again: everything replays
-    python3 examples/cpp_app/brix.py status      # exit 0, all fresh
+    python3 examples/cpp_app/brix_build.py             # again: everything replays
+    python3 examples/cpp_app/brix_build.py status      # exit 0, all fresh
     touch examples/cpp_app/src/greeting.cpp      # (or actually edit it)
-    python3 examples/cpp_app/brix.py status      # explains what will rebuild
-    python3 examples/cpp_app/brix.py errors      # after a broken edit: diagnostics
-    python3 examples/cpp_app/brix.py clean
+    python3 examples/cpp_app/brix_build.py status      # explains what will rebuild
+    python3 examples/cpp_app/brix_build.py errors      # after a broken edit: diagnostics
+    python3 examples/cpp_app/brix_build.py clean
 
 The graph uses the typed brix.cpp helpers, which lower to the same generic
 model as ExternalProcessAction. The builder stacks every capability that

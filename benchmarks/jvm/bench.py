@@ -194,7 +194,7 @@ def write_brix(root: Path) -> None:
             "    )\n"
         )
     app_cp = ", ".join(f'd.file("build/lib{k}.jar")' for k in range(1, N_LIBS + 1))
-    (root / "brix.py").write_text(
+    (root / "brix_build.py").write_text(
         BRIX_TEMPLATE.format(
             brix_src=str(BRIX_SRC),
             lib_actions=lib_actions.rstrip("\n"),
@@ -231,7 +231,7 @@ def gradle_build(root: Path, *, build_cache: bool) -> list[str]:
 
 
 def brix_cmd() -> list[str]:
-    return [sys.executable, "brix.py", "build", "build/app.jar"]
+    return [sys.executable, "brix_build.py", "build", "build/app.jar"]
 
 
 def app_output_brix(root: Path) -> str:

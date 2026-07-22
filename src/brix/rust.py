@@ -180,7 +180,7 @@ def cargo(
 ) -> CargoBuildAction:
     """Build a Rust crate with cargo, inferring the artifact and source footprint
     from its ``Cargo.toml`` (the `java.pom`/`cpp.pkg_config` *adopt-the-manifest*
-    pattern — Cargo.toml stays the single source of truth for the crate; brix.py
+    pattern — Cargo.toml stays the single source of truth for the crate; brix_build.py
     only says how the crate plugs into the graph).
 
     Reads the manifest now (per build, like the Maven adapters), relative to

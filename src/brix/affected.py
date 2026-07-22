@@ -2,7 +2,7 @@
 docs/monorepo-scaling.md).
 
 Given the paths changed since the last build, decide the provably complete set
-of package ``brix.py`` files to load — or admit that nothing can be proven and
+of package ``brix_build.py`` files to load — or admit that nothing can be proven and
 load them all. The governing invariant from the design note: **over-loading is
 a wasted parse (harmless); under-loading is a silent stale build (fatal).**
 Every rule here resolves uncertainty toward loading more, and ``None`` —
@@ -21,7 +21,7 @@ edges so dependents of an affected package reload too.
 The FULL fallbacks (``select_affected`` returns ``None``):
 
 * no persisted index — first build, version bump, or corruption;
-* any package build file itself changed — an added/removed/edited ``brix.py``
+* any package build file itself changed — an added/removed/edited ``brix_build.py``
   can change the workspace's structure, and only a full load re-derives it;
 * a changed path appears in the discovered-deps table — compiler-scanned
   inputs (e.g. C headers) are recorded per *action key*, which cannot be
@@ -72,7 +72,7 @@ def select_affected(
     changed,
     packages,
     *,
-    brix_file: str = "brix.py",
+    build_file: str = "brix_build.py",
     metadata_dir: str | Path = "build/.brix",
 ) -> set[Path] | None:
     """The packages that must be loaded given ``changed`` paths, or ``None``
@@ -89,7 +89,7 @@ def select_affected(
     rels = _relative(root, changed)
     if rels is None:
         return None
-    if any(PurePosixPath(r).name == brix_file for r in rels):
+    if any(PurePosixPath(r).name == build_file for r in rels):
         return None
 
     metadata = BuildMetadata(root, metadata_dir)
@@ -136,7 +136,7 @@ def load_affected(
     root: str | Path,
     changed=None,
     *,
-    brix_file: str = "brix.py",
+    build_file: str = "brix_build.py",
     graph_attr: str = "create_graph",
     metadata_dir: str | Path = "build/.brix",
 ) -> Workspace:
@@ -155,12 +155,12 @@ def load_affected(
         changed = _git_changed(root, metadata_dir)
     selected: set[Path] | None = None
     if changed is not None:
-        packages = find_packages(root, brix_file=brix_file)
+        packages = find_packages(root, build_file=build_file)
         selected = select_affected(
-            root, changed, packages, brix_file=brix_file, metadata_dir=metadata_dir
+            root, changed, packages, build_file=build_file, metadata_dir=metadata_dir
         )
     workspace = load_workspace(
-        root, brix_file=brix_file, graph_attr=graph_attr, only=selected
+        root, build_file=build_file, graph_attr=graph_attr, only=selected
     )
     workspace.save_index(metadata_dir)
     return workspace

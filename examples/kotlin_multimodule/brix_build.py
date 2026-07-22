@@ -40,8 +40,8 @@ finds `lib/kotlin-compiler.jar` beside the launcher (override with
 `BRIX_KOTLIN_COMPILER`) and launches it with the `java` on PATH.
 
 Run (from anywhere):
-    python examples/kotlin_multimodule/brix.py build
-    python examples/kotlin_multimodule/brix.py status
+    python examples/kotlin_multimodule/brix_build.py build
+    python examples/kotlin_multimodule/brix_build.py status
     # then edit core/src/lib.kt and rebuild to watch what re-runs.
 """
 
@@ -50,10 +50,8 @@ import shutil
 import sys
 from pathlib import Path
 
-# This file is named brix.py, so its own directory would shadow the brix
-# package on import — drop it, then point at this repo's src/.
+# Point at this repository's source tree for the in-tree example.
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import Graph, cli, kotlin  # noqa: E402

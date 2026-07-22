@@ -17,7 +17,7 @@ is written first, then staged files move into place and marked deletions
 are applied, then staging is removed. A crash mid-commit leaves the marker,
 and the next build's `on_build_begin` finishes the commit (copying is
 idempotent). A failed or interrupted build leaves staging in place,
-inspectable by `brix.py status`, and it is discarded when the next build
+inspectable by `brix_build.py status`, and it is discarded when the next build
 starts.
 
 **Held staging** (review before commit): with ``hold=True`` a successful

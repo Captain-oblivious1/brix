@@ -1,4 +1,4 @@
-"""`brix.py help`: introspect the live configuration.
+"""`brix_build.py help`: introspect the live configuration.
 
 `help` prints what lives inside the `cli.main(...)` call and is otherwise
 invisible without reading the build file — which builder layers are wired

@@ -16,5 +16,5 @@ from brix import Graph, IncrementalBuilder, cli, cpp, java
 | [Core & builders](core.md) | The graph and action model, the builder/layer stack, reporters, results, and workspace loading. |
 | [Data model](data.md) | Data expressions — files, globs, values, tools — the inputs and outputs actions declare. |
 | [C++](cpp.md) · [Java](java.md) · [Kotlin](kotlin.md) · [TypeScript](ts.md) · [Spring Boot](springboot.md) | Typed language helpers that lower to the generic model. |
-| [Command line](cli.md) | The `cli.main` entry point a project's `brix.py` exposes. |
+| [Command line](cli.md) | The `cli.main` entry point a project's `brix_build.py` exposes. |
 | [Extending brix](extending.md) | The plug-in seams: cache stores, content lenses, and change detectors. |

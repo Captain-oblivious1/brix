@@ -25,9 +25,9 @@ sources are modified. Override the checkout with `BRIX_FMT_ROOT`.
 
 ## Run
 
-    python examples/fmt/brix.py build      # compile + link -> build/hello
+    python examples/fmt/brix_build.py build      # compile + link -> build/hello
     ~/Projects/brix_test/fmt/build/hello    # "brix+fmt says the answer is 42"
-    python examples/fmt/brix.py status
+    python examples/fmt/brix_build.py status
 
 ## What it demonstrates
 

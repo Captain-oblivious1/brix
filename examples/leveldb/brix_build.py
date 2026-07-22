@@ -14,9 +14,9 @@ and the Windows port, so the globs carry excludes
 set is exactly the add_library() list in upstream CMakeLists.txt.
 
     examples/leveldb/setup.sh                 # generate port_config.h (once)
-    python examples/leveldb/brix.py build     # compile -> ar -> libleveldb.a
-    python examples/leveldb/brix.py run smoke  # link main.o + .a, then run it
-    python examples/leveldb/brix.py status
+    python examples/leveldb/brix_build.py build     # compile -> ar -> libleveldb.a
+    python examples/leveldb/brix_build.py run smoke  # link main.o + .a, then run it
+    python examples/leveldb/brix_build.py status
 
 Edit a header the sources include (e.g. db/dbformat.h) and rebuild: only the
 translation units that include it recompile — brix learned the dependency
@@ -34,7 +34,6 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import Graph, cli, cpp  # noqa: E402

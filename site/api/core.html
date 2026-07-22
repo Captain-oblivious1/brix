@@ -3078,7 +3078,7 @@ O(packages² × patterns), so they are computed once on a <em>full</em> load
 (where <code>depends_on</code> is complete and authoritative) and persisted; a
 later subset build reads them O(packages) instead of re-deriving. A
 subset save carries the persisted edges forward — sound because a subset
-build only happens when no <code>brix.py</code> changed, so patterns are stable —
+build only happens when no <code>brix_build.py</code> changed, so patterns are stable —
 <em>unless</em> a footprint-driven reload actually changed a loaded package's
 input/output patterns, in which case the edges are dropped so the next
 build full-loads and heals them (edges depend only on the patterns).</p>
@@ -3233,7 +3233,7 @@ invocation, so <code>commit</code>/<code>discard</code> rebuild cleanly), pass a
 <div class="doc-signature highlight"><pre><span></span><code><span class="nf">load_workspace</span><span class="p">(</span>
     <span class="n">root</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
-    <span class="n">brix_file</span><span class="o">=</span><span class="s2">&quot;brix.py&quot;</span><span class="p">,</span>
+    <span class="n">build_file</span><span class="o">=</span><span class="s2">&quot;brix_build.py&quot;</span><span class="p">,</span>
     <span class="n">graph_attr</span><span class="o">=</span><span class="s2">&quot;create_graph&quot;</span><span class="p">,</span>
     <span class="n">only</span><span class="o">=</span><span class="kc">None</span>
 <span class="p">)</span>
@@ -3277,7 +3277,7 @@ standalone entry point that only wires <code>cli.main</code>, not a graph contri
     <span class="n">root</span><span class="p">,</span>
     <span class="n">changed</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
-    <span class="n">brix_file</span><span class="o">=</span><span class="s2">&quot;brix.py&quot;</span><span class="p">,</span>
+    <span class="n">build_file</span><span class="o">=</span><span class="s2">&quot;brix_build.py&quot;</span><span class="p">,</span>
     <span class="n">graph_attr</span><span class="o">=</span><span class="s2">&quot;create_graph&quot;</span><span class="p">,</span>
     <span class="n">metadata_dir</span><span class="o">=</span><span class="s2">&quot;build/.brix&quot;</span>
 <span class="p">)</span>

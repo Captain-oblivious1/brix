@@ -162,7 +162,7 @@ evaluation and priorities above make sense:
 - the capability-sufficiency audit and the atomic tool-self-resolution guard;
 - the scaling benchmark and its corrected (release-build) conclusions;
 - the parked designs (filesystem watcher, staged-overlay visibility) and the
-  future `brix.py help` specification.
+  future `brix_build.py help` specification.
 
 This branch made only minor follow-on doc edits to a few of these (e.g.
 `docs/capability-audit.md`) while landing the changes above.
@@ -183,7 +183,7 @@ The changes were validated proportionally to their scope, including:
 
 ## Remaining high-priority work
 
-The principal next usability item is the live `brix.py help` command specified
+The principal next usability item is the live `brix_build.py help` command specified
 in the roadmap. Other important remaining work includes documenting the
 reproducibility and cache-trust models, continuing real-project soak of the Rust
 engine, and delaying removal of the Python execution internals until that soak

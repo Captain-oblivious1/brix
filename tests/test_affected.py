@@ -6,7 +6,7 @@ full edit alphabet — in-package edit rippling through a multi-hop dependent
 chain, an edit to a shared input outside every package's subtree (the case
 ownership-based selection gets wrong), a dynamic-config change caught only by
 the construction footprint, a deletion matching a glob input, a new package, a
-dependency rewired by editing a `brix.py` (a FULL-load fallback), and an
+dependency rewired by editing a `brix_build.py` (a FULL-load fallback), and an
 irrelevant edit (empty selection). Every step must build byte-identically to a
 full load, and the selection tests prove the lazy side genuinely loads *less*.
 """
@@ -86,15 +86,15 @@ def _write_workspace(root):
 
     (root / "services/lib").mkdir(parents=True)
     (root / "services/lib/src.txt").write_text("lib-v1")
-    (root / "services/lib/brix.py").write_text(
+    (root / "services/lib/brix_build.py").write_text(
         _pkg_source("lib", "services/lib/src.txt", "build/lib/out.txt")
     )
     (root / "services/mid").mkdir(parents=True)
-    (root / "services/mid/brix.py").write_text(
+    (root / "services/mid/brix_build.py").write_text(
         _pkg_source("mid", "build/lib/out.txt", "build/mid/out.txt")
     )
     (root / "services/app").mkdir(parents=True)
-    (root / "services/app/brix.py").write_text(
+    (root / "services/app/brix_build.py").write_text(
         _pkg_source("app", "build/mid/out.txt", "build/app/final.txt")
     )
 
@@ -102,12 +102,12 @@ def _write_workspace(root):
     (root / "services/dyn/a.txt").write_text("dyn-a")
     (root / "services/dyn/b.txt").write_text("dyn-b")
     (root / "services/dyn/deps.txt").write_text("services/dyn/a.txt")
-    (root / "services/dyn/brix.py").write_text(DYN_PKG)
+    (root / "services/dyn/brix_build.py").write_text(DYN_PKG)
 
     (root / "services/glob/parts").mkdir(parents=True)
     (root / "services/glob/parts/1.txt").write_text("one\n")
     (root / "services/glob/parts/2.txt").write_text("two\n")
-    (root / "services/glob/brix.py").write_text(GLOB_PKG)
+    (root / "services/glob/brix_build.py").write_text(GLOB_PKG)
     return root
 
 
@@ -186,19 +186,19 @@ def _delete_glob_member(root):
 def _add_package(root):
     (root / "services/new").mkdir(parents=True)
     (root / "services/new/src.txt").write_text("new-src")
-    (root / "services/new/brix.py").write_text(
+    (root / "services/new/brix_build.py").write_text(
         _pkg_source("new", "services/new/src.txt", "build/new/out.txt")
     )
-    return ["services/new/brix.py", "services/new/src.txt"]
+    return ["services/new/brix_build.py", "services/new/src.txt"]
 
 
 def _rewire_app(root):
-    # A cross-package dependency changed by editing the brix.py itself:
+    # A cross-package dependency changed by editing the brix_build.py itself:
     # app now consumes lib's output directly. Must trigger a FULL load.
-    (root / "services/app/brix.py").write_text(
+    (root / "services/app/brix_build.py").write_text(
         _pkg_source("app", "build/lib/out.txt", "build/app/final.txt")
     )
-    return ["services/app/brix.py"]
+    return ["services/app/brix_build.py"]
 
 
 def _edit_lib_after_rewire(root):
@@ -336,7 +336,7 @@ def test_brix_py_change_means_full(tmp_path):
     root = _write_workspace(tmp_path / "ws")
     _full_build(root)
     packages = find_packages(root)
-    assert select_affected(root, ["services/app/brix.py"], packages) is None
+    assert select_affected(root, ["services/app/brix_build.py"], packages) is None
 
 
 def test_out_of_tree_change_means_full(tmp_path):
@@ -362,13 +362,13 @@ def test_scanned_dep_change_means_full(tmp_path):
 
 def test_new_package_is_always_selected(tmp_path):
     # Belt-and-suspenders: even if the change list somehow omits the new
-    # brix.py, a discovered package with no index entry is never provably
+    # brix_build.py, a discovered package with no index entry is never provably
     # unaffected, so it is selected.
     root = _write_workspace(tmp_path / "ws")
     _full_build(root)
     (root / "services/new").mkdir(parents=True)
     (root / "services/new/src.txt").write_text("new-src")
-    (root / "services/new/brix.py").write_text(
+    (root / "services/new/brix_build.py").write_text(
         _pkg_source("new", "services/new/src.txt", "build/new/out.txt")
     )
     chosen = select_affected(root, ["services/new/src.txt"], find_packages(root))

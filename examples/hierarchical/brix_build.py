@@ -3,12 +3,12 @@
 
 Run from anywhere:
 
-    python3 examples/hierarchical/brix.py build
-    python3 examples/hierarchical/brix.py status
+    python3 examples/hierarchical/brix_build.py build
+    python3 examples/hierarchical/brix_build.py status
 
 This file is the workspace *entry point*, not a package: it exposes no
 ``create_graph()``, so the loader discovers it but contributes no actions from
-it. The actual build lives in the package ``brix.py`` files under ``libs/``,
+it. The actual build lives in the package ``brix_build.py`` files under ``libs/``,
 ``services/``, and ``docs/`` — placed sparsely, at boundaries. The loader finds
 them, resolves which one owns each path (nearest ancestor), and merges their
 graphs. Splitting a monolith this way builds *identically*; the split is what

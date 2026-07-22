@@ -17,8 +17,8 @@ Setup (once):
     # autotools generates src/config.h (brix owns the compile/link from there)
 
 Run (from anywhere):
-    python examples/the_silver_searcher/brix.py build      # -> build/ag
-    python examples/the_silver_searcher/brix.py status
+    python examples/the_silver_searcher/brix_build.py build      # -> build/ag
+    python examples/the_silver_searcher/brix_build.py status
     ~/Projects/brix_test/the_silver_searcher/build/ag --version
 
 The checkout defaults to ~/Projects/brix_test/the_silver_searcher (override with
@@ -30,10 +30,8 @@ import os
 import sys
 from pathlib import Path
 
-# This file is named brix.py, so its own directory would shadow the brix
-# package on import — drop it, then point at this repo's src/.
+# Point at this repository's source tree for the in-tree example.
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import Graph, cli, cpp  # noqa: E402

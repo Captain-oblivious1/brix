@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Incremental build demo: build, rebuild, change a file, delete a source.
 
-Run from anywhere:  python3 examples/incremental_demo/brix.py
+Run from anywhere:  python3 examples/incremental_demo/brix_build.py
 
 Four builds of the same graph (uppercase each src/*.txt, then combine),
 using IncrementalBuilder so results persist in build/.brix/metadata.json:

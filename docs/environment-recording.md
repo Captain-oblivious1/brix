@@ -1,7 +1,7 @@
 # Recording the build environment
 
 Status: **phases 1–2 implemented (2026-07-17, Opus)** — phase 1 diagnostic
-capture + `brix.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
+capture + `brix_build.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
 and phase 2 the `env_used=` guard (`src/brix/actions.py`,
 `tests/test_env_used.py`, golden-pinned cross-engine); phase 3 (automatic
 `getenv` discovery) **struck as unsound (2026-07-18)** and replaced by an
@@ -85,7 +85,7 @@ The roadmap phrases the goal as *"recording what was actually used is the first
 step to catching it."* That word — *first* — sets the order:
 
 1. **Diagnostic capture (this phase).** Snapshot the build's environment each
-   run into metadata; never fingerprint it. A `brix.py env` command diffs the
+   run into metadata; never fingerprint it. A `brix_build.py env` command diffs the
    current environment against the last recorded build and shows what changed.
    A *detective, not a guard*: it makes a silent difference **visible**, but
    does not itself rebuild. Cannot bust a cache, slow a build, or cause a
@@ -369,11 +369,11 @@ the metadata directory, and a missing file simply means "no build recorded yet."
 
 ## The `env` command
 
-`brix.py env` prints the recorded build environment and, when the current
+`brix_build.py env` prints the recorded build environment and, when the current
 (filtered) environment differs, the diff:
 
 ```
-$ brix.py env
+$ brix_build.py env
 Last build environment (captured 2026-07-17T14:03:11Z, command: build):
   42 variables recorded.
 
@@ -388,7 +388,7 @@ when it differs — so it composes into scripts the way `status` does (0 = clean
 1 = attention). When nothing is recorded yet it prints a short note and exits 0.
 
 A one-line summary also folds into `status` (`environment: 3 variables changed
-since last build — run 'brix.py env'`) when a record exists and differs, so the
+since last build — run 'brix_build.py env'`) when a record exists and differs, so the
 signal surfaces in the command people already run without changing its exit
 semantics.
 

@@ -15,7 +15,7 @@ examples/leveldb/setup.sh                    # generate port_config.h + smoke/
 
 The library sources are globbed **straight from leveldb's tree** — no staging.
 Each source dir interleaves library code with `*_test.cc`, benchmarks, and the
-Windows port, so `brix.py` narrows the globs with the `-` operator:
+Windows port, so `brix_build.py` narrows the globs with the `-` operator:
 
 ```python
 data.glob("db/{name}.cc") - ["*_test.cc", "db/leveldbutil.cc"]
@@ -33,9 +33,9 @@ Override the checkout location with `BRIX_LEVELDB_ROOT`.
 ## Build & run
 
 ```sh
-python examples/leveldb/brix.py build        # compile 38 TUs -> ar -> libleveldb.a, link smoke
-python examples/leveldb/brix.py run smoke     # (re)link + run the smoke program
-python examples/leveldb/brix.py status        # what would rebuild, and why
+python examples/leveldb/brix_build.py build        # compile 38 TUs -> ar -> libleveldb.a, link smoke
+python examples/leveldb/brix_build.py run smoke     # (re)link + run the smoke program
+python examples/leveldb/brix_build.py status        # what would rebuild, and why
 ```
 
 `build` alone builds everything (the archive and the linked smoke binary).

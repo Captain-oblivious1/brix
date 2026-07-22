@@ -1,7 +1,7 @@
 """Environment recording (phase 1: diagnostic capture).
 
 The "works on my machine" detective: capture the environment each build runs
-under, and let `brix.py env` diff current-vs-recorded. It records and shows —
+under, and let `brix_build.py env` diff current-vs-recorded. It records and shows —
 it never rebuilds, fingerprints, or splits a cache — so these tests cover the
 filter, the record round-trip, the diff classification, and the CLI wiring
 (capture on build, exit codes, the status note, clean removal).
@@ -144,7 +144,7 @@ def test_status_note_appears_when_environment_differs(tmp_path, capsys, monkeypa
     code = cli.main(make_graph, argv=["status"], **_args(tmp_path))
     out = capsys.readouterr().out
     assert code == 0  # graph is fresh; the note does not change that
-    assert "environment:" in out and "run 'brix.py env'" in out
+    assert "environment:" in out and "run 'brix_build.py env'" in out
 
 
 def test_failed_build_still_captures_environment(tmp_path, capsys):

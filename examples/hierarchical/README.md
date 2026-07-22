@@ -1,20 +1,20 @@
 # Hierarchical build files + lazy loading
 
-A monorepo doesn't need one giant `brix.py`. Split it into package build files
+A monorepo doesn't need one giant `brix_build.py`. Split it into package build files
 placed sparsely at module/service boundaries; each is responsible for its
-subtree until a deeper `brix.py` carves out its own. This example is the
+subtree until a deeper `brix_build.py` carves out its own. This example is the
 smallest workspace that shows both halves of the story — and doubles as the
 copy-paste template for adopting it.
 
 ## The workspace
 
 ```
-brix.py                 workspace entry point (no create_graph — it wires cli.main)
+brix_build.py                 workspace entry point (no create_graph — it wires cli.main)
 tools/step.py           one shared build tool, an input of every package
-libs/core/    brix.py   core:  src.txt          -> build/core/core.txt
-services/api/ brix.py   api:   build/core/*     -> build/api/api.txt     (depends on core)
-services/web/ brix.py   web:   build/api/*      -> build/web/web.txt     (depends on api)
-docs/         brix.py   docs:  src.txt          -> build/docs/docs.txt   (independent)
+libs/core/    brix_build.py   core:  src.txt          -> build/core/core.txt
+services/api/ brix_build.py   api:   build/core/*     -> build/api/api.txt     (depends on core)
+services/web/ brix_build.py   web:   build/api/*      -> build/web/web.txt     (depends on api)
+docs/         brix_build.py   docs:  src.txt          -> build/docs/docs.txt   (independent)
 ```
 
 The chain is `core → api → web`; `docs` shares nothing with it. No package
@@ -24,11 +24,11 @@ produces, and brix derives the edge from that overlap.
 ## Build it (the safe default)
 
 ```
-python3 examples/hierarchical/brix.py build
-python3 examples/hierarchical/brix.py status
+python3 examples/hierarchical/brix_build.py build
+python3 examples/hierarchical/brix_build.py status
 ```
 
-The root `brix.py` calls `load_workspace(ROOT).graph`: it loads **every**
+The root `brix_build.py` calls `load_workspace(ROOT).graph`: it loads **every**
 package and merges them, so a hierarchical workspace builds *identically* to the
 equivalent monolith. This is the floor — nothing is skipped, nothing can go
 stale. `build/web/web.txt` ends up holding `web(api(core(hello)))`, the visible

@@ -148,7 +148,7 @@ Move engine and scheduler types out of the top-level exports unless they are int
 Create one short, polished path from installation to a successful incremental build. A new user should be able to:
 
 1. Install Brix and its Rust extension.
-2. Create or copy a small `brix.py`.
+2. Create or copy a small `brix_build.py`.
 3. Run a build.
 4. Run it again and see that work was skipped.
 5. Change one input and understand why only part of the graph rebuilt.

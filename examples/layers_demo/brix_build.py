@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build-layer demo: watch the middleware stack work on a live build.
 
-Run from anywhere:  python3 examples/layers_demo/brix.py
+Run from anywhere:  python3 examples/layers_demo/brix_build.py
 
 Two runs:
 

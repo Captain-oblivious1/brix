@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import CacheBuilder, Graph, IncrementalBuilder, cli, java  # noqa: E402

@@ -1,6 +1,6 @@
 """`env_used=` — environment as fingerprint material (phase 2: the guard).
 
-Phase 1 (`brix.py env`) *records* the environment. Phase 2 makes a declared
+Phase 1 (`brix_build.py env`) *records* the environment. Phase 2 makes a declared
 subset a real dependency: `env_used=["JAVA_HOME"]` snapshots those variables
 into a fingerprint-only input, so a change re-stales the action — but it never
 *sets* them (unlike `env=`) and never reaches the command line. The snapshot is

@@ -73,7 +73,7 @@ graph.
 
 ### From a tiny project to a monorepo
 
-A small project can have one short `brix.py`. As the repository grows, build
+A small project can have one short `brix_build.py`. As the repository grows, build
 files can be placed at natural package or service boundaries. Brix can read and
 execute only the build files needed for the affected part of a large monorepo.
 
@@ -96,7 +96,7 @@ python -m pip install /path/to/brix
 python -m pip install "$HOME/Downloads"/brix-*.whl
 ```
 
-Put this standalone `build.py` in the root of your project:
+Put this standalone `brix_build.py` in the root of your project:
 
 ```python
 #!/usr/bin/env python3
@@ -119,7 +119,7 @@ The CLI is now installed for this project. Verify the setup before adding any
 build actions:
 
 ```sh
-python build.py help       # show this project's live Brix configuration
+python brix_build.py help       # show this project's live Brix configuration
 ```
 
 Now replace the empty `create_graph()` body with the actions for your project.
@@ -154,7 +154,7 @@ def create_graph() -> Graph:
 With one or more `.cpp` files under `src/`:
 
 ```sh
-python build.py build
+python brix_build.py build
 ./build/app
 ```
 
@@ -182,7 +182,7 @@ def create_graph() -> Graph:
 Set `entry_point` to the class containing `public static void main`, then run:
 
 ```sh
-python build.py build
+python brix_build.py build
 java -jar build/app.jar
 ```
 
@@ -209,7 +209,7 @@ Pass `cache_dir=None` or `staging_dir=None` to disable either optional layer.
 
 The typed language helpers are optional. `ExternalProcessAction` is the escape
 hatch for any application, existing build tool, or project-specific generator.
-For example, add it to the import in `build.py`:
+For example, add it to the import in `brix_build.py`:
 
 ```python
 from brix import ExternalProcessAction, Graph, cli

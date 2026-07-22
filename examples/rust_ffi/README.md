@@ -9,7 +9,7 @@ src/     C      main.c calls answer(), links the archive             cpp.*
 ```
 
 ```
-python3 examples/rust_ffi/brix.py build
+python3 examples/rust_ffi/brix_build.py build
 ./examples/rust_ffi/build/app        # -> Rust says the answer is 42
 ```
 

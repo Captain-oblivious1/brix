@@ -43,18 +43,16 @@ overrides (all optional, with dev defaults):
     BRIX_KOTLIN_GRADLE           gradle launcher (default: the project ./gradlew)
 
 Run (from anywhere):
-    python examples/spring-petclinic-kotlin/brix.py build
-    python examples/spring-petclinic-kotlin/brix.py status
+    python examples/spring-petclinic-kotlin/brix_build.py build
+    python examples/spring-petclinic-kotlin/brix_build.py status
 """
 
 import os
 import sys
 from pathlib import Path
 
-# This file is named brix.py, so its own directory would shadow the brix
-# package on import — drop it, then point at this repo's src/.
+# Point at this repository's source tree for the in-tree example.
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import Graph, cli, java, kotlin  # noqa: E402

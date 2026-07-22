@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("brix_jackson_example", HERE / "brix.py")
+spec = importlib.util.spec_from_file_location("brix_jackson_example", HERE / "brix_build.py")
 assert spec and spec.loader
 example = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = example

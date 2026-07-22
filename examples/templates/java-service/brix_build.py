@@ -4,13 +4,13 @@
 Copy this directory, drop your sources under ``src/main/java``, set ENTRY_POINT
 to your `main` class, and you have a working build:
 
-    python brix.py build      # -> build/libs/app.jar
-    python brix.py run app    # build the `app` jar, then `java -jar` it
-    python brix.py status     # what would build, and why
-    python brix.py help       # the live build configuration
+    python brix_build.py build      # -> build/libs/app.jar
+    python brix_build.py run app    # build the `app` jar, then `java -jar` it
+    python brix_build.py status     # what would build, and why
+    python brix_build.py help       # the live build configuration
 
 Requires a JDK (``javac`` + ``jar``) on PATH. brix must be importable — in a
-real project it is an installed package, so your ``brix.py`` starts straight at
+real project it is an installed package, so your ``brix_build.py`` starts straight at
 ``from brix import ...``. The one marked block below only lets this template also
 run from inside the brix repo; **delete it in your copy.**
 """
@@ -20,12 +20,6 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-
-# This file is named ``brix.py``, so when run as ``python brix.py`` Python puts
-# THIS directory first on sys.path, which would shadow the installed brix
-# package. Drop it so ``import brix`` resolves to the real package. (Keep this in
-# your copy — it is inherent to running a file named brix.py.)
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 
 # ---- DELETE THIS BLOCK IN YOUR COPY ---------------------------------------
 # It lets the template import brix from this repo's ``src/`` when run in-tree.

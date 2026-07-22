@@ -32,8 +32,8 @@ Override the checkout location with `BRIX_AG_ROOT`.
 
 ## Run
 
-    python examples/the_silver_searcher/brix.py build     # -> build/ag
-    python examples/the_silver_searcher/brix.py status
+    python examples/the_silver_searcher/brix_build.py build     # -> build/ag
+    python examples/the_silver_searcher/brix_build.py status
 
     ~/Projects/brix_test/the_silver_searcher/build/ag --version   # ag version 2.2.0
     ~/Projects/brix_test/the_silver_searcher/build/ag pcre_compile src/  # a real search

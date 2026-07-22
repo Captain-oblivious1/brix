@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""A project brix.py with the CLI section, per the spec's user-file shape.
+"""A project brix_build.py with the CLI section, per the spec's user-file shape.
 
 Try, in order:
 
-    python3 examples/cli_demo/brix.py status      # everything: never built
-    python3 examples/cli_demo/brix.py             # build (incremental)
-    python3 examples/cli_demo/brix.py status      # everything: fresh (exit 0)
-    python3 examples/cli_demo/brix.py graph       # plan structure
-    python3 examples/cli_demo/brix.py errors      # no recorded failures
-    python3 examples/cli_demo/brix.py clean       # back to square one
+    python3 examples/cli_demo/brix_build.py status      # everything: never built
+    python3 examples/cli_demo/brix_build.py             # build (incremental)
+    python3 examples/cli_demo/brix_build.py status      # everything: fresh (exit 0)
+    python3 examples/cli_demo/brix_build.py graph       # plan structure
+    python3 examples/cli_demo/brix_build.py errors      # no recorded failures
+    python3 examples/cli_demo/brix_build.py clean       # back to square one
 
 Edit or delete a file under src/ between runs and watch status explain
 exactly what would rebuild and why — without building anything.

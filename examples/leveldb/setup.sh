@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# One-time setup for examples/leveldb/brix.py. The library sources are
-# globbed straight from leveldb's tree by brix.py (with `-` excludes for
+# One-time setup for examples/leveldb/brix_build.py. The library sources are
+# globbed straight from leveldb's tree by brix_build.py (with `-` excludes for
 # tests, benchmarks, and the Windows port) — nothing is staged. Two files
 # still have to exist inside the workspace:
 #
@@ -10,7 +10,7 @@
 #     dir, copied in so the workspace-rooted glob can see it.
 #
 #   examples/leveldb/setup.sh            # into ~/Projects/brix_test/leveldb
-#   python examples/leveldb/brix.py build
+#   python examples/leveldb/brix_build.py build
 #
 # Override the checkout with BRIX_LEVELDB_ROOT.
 set -euo pipefail
@@ -27,7 +27,7 @@ fi
 cd "$ROOT"
 
 # A leftover staging tree from the pre-exclusion version of this example
-# would double every library source in brix.py's globs.
+# would double every library source in brix_build.py's globs.
 rm -rf build-src
 
 # Values for POSIX Linux with no optional compression/crc libraries.
@@ -50,4 +50,4 @@ EOF
 mkdir -p smoke
 cp "$HERE/main.cc" smoke/main.cc
 
-echo "done. now: python $HERE/brix.py build && python $HERE/brix.py run smoke"
+echo "done. now: python $HERE/brix_build.py build && python $HERE/brix_build.py run smoke"

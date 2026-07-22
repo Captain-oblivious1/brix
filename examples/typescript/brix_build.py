@@ -21,16 +21,15 @@ Setup (once) — a local TypeScript, since tsc is rarely global:
     cd examples/typescript && npm install typescript@5
 
 Run (from anywhere):
-    python examples/typescript/brix.py build      # -> greeter/dist, app/dist
-    python examples/typescript/brix.py status
+    python examples/typescript/brix_build.py build      # -> greeter/dist, app/dist
+    python examples/typescript/brix_build.py status
     node examples/typescript/app/dist/main.js     # -> Hello, brix!
 
     # See the lens skip: edit greeter/src/greet.ts's *body* only, rebuild, and
     # the app step reports (replayed); edit its exported signature and it rebuilds.
 
 tsc is found via BRIX_TSC, else ./node_modules/.bin/tsc, else a global `tsc`.
-This file is named brix.py, so it drops its own dir from sys.path and points at
-this repo's src/.
+The path setup below points this in-tree example at this repository's source.
 """
 
 import os
@@ -39,7 +38,6 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import Graph, cli, ts  # noqa: E402

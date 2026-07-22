@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Pluggable cache store demo: a two-tier team cache across machines.
 
-Run from anywhere:  python3 examples/cache_store_demo/brix.py
+Run from anywhere:  python3 examples/cache_store_demo/brix_build.py
 
 The cache store is pluggable. `CacheBuilder(inner, store=...)` takes any
 object with the three-method protocol (`load` / `restore` / `store`, see
 `CacheStoreProtocol`) instead of a local `cache_dir`. `TwoTierCacheStore`
 puts a fast local store in *front* of a slow shared ("team") one.
 
-A single `brix.py build` can't show this off -- the interesting behavior is
+A single `brix_build.py build` can't show this off -- the interesting behavior is
 across machines and checkouts -- so this script simulates several builds in
 throwaway workspaces (created in a temp dir and cleaned up at the end). It
 walks the four behaviors that matter:

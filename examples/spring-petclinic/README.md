@@ -41,9 +41,9 @@ result. Override the checkout location with `BRIX_PETCLINIC_ROOT`.
 
 ## Run
 
-    python examples/spring-petclinic/brix.py build        # jar + executable jar
-    python examples/spring-petclinic/brix.py build boot    # just the boot jar
-    python examples/spring-petclinic/brix.py status
+    python examples/spring-petclinic/brix_build.py build        # jar + executable jar
+    python examples/spring-petclinic/brix_build.py build boot    # just the boot jar
+    python examples/spring-petclinic/brix_build.py status
 
     java -jar ~/Projects/brix_test/spring-petclinic/build/petclinic-boot.jar
     # then: curl localhost:8080/actuator/health  ->  {"status":"UP"}

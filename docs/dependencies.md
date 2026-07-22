@@ -46,7 +46,7 @@ are.
 - `java.gradle(path)` — resolve a Gradle project's configuration classpath (implemented)
 - `cpp.conanfile(path)` / `cpp.vcpkg_json(path)` (planned)
 
-**Resolve inline coordinates** (declare in `brix.py`). Named by the engine. This
+**Resolve inline coordinates** (declare in `brix_build.py`). Named by the engine. This
 is the *greenfield / single-file* path.
 
 - `java.maven([coords])` — resolve `"group:artifact:version"` via Maven (implemented)
@@ -151,7 +151,7 @@ and wired to other languages by its built artifact (a `staticlib`/`cdylib` a
 C/C++/JNI consumer links, per `examples/rust_ffi`). cargo owns crates.io
 resolution and within-crate incremental; **Cargo.toml stays the single source of
 truth** (the adopt-the-manifest principle — you do not re-declare deps in
-brix.py). Two honest consequences: brix's skip granularity is crate-level (cargo
+brix_build.py). Two honest consequences: brix's skip granularity is crate-level (cargo
 does the finer work within), and a cargo action wants the plain incremental stack
 because cargo writes its own `target/`, which atomic staging can't redirect. See
 `src/brix/rust.py`.

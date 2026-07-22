@@ -15,7 +15,7 @@ this doc disagree with the tests, the tests win.
 
 - One Rust core (`brix-core`) that the Python API wraps today and a JS/TS
   API wraps later. Python remains the user-facing build language; project
-  `brix.py` files do not change at all.
+  `brix_build.py` files do not change at all.
 - Real parallelism: the scheduler and hashing escape the GIL.
 - Non-goal: changing any semantics. The port is a re-implementation of
   fixed behavior, not a redesign. No new features ride along.

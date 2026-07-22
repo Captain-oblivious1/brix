@@ -6,9 +6,9 @@ parallel compilation and, the real point, automatic `#include` header-dep
 tracking (compiler depfiles) — on a famous real project's headers.
 
     examples/fmt/setup.sh                     # assemble build-src/ (once)
-    python examples/fmt/brix.py build         # compile + link -> build/hello
+    python examples/fmt/brix_build.py build         # compile + link -> build/hello
     build/hello                               # run it
-    python examples/fmt/brix.py status
+    python examples/fmt/brix_build.py status
 
 Edit any header fmt's sources include (e.g. include/fmt/base.h) and rebuild:
 only the translation units that include it recompile — brix learned the
@@ -23,7 +23,6 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path = [p for p in sys.path if Path(p or ".").resolve() != HERE]
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import Graph, cli, cpp  # noqa: E402

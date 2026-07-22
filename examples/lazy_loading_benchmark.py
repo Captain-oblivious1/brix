@@ -69,7 +69,7 @@ def setup(root: Path, packages: int, modules: int) -> str:
         d = root / pkg
         d.mkdir(parents=True)
         (d / "manifest.txt").write_text(" ".join(names))
-        (d / "brix.py").write_text(PKG_TEMPLATE.format(pkg=pkg))
+        (d / "brix_build.py").write_text(PKG_TEMPLATE.format(pkg=pkg))
     return f"services/svc_0000/src/{names[0]}.c"
 
 

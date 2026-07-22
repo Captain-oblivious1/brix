@@ -283,7 +283,7 @@ const builder = new AtomicBuilder(new CacheBuilder(new IncrementalBuilder(create
 
 Constructors take a single options object (TS has no keyword
 arguments); `{binding}` pattern syntax is brix's own and carries over
-verbatim. A project's `brix.ts` ends the same way `brix.py` does:
+verbatim. A project's `brix.ts` ends the same way `brix_build.py` does:
 `process.exit(await cli.main(createGraph, { root, argv, aliases,
 commands }))`.
 
