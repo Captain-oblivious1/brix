@@ -278,6 +278,13 @@ These are self-contained and come with tests. No Fable needed.
 
 **Making it easy to start:**
 
+- **Machine-readable status.** Add a JSON form of `brix.py status` (for example,
+  `brix.py status --json`) with a documented, versioned schema. It should expose
+  each action's state and explanation, pending/deleted outputs, staging state,
+  and the relevant project paths without mixing human-readable text into
+  stdout. This lets somebody build a web UI, IDE panel, CI report, or other
+  frontend without scraping terminal output. Brix should provide the data, not
+  require the core project to choose or host the frontend.
 - **`brix.py help` — show the *live* configuration, not just the command list.**
   **Done (2026-07-17, Opus).** Argparse's `-h` lists the built-in subcommands,
   but everything project-specific lived in the `cli.main(...)` call and was
@@ -517,6 +524,16 @@ careful model:
 
 ### Blocked or not yet decided
 
+- **Open `brix.cpp` naming question:** should
+  `CompileSourceAction(source_files=..., object_files=...)` instead use the
+  singular names `source_file=` and `object_file=`? Each expanded compiler
+  invocation compiles one source into one object, and the shared `{name}`
+  binding is what expands the declaration into many invocations. On the other
+  hand, the helper object itself accepts glob patterns representing collections
+  and lowers the whole collection, so the current plurals describe the values
+  passed by the caller. Decide whether the API names should describe each
+  expanded action or the cardinality of the declaration before calling the
+  Python API stable.
 - **Fully replacing your Java/TS build tools with brix.** Blocked on two decisions
   from Duane: (a) wrap the existing builds first and replace piece by piece, or
   replace everything at once; and (b) whether brix also handles *downloading*

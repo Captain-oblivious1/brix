@@ -1,170 +1,313 @@
 # Brix
 
-Brix is a library for building your project from your own Python code — an API
-small enough to read in a sitting, yet comprehensive enough to express a real,
-multi-language build. You describe the files and data each step uses; Brix plans
-the work, infers dependencies, runs independent steps in parallel, and avoids
-work whose inputs have not meaningfully changed.
+## TL;DR
 
-The Python API is the build language; the engine underneath gives you three
-things a serious build needs:
+Developers should not have to become build-system experts—or learn a language
+used only by their build system—just to build their code. They want builds to be
+easy to describe, fast, correct, and otherwise out of the way.
 
-- **Fast.** The engine is written in Rust and owns the planning, scheduling, and
-  change detection, and it keeps compiler processes warm between builds — so even
-  large builds, and every edit-compile loop, stay quick.
-  // Mention that the below are optional and configurable
-- **Atomic.** A build is all-or-nothing, like a `git` commit — it either applies  // Maybe also mention that this is inspired by git in that users can get status, stage, and commit builds
-  in full or leaves your workspace exactly as it was, so a failure never leaves a
-  half-built tree.
-- **Incremental builds that match a clean build, exactly.** Rebuilding only what  // Make clear the *why*. That users no longer fall back to clean builds out of fear of an incorrect build
-  changed is never a correctness compromise: an incremental build produces the
-  same result a from-scratch build would — down to removing outputs whose source
-  is gone.
+Brix is a **library of building blocks for creating builds in languages people
+already know**—thus the name “Brix.” Brix currently provides those building
+blocks as a Python library, so you can describe anything from a tiny build to a
+large, complex monorepo without implementing your own scheduler, incremental
+engine, cache, or safety machinery. You can build TypeScript projects with Brix
+today, but the build definition itself must be written in Python;
+JavaScript/TypeScript build-file authoring is planned but is **not supported
+yet**. Python and JavaScript are widely used and well understood by AI coding
+assistants, so an assistant can help create, explain, and maintain your build
+instead of asking you to master another build language.
 
-That engine is the default today and is designed to back a future  // This makes it seem like the above features won't exist in Javascript/Typescript API
-JavaScript/TypeScript API as well.
+The repository also includes plenty of working examples that you can copy, run,
+and adapt instead of starting from a blank file.
 
-## In plain terms
+That is the short version. Since nobody wants to become an expert in a build
+system, you should not have to read its entire manual before deciding whether it
+is useful. The fuller version—and a small example—follow.
 
-A build tool turns your source code into the finished program. The slow way is
-to rebuild everything from scratch every time you change one file. The fast way
-is to redo only the parts your change affects — but most tools that try to be
-fast sometimes get it wrong and hand you a stale or broken result.  // losing confidence and resulting in reliance of clean builds all the time
+## What Brix gives you
 
-Brix is the fast way *without* the wrong. You write a short Python file that
-says, for each step, which files go in and which come out. Brix reads that and  // Not sure what you mean by "which files go in and which come out"
-works out the rest: the right order to do things, what can run at the same time,
-and — the important part — exactly what needs redoing when you change something.
-Change one file and only the steps that truly depend on it run again; change
-nothing that matters and it does no work at all. Think of a recipe with many
-steps: swap one ingredient and you only redo the steps that used it, not the
-whole meal.
+Brix is a library rather than a fixed policy. Start with a direct build, then
+add and configure the higher-level pieces your project needs.
 
-And because the build file is just a small, plain Python file, you don't even
-have to write it yourself — an AI assistant can write it for you and check it by
-running the build.
+### Fast builds
 
-## Why Brix
+The performance-sensitive engine is implemented in Rust and exposed through an
+ordinary Python API. Brix runs independent work in parallel and avoids work that
+does not need to happen.
 
-Almost nobody wants to become an expert in their build system. People want it to
-be easy to write, fast, and correct — and to otherwise stay out of the way.
+### Incremental builds you can trust
 
-Yet build tools make you pick the wrong trade-off. On one side, simple-but-unsafe: a
-Makefile is quick to write but silently wrong — it misses a changed header, has
-no real notion of what "changed" means, and happily ships a stale build. On the
-other, correct-but-heavy: Bazel and Buck are correct, but they are a sealed world
-with their own language, their own sandbox, and a rewrite-everything migration;
-Gradle is powerful, but that power turns build files into imperative code that
-rots.
+An incremental build must produce exactly what a clean build would. That
+includes deleting downstream artifacts that would no longer exist after a clean
+build. You should not need to repeatedly clean everything because you have lost
+confidence in your incremental build.
 
-Brix takes a different bet: **write your build in ordinary Python — declare what  // Mention that brix provides users the building blocks (thus the name brix.. as in bricks) to make a simple and/or powerful build system as they want.
-each step reads and writes — and get the incremental correctness and safety of
-the heavy tools without the DSL, the sandbox, or the migration cliff.** You  // What is DSL?0
-author with Python's full power (a loop to stamp out fifty services, a function
-to factor a shared pattern), but a step's *meaning* is a small, declarative
-vocabulary: its inputs and its outputs — declared coarsely, as patterns, not
-file-by-file. You name `src/*.c`; Brix discovers each file's actual `#include`
-headers (and a TypeScript module's imports) for you, so you never hand-maintain a
-dependency list. From there the engine infers the dependency edges, runs
-independent work in parallel, skips anything whose meaning has not changed, and
-refuses any graph it cannot build correctly. Expressiveness for assembling the
-build; rails around what the build means.
+### Git-inspired atomic builds
 
-This is not aspirational. The engine is cross-checked between a Python and a Rust
-implementation that must produce byte-identical decisions; content-key *lenses*  // I know that you use "lenses" a lot, but is that a common term (that I'm unfamiliar with)?  Will users know what that means? Or are you defining a new meaning here?
-compare a Java jar by its ABI and a TypeScript module by its declared types, so  // Things like ABI seems to be advanced. It seems like these techincal details (lenses, ABI, etc. maybe should be put in a details section.)
-an implementation-only edit lets dependents replay instead of rebuild; atomic
-staging means a failed build never half-updates your tree; and on JUnit 5's
-platform modules the warm edit-compile loop runs 5–12× faster than Gradle. Brix
-can adopt an existing project's Maven or Gradle classpath, so you migrate
-incrementally rather than all at once.
+Brix can show the current build status, stage a complete build for review, and
+then commit or discard it. A normal atomic build becomes visible only when the
+whole build succeeds, so a failure does not leave your workspace half updated.
 
-And because those build files are small, declarative Python — the language coding
-assistants know best — an assistant can *write and maintain them for you*, and
-check its own work by running the build: `status` explains what would happen
-before it does, and the planner rejects an ambiguous graph outright. It is not  // You mention "planner" but is that detail that the users needs? What if we just say "brix"?
-raw configurability that makes this work but expressiveness with rails — a small,
-checkable vocabulary over a language the model already knows. The examples in   // language model and most users already know
-this repository were themselves authored this way.
+### Local and shared caching
 
-## What you get
+Brix can reuse work from an earlier build instead of running it again. A shared
+cache lets a developer restore work already completed by another workspace, a
+teammate, or CI.
 
-A small, readable authoring experience with the safety and speed expected from a
-serious build system:
+### Less dependency bookkeeping
 
-- Build steps declare logical inputs and outputs instead of hand-written order.
-- Dependencies are inferred from overlapping data sets.
-- Transitive dependencies are discovered automatically — a C file's `#include`
-  headers, a TypeScript module's imports — so you declare intent coarsely, never
-  a file-by-file dependency list.
-- Java ABI and TypeScript declaration lenses avoid downstream rebuilds when a
-  public interface did not change.
-- Incremental metadata handles changed and deleted sources.
-- On a large monorepo, Brix loads and builds only the slice a change affects,  // maybe word this that "in order to support large monorepos, brix enables brix.py files to be spread across the repository. And only the ones necessesssary are read and executed.
-  not the whole repository.
-- Persistent compiler workers stay warm between builds, so the edit-compile loop
-  does not pay compiler startup each time.
-- A shared result cache can restore builds across workspaces — a build CI or a
-  teammate already ran restores instantly instead of rebuilding.
-- Generate your project's own API docs (`javadoc`, `typedoc`, `doxygen`) as
-  tracked, incremental build outputs, like anything else in the graph.
-- Atomic staging prevents failed builds from partly changing the workspace.
-- `status` explains what would run and why.
-- `Graph.force_order()` covers the exceptional case where two steps need an
-  ordering relationship without sharing a file.
-- Planning rejects two steps that may write the same output.
+Brix derives relationships and build order from the inputs and outputs your
+steps already declare, reducing the need to maintain a separate target
+dependency graph. It can also discover fine-grained dependencies such as C/C++
+headers and TypeScript imports automatically.
 
-## A small example
+By comparison, Bazel and Buck generally require every target to list its direct
+target dependencies explicitly. Brix lets the data flowing between steps define
+those relationships instead of asking you to state the same relationship again
+as a target-to-target edge.
 
-// Add comments to this code:
+This does not mean dependencies become magic. You still declare things that a
+tool genuinely needs, such as a Java classpath or runtime data. Brix avoids
+making you separately hand-wire the same information into a second dependency
+graph.
+
+### From a tiny project to a monorepo
+
+A small project can have one short `brix.py`. As the repository grows, build
+files can be placed at natural package or service boundaries. Brix can read and
+execute only the build files needed for the affected part of a large monorepo.
+
+### Explainable and configurable
+
+Incremental building, caching, and atomic updates are composable features rather
+than mandatory policy. Commands such as `status`, `graph`, `help`, and `env`
+show what Brix sees, what would run, and how the project is configured. Brix
+also rejects ambiguous builds, such as two steps that may write the same output,
+before running them.
+
+## Set up a Brix project
+
+Install Brix into your project's virtual environment. Until published packages
+are available, install from a Brix source checkout or a wheel built from it:
+
+```sh
+python -m pip install /path/to/brix
+# Or install a wheel you built/downloaded:
+python -m pip install "$HOME/Downloads"/brix-*.whl
+```
+
+Put this standalone `build.py` in the root of your project:
 
 ```python
-from brix import CleanBuilder, ExpandAll, ExternalProcessAction, Graph
+#!/usr/bin/env python3
+from pathlib import Path
 
-graph = Graph()
-data = graph.data
+from brix import Graph, cli
 
-graph.add(
-    ExpandAll(
-        element_name="name",
-        collection=data.glob("src/{name}.cpp"),
-        child=ExternalProcessAction(
-            name="compile {name}",
-            command_line="{compiler} -c {source} -o {object}",
-            inputs={
-                "compiler": data.tool("c++"),
-                "source": data.file("src/{name}.cpp"),
-            },
-            outputs={"object": data.file("build/obj/{name}.o")},
+ROOT = Path(__file__).resolve().parent
+
+def create_graph() -> Graph:
+    graph = Graph()
+    # Add your build actions here.
+    return graph
+
+if __name__ == "__main__":
+    raise SystemExit(cli.main(create_graph, root=ROOT))
+```
+
+The default CLI uses incremental builds and is already runnable:
+
+```sh
+python build.py help       # show this project's live Brix configuration
+python build.py build      # run the build
+python build.py status     # explain what would run now
+```
+
+Now replace the empty `create_graph()` body with the actions for your project.
+Caching and atomic updates can be added later with `build_stack`; they are not
+boilerplate a new project must understand before its first build.
+The [starter templates](examples/templates/) provide complete Java and
+TypeScript projects to copy, and the [examples index](examples/README.md) covers
+progressively larger builds.
+
+## A small C++ build
+
+Add `cpp` to the import from `brix`, then replace the empty `create_graph()`
+above with this complete C++ build definition:
+
+```python
+def create_graph() -> Graph:
+    graph = Graph()
+    data = graph.data
+    graph.add(
+        cpp.CompileSourceAction(
+            source_files=data.glob("src/{name}.cpp"),
+            object_files=data.glob("build/{name}.o"),
         ),
+        cpp.LinkApplicationAction(
+            object_files=data.glob("build/{name}.o"),
+            output_file=data.file("build/app"),
+        ),
+    )
+    return graph
+```
+
+## A small Java build
+
+Java is the same shape. Add `java` to the import from `brix`, then use this
+`create_graph()` to compile every source under `src/main/java` into a runnable
+jar (a JDK must be on `PATH`):
+
+```python
+def create_graph() -> Graph:
+    graph = Graph()
+    data = graph.data
+    graph.add(
+        java.JarAction(
+            source_files=data.glob("src/main/java/{name}.java"),
+            output_file=data.file("build/app.jar"),
+            entry_point="com.example.App",
+        )
+    )
+    return graph
+```
+
+The typed language helpers are optional. `ExternalProcessAction` is the escape
+hatch for any application, existing build tool, or project-specific generator.
+For example, add `ExternalProcessAction` to the imports in `build.py`, then add
+these actions after `graph` and `data` are created in `create_graph()`:
+
+```python
+graph.add(
+    ExternalProcessAction(
+        name="generate protocol sources",
+        command_line=(
+            "{protoc} --proto_path=schema --cpp_out=build/generated {schema}"
+        ),
+        inputs={
+            "protoc": data.tool("protoc"),
+            "schema": data.file("schema/messages.proto"),
+        },
+        outputs={
+            "source": data.file("build/generated/messages.pb.cc"),
+            "header": data.file("build/generated/messages.pb.h"),
+        },
     ),
     ExternalProcessAction(
-        name="link app",
-        command_line="{compiler} {objects} -o {app}",
+        name="compile generated protocol sources",
+        command_line="{compiler} -Ibuild/generated -c {source} -o {object}",
         inputs={
             "compiler": data.tool("c++"),
-            "objects": data.glob("build/obj/{name}.o"),
+            "source": data.file("build/generated/messages.pb.cc"),
+            "header": data.file("build/generated/messages.pb.h"),
         },
-        outputs={"app": data.file("build/bin/app")},
+        outputs={"object": data.file("build/messages.pb.o")},
     ),
 )
-
-CleanBuilder(graph).build()
 ```
+
+Brix sees that the compile inputs overlap the generator outputs, so it orders
+the actions automatically. Changing the schema regenerates and recompiles;
+an unchanged schema lets both actions replay.
 
 See [Getting started](docs/getting-started.md) for runnable examples and the
 usual development commands.
 
+## For the technically curious
+
+You do not need these details to use Brix, but they explain how the high-level
+promises above are implemented.
+
+- **Rust engine.** Rust handles planning, change detection, scheduling, caching,
+  and execution. A Python reference implementation is checked against it with
+  shared test cases so changes to the production engine remain trustworthy.
+- **Warm compiler processes.** Compilers such as `javac` can remain alive across
+  builds, avoiding repeated startup and warm-up costs during the edit-compile
+  loop. Independent steps run in parallel.
+- **Meaningful-change detection.** Brix can compare the part of a dependency its
+  consumers actually use. For Java, that is the ABI—the public classes, methods,
+  fields, and related details dependent code can access. For TypeScript, it is
+  the emitted type declarations. A private implementation change can therefore
+  rebuild and retest its own module without recompiling every dependent module.
+- **Discovered dependencies.** Compiler depfiles teach Brix which C/C++ headers
+  were actually read. A TypeScript compiler wrapper records the transitive
+  import graph through the same mechanism.
+- **Incremental-versus-clean checks.** Equivalence tests apply changes, build
+  incrementally, build again from scratch, and compare the resulting files.
+  These tests cover ordinary files, deleted sources, Java public-interface
+  changes, and compiler-discovered dependencies.
+- **Atomic staging.** New and deleted outputs are held separately from the
+  workspace until the build can be committed as a unit. Interrupted commits can
+  be completed safely, while failed staging is kept for inspection or discarded.
+- **Content-addressed caching.** Cache entries are keyed by the action and its
+  tracked inputs. Entries can live locally, on an HTTP service, or in a two-tier
+  local-plus-shared arrangement.
+- **Lazy monorepo loading.** An index of package ownership, declared patterns,
+  and cross-package dependencies lets Brix identify which distributed build
+  files may be affected. Safety tests require a selectively loaded build to
+  produce the same result as loading the entire workspace.
+
+<details>
+<summary>What the typed C++ compile and link helpers expand into</summary>
+
+The language helpers are conveniences over Brix's generic action model, not a
+separate engine. The typed C++ example above corresponds to this basic
+`ExternalProcessAction` graph. The helper also supplies C++-specific defaults,
+including toolchain-environment and header tracking.
+
+```python
+from brix import ExpandAll, ExternalProcessAction, Graph
+
+def create_graph() -> Graph:
+    graph = Graph()
+    data = graph.data
+    graph.add(
+        ExpandAll(
+            element_name="name",
+            collection=data.glob("src/{name}.cpp"),
+            child=ExternalProcessAction(
+                name="compile {name}",
+                command_line=(
+                    "{compiler} -MMD -MF {depfile} -c {source} -o {object}"
+                ),
+                inputs={
+                    "compiler": data.tool("c++"),
+                    "source": data.file("src/{name}.cpp"),
+                },
+                outputs={
+                    "object": data.file("build/{name}.o"),
+                    "depfile": data.file("build/{name}.o.d"),
+                },
+                depfile="build/{name}.o.d",
+            ),
+        ),
+        ExternalProcessAction(
+            name="link app",
+            command_line="{linker} {objects} -o {app}",
+            inputs={
+                "linker": data.tool("c++"),
+                "objects": data.glob("build/{name}.o"),
+            },
+            outputs={"app": data.file("build/app")},
+        ),
+    )
+    return graph
+```
+
+</details>
+
 ## Current state
 
 The Python authoring API is feature-complete for the currently supported use
-cases, and the Rust core is the default engine. The two implementations are
-cross-checked with shared golden fixtures, while real-project examples exercise
-Java, Kotlin, C, C++, TypeScript, Spring Boot, dependency resolution, warm
-workers, and the build layers.
+cases, and the Rust core is the default engine. Python-authored build files can
+compile and test Java, Kotlin, C, C++, and TypeScript projects today. Writing the
+build file itself in JavaScript or TypeScript is the future API mentioned in the
+TL;DR. The two engine implementations are cross-checked with shared golden
+fixtures, while real-project examples also exercise Spring Boot, dependency
+resolution, warm workers, and the build layers.
 
 The remaining work is mainly Rust-engine soak and cleanup, more real-project
-dogfooding, usability improvements, and the future TypeScript authoring API.
+dogfooding, usability improvements, and the future non-Python authoring API.
 See the [roadmap](docs/roadmap.md) for the full prioritized list.
 
 ## Documentation
