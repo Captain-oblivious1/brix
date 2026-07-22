@@ -166,6 +166,16 @@ def action_fingerprint(
     }
     if action.env:
         payload["env"] = {k: [atom_fp(a) for a in v.atoms()] for k, v in action.env.items()}
+    # `UNSET` names change what the process sees (a variable forced absent), so
+    # they are fingerprint material exactly like literal env values — not just
+    # action identity. Without this, the fingerprint-keyed cache layer would
+    # serve an artifact produced under the *other* regime when UNSET is flipped
+    # (the incremental layer re-stales via action_key, but the cache sits
+    # outside it and hits on fingerprint alone). Mirrors Rust
+    # `content::action_fingerprint`. Absent when empty, so no existing
+    # fingerprint is perturbed.
+    if action.env_unset:
+        payload["env_unset"] = list(action.env_unset)
     if action.worker is not None:
         # The worker is part of the toolchain (its jar/interpreter determine the
         # output), so its identity joins the fingerprint with the same atom_fp

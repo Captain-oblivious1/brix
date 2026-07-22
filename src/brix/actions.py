@@ -164,6 +164,21 @@ class ExternalProcessAction(Expandable):
             )
         # A worker executes this action as a request instead of spawning it;
         # None spawns a process. Purely an execution transport (see workers.py).
+        # A warm worker is a persistent process whose environment was fixed at
+        # launch, so per-action *setting* (a literal) or *unsetting* can never
+        # reach it. Silently ignoring the pin would be a guard bypass — the
+        # action would fingerprint an environment the process never saw — so it
+        # fails loudly here instead (the phase-3 spec's worker set-vs-track
+        # asymmetry). Tracking (`SYSTEM`) and `PASS` are fingerprint/scrub-side
+        # only and stay legal on the worker path.
+        if worker is not None and (self.env or self.env_unset):
+            pinned = sorted(set(self.env) | set(self.env_unset))
+            raise ValueError(
+                f"worker-routed action {self.label!r} cannot set or unset "
+                f"environment variables {pinned}: a warm worker's environment "
+                f"is fixed at launch, so the pin would be silently ignored; "
+                f"use SYSTEM to track, or drop worker="
+            )
         self.worker = worker
         # Logical path of a Makefile-format depfile this action emits (e.g. a
         # compiler's `-MMD -MF`). If set, the incremental layer scans it after a

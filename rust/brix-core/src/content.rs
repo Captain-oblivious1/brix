@@ -192,7 +192,7 @@ pub fn action_fingerprint(
     ctx: &NodeContext,
     det: &TimeAndHashChangeDetector,
 ) -> Result<String, String> {
-    let Action::Process { command_line, inputs, env, worker, .. } = action else {
+    let Action::Process { command_line, inputs, env, env_unset, worker, .. } = action else {
         return Err("action_fingerprint is only defined for process actions".to_string());
     };
     let mut payload: BTreeMap<String, Value> = BTreeMap::new();
@@ -200,6 +200,18 @@ pub fn action_fingerprint(
     payload.insert("inputs".to_string(), exprs_fp(inputs, ctx, det)?);
     if !env.is_empty() {
         payload.insert("env".to_string(), exprs_fp(env, ctx, det)?);
+    }
+    // `UNSET` names change what the process sees (a variable forced absent),
+    // so they are fingerprint material exactly like literal env values — not
+    // just action identity. Without this, the fingerprint-keyed cache layer
+    // would serve an artifact produced under the *other* regime when UNSET is
+    // flipped. Mirrors Python `action_fingerprint`; absent when empty, so no
+    // existing fingerprint is perturbed.
+    if !env_unset.is_empty() {
+        payload.insert(
+            "env_unset".to_string(),
+            Value::List(env_unset.iter().map(|n| Value::str(n)).collect()),
+        );
     }
     if let Some(spec) = worker {
         // The worker is part of the toolchain (its jar/interpreter determine
