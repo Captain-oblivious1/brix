@@ -1,5 +1,22 @@
 # Development log
 
+- **Machine-readable status: `status --json` for frontends.** `brix_build.py
+  status --json` emits the whole build state as one JSON document on stdout, so a
+  web UI / IDE panel / CI report can consume it without scraping the text form.
+  The shape is a *stable, versioned external contract* — `schema:
+  "brix.status/v1"` (`STATUS_SCHEMA_VERSION`), deliberately decoupled from the
+  internal engine↔Python wire boundary, with an additive-fields compatibility
+  rule (consumers ignore unknown keys). It carries each action's
+  `state`/`detail`/`fresh` and `last_result` (with derived `ok`/`summary`),
+  `counts`, `pending_deletions`, the `staging` block, and the folded-in
+  `environment` diff so a frontend gets everything in one call. Pure
+  inspection, same exit code as text `status` (0 clean / 1 pending; errors go to
+  stderr and return 2, keeping stdout pure JSON). Implemented as
+  `StatusReport.to_public_dict()` — engine-agnostic, since `compute_status`
+  builds the same dataclass on both engines (no Rust change) — plus a CLI
+  `--json` flag. `tests/test_status_json.py` (both engines); schema documented in
+  `docs/status-json.md`.
+
 - **Env phase-3 Fable review: positive-with-fixes, two holes closed.** The
   reserved Fable review of the phase-3 env diff (the piece that crosses the
   fingerprint path) confirmed the design and found two real correctness holes,

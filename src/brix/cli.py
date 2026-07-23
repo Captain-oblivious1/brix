@@ -9,7 +9,7 @@ metadata. A project's build file ends with:
 Commands (default: build):
 
     brix_build.py [build] [-j N] [--silent | --quiet-replays] [--stage]
-    brix_build.py status      exit 0 = everything fresh, 1 = work pending
+    brix_build.py status [--json]  exit 0 = everything fresh, 1 = work pending
     brix_build.py errors      replay last recorded failures; exit 1 if any
     brix_build.py commit      apply staging held by `build --stage`
     brix_build.py discard     throw held/failed staging away
@@ -38,6 +38,7 @@ fine — it is the client.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 from collections.abc import Callable
@@ -129,6 +130,11 @@ def main(
     )
     status_parser = subparsers.add_parser("status", help="what would build, and why")
     status_parser.add_argument("targets", nargs="*")
+    status_parser.add_argument(
+        "--json", action="store_true",
+        help="emit the machine-readable status document (stable versioned schema) "
+             "to stdout instead of the human-readable text",
+    )
     subparsers.add_parser("errors", help="show last recorded failures")
     subparsers.add_parser("commit", help="apply staging held by `build --stage`")
     subparsers.add_parser("discard", help="throw held/failed staging away")
@@ -211,13 +217,22 @@ def main(
         except ValueError as exc:
             print(f"brix: {exc}", file=sys.stderr)
             return 2
-        print(report.render())
         # A build-wide heads-up, independent of the graph's freshness: the
         # environment differs from the last recorded build. Diagnostic only —
         # it does not change status's clean/pending exit code.
         note = environment.summary_line(
             root / metadata_dir, environment.capture(ignore=env_ignore)
         )
+        if args.json:
+            # Pure JSON on stdout — no human text mixed in — so a frontend can
+            # parse it directly (docs/status-json.md). The env diff folds into
+            # the document rather than printing a separate line.
+            doc = report.to_public_dict(
+                environment={"changed": note is not None, "note": note}
+            )
+            print(json.dumps(doc, indent=2))
+            return 0 if report.is_clean else 1
+        print(report.render())
         if note is not None:
             print(note)
         return 0 if report.is_clean else 1
@@ -354,7 +369,7 @@ def _render_help(builder, aliases, commands) -> str:
     lines.append("Commands:")
     fixed = [
         ("build [targets]", "build the requested targets, or everything (the default)"),
-        ("status [targets]", "what would build, and why; exit 1 if work is pending"),
+        ("status [targets] [--json]", "what would build, and why; exit 1 if work is pending"),
         ("errors", "replay the last recorded failures"),
         ("commit", "apply staging held by `build --stage`"),
         ("discard", "throw held or failed staging away"),

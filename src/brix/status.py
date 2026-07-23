@@ -14,7 +14,7 @@ its inputs are about to change.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .actions import ExpandAll
@@ -35,6 +35,13 @@ from .process import ProcessResult
 # Realization logic lives with the scheduler; status asks the same question
 # ("what are the members right now?") without executing anything.
 from .executor import _collection_members
+
+# The public, versioned schema tag for the JSON status form (`status --json`).
+# This is a *stable external contract* for frontends (web/IDE/CI), independent
+# of the internal engine<->Python wire boundary (docs/boundary-schema.md), which
+# may change freely. Bump the version only on a breaking schema change; add
+# fields compatibly under the same version. See docs/status-json.md.
+STATUS_SCHEMA_VERSION = "brix.status/v1"
 
 FRESH = "fresh"
 NEVER_BUILT = "never built"
@@ -120,6 +127,57 @@ class StatusReport:
             summary += ", staged state present (failed or interrupted atomic build)"
         lines.append(summary if lines else "nothing to build")
         return "\n".join(lines)
+
+    def to_public_dict(self, *, environment: dict | None = None) -> dict:
+        """The versioned JSON-serializable status document (`status --json`).
+
+        A stable external contract (`STATUS_SCHEMA_VERSION`) so a web UI, IDE
+        panel, or CI report can consume build state without scraping the
+        human-readable `render()` text. Pure data — every value is a JSON
+        primitive, list, or dict; nothing here executes or touches disk. The
+        optional ``environment`` block is supplied by the CLI (the last-build
+        environment diff), folded in so a frontend gets everything in one call.
+        See docs/status-json.md.
+        """
+        counts: dict[str, int] = {}
+        for a in self.actions:
+            counts[a.state] = counts.get(a.state, 0) + 1
+        doc: dict = {
+            "schema": STATUS_SCHEMA_VERSION,
+            "clean": self.is_clean,
+            "counts": counts,
+            "actions": [
+                {
+                    "label": a.label,
+                    "state": a.state,
+                    "fresh": a.is_fresh,
+                    "detail": a.detail,
+                    "last_result": _result_public(a.last_result),
+                }
+                for a in self.actions
+            ],
+            "pending_deletions": [
+                {"expansion": d.expansion, "member": d.member, "paths": list(d.paths)}
+                for d in self.pending_deletions
+            ],
+            "staging": {
+                "held": self.held,
+                "interrupted_commit": self.interrupted_commit,
+                "staged_files": list(self.staged_files),
+                "staged_deletions": list(self.staged_deletions),
+            },
+        }
+        if environment is not None:
+            doc["environment"] = environment
+        return doc
+
+
+def _result_public(result: ProcessResult | None) -> dict | None:
+    """A JSON view of a recorded process result, with ``ok``/``summary``
+    derived for convenience. ``None`` when the action has no recorded run."""
+    if result is None:
+        return None
+    return {**asdict(result), "ok": result.ok, "summary": result.summary()}
 
 
 def _action_status(action, ctx, detector, metadata) -> ActionStatus:

@@ -278,14 +278,20 @@ These are self-contained and come with tests. No Fable needed.
 
 **Making it easy to start:**
 
-- **Machine-readable status.** *(Duane re-raised 2026-07-22 — wants status data
-  consumable as an API for a web page / frontend.)* Add a JSON form of `brix_build.py status` (for example,
-  `brix_build.py status --json`) with a documented, versioned schema. It should expose
-  each action's state and explanation, pending/deleted outputs, staging state,
-  and the relevant project paths without mixing human-readable text into
-  stdout. This lets somebody build a web UI, IDE panel, CI report, or other
-  frontend without scraping terminal output. Brix should provide the data, not
-  require the core project to choose or host the frontend.
+- **Machine-readable status — done (2026-07-22, Opus).** *(Duane re-raised
+  2026-07-22 — wants status data consumable as an API for a web page /
+  frontend.)* `brix_build.py status --json` emits the build state as one JSON
+  document on stdout under a stable, versioned schema tag (`brix.status/v1`,
+  `STATUS_SCHEMA_VERSION`), deliberately independent of the internal engine wire
+  boundary. It exposes each action's state/detail/last-result, pending
+  deletions, staging state, and the folded-in environment diff — no human text
+  on the success path, same exit code as text `status` (0 clean / 1 pending, 2
+  to stderr on error). Built as `StatusReport.to_public_dict()` (engine-agnostic
+  — the same dataclass on both engines, so no Rust change) plus the CLI `--json`
+  flag. Compatibility rule: additive fields under the same version; consumers
+  ignore unknown keys. `tests/test_status_json.py` (both engines); schema in
+  `docs/status-json.md`. **Follow-up:** a matching `errors --json`, and a graph
+  visualizer that consumes this document.
 - **`brix_build.py help` — show the *live* configuration, not just the command list.**
   **Done (2026-07-17, Opus).** Argparse's `-h` lists the built-in subcommands,
   but everything project-specific lived in the `cli.main(...)` call and was
