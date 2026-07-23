@@ -1,5 +1,28 @@
 # Development log
 
+- **Test-impact selection, increment 1a: the language-agnostic core + equivalence
+  oracle.** First buildable slice of the test-impact design
+  (`docs/test-impact-selection.md`), proven against a synthetic provider before
+  any real Java/C++ wiring. `src/brix/testimpact.py` is language-free: it operates
+  on a pure `ProviderView` (code-dep graph + test→code edges + the units that do
+  runtime dynamic loading) and returns the provably-equivalent set of tests to
+  run, or fails open. The soundness model from the design is realized directly —
+  a test runs iff its static code closure intersects the change set; a test whose
+  closure reaches a **dynamic-loading** unit runs unconditionally (its real deps
+  are unknowable), the only sound stance short of coverage. The **fail-open
+  triggers are first-class and enumerable** (`new-or-renamed-unit`,
+  `incomplete-graph`, `prior-failure`) so a future optional speed/correctness dial
+  is a controlled relaxation, not a rewrite; any firing ⇒ run all. The
+  **equivalence oracle** (`tests/test_testimpact.py`) is the ground truth: a
+  synthetic world with real verdicts, where a test's *true* runtime deps can
+  exceed its statically-visible ones (the dynamic case), asserts across
+  break-every-unit (incl. 300 randomized worlds) that **no test failing in the
+  full run is ever skipped**. Verified the oracle has teeth — it catches a naive
+  static-only selector under-selecting the dynamic case. Inherits `affected.py`'s
+  over-select-harmless/under-select-fatal invariant; no engine change (pure
+  Python), not yet public API. Next: the first real provider (Java `jvm-abi` +
+  `--select-class`), then C++.
+
 - **Machine-readable status: `status --json` for frontends.** `brix_build.py
   status --json` emits the whole build state as one JSON document on stdout, so a
   web UI / IDE panel / CI report can consume it without scraping the text form.
