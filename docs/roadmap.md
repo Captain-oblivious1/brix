@@ -278,7 +278,8 @@ These are self-contained and come with tests. No Fable needed.
 
 **Making it easy to start:**
 
-- **Machine-readable status.** Add a JSON form of `brix_build.py status` (for example,
+- **Machine-readable status.** *(Duane re-raised 2026-07-22 — wants status data
+  consumable as an API for a web page / frontend.)* Add a JSON form of `brix_build.py status` (for example,
   `brix_build.py status --json`) with a documented, versioned schema. It should expose
   each action's state and explanation, pending/deleted outputs, staging state,
   and the relevant project paths without mixing human-readable text into
@@ -479,6 +480,26 @@ These are self-contained and come with tests. No Fable needed.
   lazy *loading* (skipping graph construction) is the real win; and selection
   must be pattern-based, not ownership-based (shared out-of-subtree inputs make
   "nearest owner" under-select — see the design note's correction).
+
+- **Minimal correct test selection (test-impact analysis).** *(Duane-requested
+  2026-07-22.)* Given a code change, run only the tests that could be affected by
+  it — not the whole suite. The unit is finer than the package-level
+  "only build what my change touched" above: within a single jar of `A.class`,
+  `B.class`, `C.class` (100 tests each), a change to `A.java` should run the
+  ~100 that exercise `A.class` **plus** any tests of code that (transitively)
+  depends on `A.class` — and ideally fewer than 100 if we can resolve to the
+  method/class level correctly — while never running the `B`/`C`-only tests that
+  can't be affected. **The whole feature is correctness-gated:** the risk is
+  *under*-selection (skipping a test that would have caught a regression), so the
+  selected set must be a provable superset of the truly-affected tests, with a
+  clear fail-open fallback (run everything) whenever the impact can't be proven —
+  same discipline as the lazy-loading equivalence oracle. Design questions to
+  sketch first: how to derive the test→code-under-test edges (reuse the same
+  artifact-overlap/`infer_dependency` machinery that already gives cross-package
+  edges? a per-test declared or discovered footprint? bytecode/ABI-level
+  reverse-dependency from the jvm-abi lens?), granularity (class vs method), and
+  how it composes with the existing `affected`/`load_affected` selection. Likely
+  an Opus design pass then a **Fable** correctness review before it ships.
 
 ### Fable queue — for the careful model only
 
