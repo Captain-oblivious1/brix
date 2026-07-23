@@ -33,14 +33,23 @@ represented as raw-bytes hex (no text-decoding step to disagree on across
 languages); float/double constants as their raw IEEE-754 bits (no
 float-formatting hazard). A jar's classes are digested in sorted-name order
 and their digests concatenated.
+
+This module is also the home of brix's class-file *reader*, so a second
+consumer lives here: `class_refs` extracts the type-reference graph a class
+file induces (which classes it statically binds to, and whether it reaches a
+reflective entry point). That feeds test-impact selection — see
+`testimpact_java.py` and docs/test-impact-selection.md — and deliberately
+reuses this parser rather than growing a second one.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 # Constant-pool tags (JVMS Table 4.4-B).
@@ -413,3 +422,172 @@ def digest(path: Path) -> str:
     if zipfile.is_zipfile(path):
         return digest_jar(path)
     return digest_class(path.read_bytes())
+
+
+# -- the type-reference graph (test-impact selection) ------------------------
+#
+# Different question, same parser. `class_abi` asks "what can change a
+# dependent's *compilation*"; `class_refs` asks "what does this class *bind
+# to at run time*". So it deliberately keeps everything the ABI drops —
+# private members, method bodies — because a private method's call is still a
+# runtime dependency.
+#
+# Why the constant pool is the sound answer: the JVM resolves **every**
+# symbolic reference (instantiation, call, field access, cast, `instanceof`,
+# catch type, and every type in a descriptor) through the constant pool. So a
+# class cannot statically bind to a type absent from its pool. The one way out
+# is binding by *name* at run time — reflection / `ClassLoader` / `ServiceLoader`
+# / JNI — which is exactly what `reflective` reports so the caller can fail open.
+
+ACC_ABSTRACT = 0x0400
+
+# Types in a descriptor or generic signature: `Lfoo/Bar;`, and `Lfoo/Bar<` for
+# the generic form. Matching both terminators means signatures contribute too.
+_TYPE_IN_DESCRIPTOR = re.compile(r"L([^;<>\[\s]+)[;<]")
+
+_PRIMITIVES = "BCDFIJSZV"
+
+# Reflective entry points: binding a class or member by name at run time. A
+# class that reaches one of these has dependencies no static analysis can see.
+# Deliberately NOT included: `java/lang/invoke/LambdaMetafactory` and
+# `StringConcatFactory` — every lambda and string concat goes through them, but
+# their targets are ordinary method handles recorded in the constant pool, i.e.
+# statically bound. Treating them as reflective would mark essentially every
+# class dynamic and make selection useless.
+_REFLECTIVE_METHODS: dict[str, frozenset[str]] = {
+    "java/lang/Class": frozenset(
+        {
+            "forName",
+            "newInstance",
+            "getMethod",
+            "getMethods",
+            "getDeclaredMethod",
+            "getDeclaredMethods",
+            "getConstructor",
+            "getConstructors",
+            "getDeclaredConstructor",
+            "getDeclaredConstructors",
+            "getField",
+            "getFields",
+            "getDeclaredField",
+            "getDeclaredFields",
+        }
+    ),
+    "java/lang/ClassLoader": frozenset({"loadClass", "defineClass", "findClass"}),
+    "java/util/ServiceLoader": frozenset({"load", "loadInstalled"}),
+    "java/util/ResourceBundle": frozenset({"getBundle"}),  # can load a bundle *class*
+    "java/lang/invoke/MethodHandles": frozenset({"lookup", "privateLookupIn"}),
+    "java/lang/System": frozenset({"load", "loadLibrary"}),  # JNI: native code
+    "java/lang/Runtime": frozenset({"load", "loadLibrary"}),
+}
+
+# Any method on any of these owners is reflective.
+_REFLECTIVE_OWNER_PREFIXES = ("java/lang/reflect/",)
+_REFLECTIVE_OWNERS = frozenset({"java/lang/invoke/MethodHandles$Lookup"})
+
+
+@dataclass(frozen=True)
+class ClassRefs:
+    """What one class file binds to.
+
+    * ``name`` — this class's internal name (``com/acme/A``).
+    * ``supers`` — direct superclass + interfaces (also present in ``refs``;
+      broken out because subtype structure drives test-class discovery).
+    * ``refs`` — every internal class name the class statically binds to, an
+      intentional over-approximation.
+    * ``reflective`` — the reflective entry points called, as ``owner.member``
+      strings; non-empty means this class's real dependencies are unknowable.
+    * ``abstract`` — abstract or interface (cannot itself be instantiated).
+    """
+
+    name: str
+    supers: frozenset[str]
+    refs: frozenset[str]
+    reflective: frozenset[str]
+    abstract: bool
+
+    @property
+    def dynamic(self) -> bool:
+        return bool(self.reflective)
+
+
+def _text(pool: list, index: int) -> str:
+    """A Utf8 constant as text. Class names are ASCII in practice; a decode
+    slip could only invent a bogus extra name (over-approximation), never hide
+    a real one."""
+    return _utf8_bytes(pool, index).decode("utf-8", "replace")
+
+
+def _internal_name(text: str) -> str | None:
+    """The internal class name a CONSTANT_Class value denotes, or None for a
+    primitive/array-of-primitive."""
+    t = text.lstrip("[")
+    if t.startswith("L") and t.endswith(";"):
+        t = t[1:-1]
+    elif len(t) == 1 and t in _PRIMITIVES:
+        return None
+    return t or None
+
+
+def class_refs(data: bytes) -> ClassRefs:
+    """The runtime type-reference summary of one class file."""
+    r = _Reader(data)
+    if r.u4() != 0xCAFEBABE:
+        raise ClassFormatError("not a class file (bad magic)")
+    r.u2()  # minor version
+    r.u2()  # major version
+    pool = _parse_constant_pool(r)
+    access = r.u2()
+    this_class = _class_name_text(pool, r.u2())
+    super_index = r.u2()
+    supers = set()
+    if super_index:
+        supers.add(_class_name_text(pool, super_index))
+    for _ in range(r.u2()):
+        supers.add(_class_name_text(pool, r.u2()))
+
+    refs: set[str] = set()
+    reflective: set[str] = set()
+    for entry in pool:
+        if entry is None:
+            continue
+        tag = entry[0]
+        if tag == _CLASS:
+            name = _internal_name(_text(pool, entry[1]))
+            if name:
+                refs.add(name)
+        elif tag == _UTF8:
+            # Descriptors and generic signatures name types that may have no
+            # CONSTANT_Class of their own (e.g. a parameter type never touched
+            # in the body) yet must still resolve.
+            refs.update(_TYPE_IN_DESCRIPTOR.findall(entry[1].decode("utf-8", "replace")))
+        elif tag in (_METHODREF, _INTERFACE_METHODREF):
+            owner = _class_name_text(pool, entry[1])
+            member = _text(pool, pool[entry[2]][1])
+            if _is_reflective(owner, member):
+                reflective.add(f"{owner}.{member}")
+
+    refs.update(supers)
+    refs.discard(this_class)
+    return ClassRefs(
+        name=this_class,
+        supers=frozenset(supers),
+        refs=frozenset(refs),
+        reflective=frozenset(reflective),
+        abstract=bool(access & ACC_ABSTRACT),
+    )
+
+
+def _is_reflective(owner: str, member: str) -> bool:
+    if owner in _REFLECTIVE_OWNERS or owner.startswith(_REFLECTIVE_OWNER_PREFIXES):
+        return True
+    return member in _REFLECTIVE_METHODS.get(owner, frozenset())
+
+
+def _class_name_text(pool: list, index: int) -> str:
+    """A CONSTANT_Class's name as text (the ABI path keeps names hex-encoded for
+    cross-language determinism; the reference graph needs readable names)."""
+    entry = pool[index]
+    if entry is None or entry[0] != _CLASS:
+        raise ClassFormatError(f"constant {index} is not Class")
+    return _text(pool, entry[1])

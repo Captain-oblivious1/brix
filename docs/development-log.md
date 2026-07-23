@@ -1,5 +1,41 @@
 # Development log
 
+- **Test-impact selection, increment 1b: the Java provider, proven against real
+  JUnit.** The first real provider behind `testimpact.Provider`, at Java's coarse
+  binding unit — the class. `jvmabi.class_refs` reuses the existing class-file
+  parser to extract each class's *runtime* type-reference set: the constant pool
+  is the sound answer because the JVM resolves every symbolic reference through
+  it, so a class cannot statically bind to a type its pool omits. This
+  deliberately keeps what the ABI lens drops (private members, method bodies) — a
+  private method's call is still a runtime dependency — and adds a descriptor
+  scan, since `void f(Bar b)` binds `Bar` with no `CONSTANT_Class` of its own.
+  `src/brix/testimpact_java.py` turns that into a `ProviderView` and emits JUnit
+  `--select-class` args. Escapes are detected, not assumed away: reflection /
+  `ClassLoader` / `ServiceLoader` / JNI mark the referencing class **dynamic**, as
+  does a reference we cannot resolve to any scanned class (an un-supplied library
+  might reflect back into the code under test) — both degrade *locally*, so the
+  tests touching that class always run while the rest still select. Test units
+  are top-level classes (what `--select-class` addresses), with `@Nested` grouped
+  in and **inherited** tests discovered by closing "carries tests" down the
+  subtype graph — `class FooTest extends AbstractContractTest` has no annotation
+  of its own and missing it would silently skip a real test.
+  `tests/test_testimpact_java_oracle.py` is the equivalence oracle against a
+  **real junit-platform-console-standalone**: edit code, run the suite for real,
+  assert every test failing in the full run is selected. Teeth verified — a
+  one-hop (non-transitive) selector is caught missing `BTest` when `A` changes.
+  **Open ruling for Duane:** the oracle exposed that JUnit's own launcher is
+  wall-to-wall reflection and sits in *every* test's closure, so treating it as
+  ordinary code collapses selection to a permanent full run. Resolved with an
+  explicit `HARNESS_PREFIXES` boundary (junit/opentest4j/apiguardian treated as
+  inert like the JDK), justified on the grounds that brix builds the run command
+  and therefore knows the launcher reflects only on the classes it was handed —
+  brix knowing its own tool, not a user vouching for their code. Application
+  frameworks get no such pass (Spring's component scan stays dynamic). Flagged
+  because it sits next to decision 3 ("no user-vouching override") and needs a
+  ruling before `docs/test-impact-selection.md` records it. Not yet wired into
+  `JUnitTestAction` — that crosses the fingerprint path and is the reserved Fable
+  slice.
+
 - **Test-impact selection, increment 1a: the language-agnostic core + equivalence
   oracle.** First buildable slice of the test-impact design
   (`docs/test-impact-selection.md`), proven against a synthetic provider before
