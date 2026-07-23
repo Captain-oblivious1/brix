@@ -499,13 +499,24 @@ These are self-contained and come with tests. No Fable needed.
   *under*-selection (skipping a test that would have caught a regression), so the
   selected set must be a provable superset of the truly-affected tests, with a
   clear fail-open fallback (run everything) whenever the impact can't be proven —
-  same discipline as the lazy-loading equivalence oracle. Design questions to
-  sketch first: how to derive the test→code-under-test edges (reuse the same
-  artifact-overlap/`infer_dependency` machinery that already gives cross-package
-  edges? a per-test declared or discovered footprint? bytecode/ABI-level
-  reverse-dependency from the jvm-abi lens?), granularity (class vs method), and
-  how it composes with the existing `affected`/`load_affected` selection. Likely
-  an Opus design pass then a **Fable** correctness review before it ships.
+  same discipline as the lazy-loading equivalence oracle. **Design sketched +
+  decided (2026-07-22, Opus, with Duane): `docs/test-impact-selection.md`.** Key
+  decisions: (1) a **language-agnostic core + per-language provider** — not a Java
+  feature — where the provider supplies a dependency graph brix *already*
+  discovers (`jvm-abi` refs, C++ `-MMD`+link graph, `tsc --listFiles`, cargo) plus
+  a runner-subset adapter; (2) **soundness = (binding time × granularity), uniform
+  across languages** — coarse binding-closure selection is safe-by-over-selection,
+  every language has exactly one runtime-dynamic-loading escape hatch
+  (`dlopen`/reflection/dynamic-`import`) that fails open; (3) the governing rule is
+  **100% equivalence to the full run, non-negotiable and the default** — like
+  incremental==clean; correctness is not a knob, only speedup varies; **no
+  user-vouching override**, recover the win on dynamic-loading code only via sound
+  dynamic coverage; (4) **coarse-first, Java + C++ providers first**, dynamic
+  coverage as increment 2; (5) fail-open triggers kept **first-class/enumerable**
+  so an optional speed/correctness dial stays cheap to add later without moving
+  the default. Opus builds the core + provider interface + oracle + Java/C++ coarse
+  providers; **Fable** owns the uniform soundness model + the cache/fingerprint
+  bookkeeping (the fingerprint-crossing kernel).
 
 ### Fable queue — for the careful model only
 
