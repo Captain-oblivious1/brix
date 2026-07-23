@@ -1,6 +1,6 @@
 # Recording the build environment
 
-Status: **phases 1–2 implemented (2026-07-17, Opus)** — phase 1 diagnostic
+Status: **phases 1–3 implemented (2026-07-17…19, Opus; phase-3 Fable-reviewed 2026-07-19, positive-with-fixes)** — phase 1 diagnostic
 capture + `brix_build.py env` (`src/brix/environment.py`, `tests/test_environment.py`)
 and phase 2 the `env_used=` guard (`src/brix/actions.py`,
 `tests/test_env_used.py`, golden-pinned cross-engine); phase 3 (automatic
@@ -27,6 +27,11 @@ the process action, applied by *both* process executors (`full_env.pop` /
 `cmd.env_remove`) and folded into *both* `action_key`s (identity, so flipping
 UNSET re-stales), with a new golden case (`env-vocab`) pinning the cross-engine
 parity. Both engines proven in `tests/test_env_system.py` (removal + identity).
+*(As shipped, this increment put `env_unset` in `action_key` only — **not** the
+`action_fingerprint`. The Fable review below found that gap: identity governs
+replay, but the **fingerprint** is the cache key, so a cached artifact built
+before the `UNSET` could still be served on a cache hit. It is now fingerprint
+material in both engines — see the review outcome.)*
 **Increment 4 (foundation) shipped (2026-07-19):** the **`PASS`** sentinel and the
 build-wide `BASE_ENV` (plumbing: `PATH`/`HOME`/`TMPDIR` as `PASS`). `PASS` lets a
 variable through *without* fingerprinting it — deliberately absent from
@@ -45,9 +50,43 @@ inherited (`env_clear` in Rust; build-from-empty in Python). Proven identical on
 both engines (`tests/test_env_system.py`): an undeclared ambient variable is
 **absent** under scrub while a declared `SYSTEM` var and `PATH` remain, and with
 scrub off it leaks through (the counterpart that makes the guarantee meaningful).
-Goldens unaffected. **The whole phase-3 diff is now ready for the Fable review**
-(it crosses the fingerprint path via the per-language `SYSTEM` defaults, the
-`UNSET` identity, and the `env-vocab` golden). **Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
+Goldens unaffected. **Phase-3 Fable-reviewed (2026-07-19), verdict
+positive-with-fixes.** The review confirmed the design but found two real holes,
+both now closed:
+
+1. **`UNSET` was identity but not fingerprint.** `env_unset` was in `action_key`
+   yet absent from `action_fingerprint` — and `CacheLayer` keys purely on the
+   fingerprint. So a cached artifact built while a variable was ambiently visible
+   could be served, on a cache hit, to a later build that had since added
+   `env={"X": UNSET}` for that variable — silently defeating the declared intent.
+   Fixed by adding `env_unset` to `action_fingerprint()` in **both** engines
+   (`src/brix/incremental.py`, `rust/brix-core/src/content.rs`), only when
+   non-empty so no pre-existing fingerprint moves, with a new fingerprint golden
+   case and two pinning tests (`test_unset_is_fingerprint_material`, and the
+   end-to-end cross-engine `test_unset_flip_misses_the_cache`).
+2. **No loud failure for a pinned env on a worker-routed action.** A warm
+   `javac`/`kotlinc` worker's environment is fixed at process launch, so a
+   literal `env=` or `UNSET` can never actually reach it — yet it would still
+   enter the fingerprint as if it had. Fixed with a constructor-time `ValueError`
+   in `src/brix/actions.py` (message contains "fixed at launch") when `worker=`
+   is combined with a literal value or `UNSET`; `SYSTEM`/`PASS` stay legal, being
+   fingerprint/scrub-side concerns only (`test_worker_routed_action_rejects_pinned_env`).
+
+The review also added a `BASE_ENV` Python↔Rust parity test
+(`test_base_env_matches_the_rust_engine`) to catch silent drift between the two
+`BASE_ENV` definitions.
+
+**Design ruling — scrub × fingerprint.** The `scrub` flag is deliberately **not**
+fingerprinted. It only ever *removes* undeclared ambient variables from a
+process's environment; every variable that can affect output is already declared
+(`SYSTEM`/`env=`/`UNSET`) and already fingerprinted, so turning scrub on cannot
+change a correct result — it can only turn a latent, undeclared dependency into a
+loud failure. Fingerprinting the flag would just churn every fingerprint for no
+correctness gain. It is provenance, not a cache key. (Optional, unimplemented,
+Duane's call: record `scrub: true` in the build metadata so `env`/`status` can
+report which mode a build ran under.)
+
+**Phase 2 Fable-reviewed (2026-07-18), verdict positive**:
 unset-vs-empty is deterministic and engine-identical (canonical sorted JSON,
 `null` ≠ `""`); the snapshot never reaches the process environment or the
 command; the verbatim-through-`substitute` copy holds under nested expansion

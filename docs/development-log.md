@@ -1,5 +1,32 @@
 # Development log
 
+- **Env phase-3 Fable review: positive-with-fixes, two holes closed.** The
+  reserved Fable review of the phase-3 env diff (the piece that crosses the
+  fingerprint path) confirmed the design and found two real correctness holes,
+  both now fixed. **(1) `UNSET` was identity but not fingerprint.** `env_unset`
+  was in `action_key` but absent from `action_fingerprint`, and `CacheLayer`
+  keys purely on the fingerprint — so a cached artifact built while a variable
+  was ambiently visible could be served, on a cache hit, to a later build that
+  had since declared `env={"X": UNSET}`, silently defeating the intent. Added
+  `env_unset` to `action_fingerprint()` in both engines
+  (`src/brix/incremental.py`, `rust/brix-core/src/content.rs`), only when
+  non-empty (no pre-existing fingerprint moves), with a new fingerprint golden
+  case and two pins: `test_unset_is_fingerprint_material` and the end-to-end
+  cross-engine `test_unset_flip_misses_the_cache`. **(2) A pinned env on a
+  worker-routed action failed silently, not loudly.** A warm `javac`/`kotlinc`
+  worker's environment is fixed at launch, so a literal `env=` or `UNSET` can
+  never reach it — yet it still entered the fingerprint as if it had. Now a
+  constructor-time `ValueError` (message "fixed at launch") rejects `worker=`
+  combined with a literal value or `UNSET`; `SYSTEM`/`PASS` stay legal
+  (`src/brix/actions.py`, `test_worker_routed_action_rejects_pinned_env`). Also
+  added a `BASE_ENV` Python↔Rust parity test
+  (`test_base_env_matches_the_rust_engine`) against silent drift. **Ruling:**
+  the `scrub` flag is deliberately not fingerprinted — it only removes
+  undeclared ambient variables, and everything that can affect output is already
+  declared and fingerprinted, so scrub can never change a correct result. It is
+  provenance, not a cache key. All green: 552 Python passed, Rust workspace ok,
+  9 goldens. (Merged onto the branch alongside the `brix_build.py` rename.)
+
 - **Env phase-3 complete: the scrub runtime (authoritative environment).** The
   final piece, and what turns "no silent env" from *mitigated* into *guaranteed*.
   `build_stack(scrub=True)` / `IncrementalBuilder(scrub=True)` runs each process
