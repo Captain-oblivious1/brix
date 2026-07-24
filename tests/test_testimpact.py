@@ -89,6 +89,44 @@ def test_incomplete_graph_forces_full_run():
     assert any("could not analyze" in r for r in sel.reasons)
 
 
+def test_config_named_unit_forces_full_run():
+    # `P` is named as text in a service file / manifest, so machinery that
+    # appears in nobody's closure can load it. No test can be proven safe.
+    view = ProviderView(
+        code_deps={"A": frozenset(), "P": frozenset()},
+        test_edges={"tA": frozenset({"A"}), "tB": frozenset()},
+        name_addressed=frozenset({"P"}),
+    )
+    sel = _select(view, {"P"}, known={"A", "P", "tA", "tB"})
+    assert sel.run_all
+    assert any("reachable from configuration by name" in r for r in sel.reasons)
+
+
+def test_config_named_unit_drags_its_dependencies():
+    """Once `P` can be loaded from anywhere, so can everything it uses — so the
+    trigger covers `P`'s closure, not just `P`."""
+    view = ProviderView(
+        code_deps={"A": frozenset(), "P": frozenset({"H"}), "H": frozenset()},
+        test_edges={"tA": frozenset({"A"})},
+        name_addressed=frozenset({"P"}),
+    )
+    sel = _select(view, {"H"}, known={"A", "P", "H", "tA"})
+    assert sel.run_all
+
+
+def test_config_named_units_cost_nothing_until_they_change():
+    """The asymmetry that makes this affordable: it is a property of the
+    *target*, so an untouched plugin registry never slows a build down."""
+    view = ProviderView(
+        code_deps={"A": frozenset(), "P": frozenset()},
+        test_edges={"tA": frozenset({"A"}), "tP": frozenset({"P"})},
+        name_addressed=frozenset({"P"}),
+    )
+    sel = _select(view, {"A"}, known={"A", "P", "tA", "tP"})
+    assert not sel.run_all
+    assert sel.tests == frozenset({"tA"})
+
+
 def test_prior_failure_forces_full_run():
     view = _view(code_deps={"A": [], "B": []}, test_edges={"tA": ["A"], "tB": ["B"]})
     sel = _select(view, {"A"}, prior_failed=True)

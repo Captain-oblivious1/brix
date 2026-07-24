@@ -50,7 +50,7 @@ needs_junit = pytest.mark.skipif(
 
 # A/B/C with a real dependency edge (B calls A) and one assertion per class, so
 # a changed return value actually turns a test red.
-def _sources(a_value: int, b_bonus: int, c_value: int, p_value: int) -> dict:
+def _sources(a_value: int, b_bonus: int, c_value: int, p_value: int, tool_value: int) -> dict:
     return {
         "com/acme/A.java": f"package com.acme; public class A {{ public static int v() {{ return {a_value}; }} }}",
         "com/acme/B.java": f"package com.acme; public class B {{ public static int v() {{ return A.v() + {b_bonus}; }} }}",
@@ -62,6 +62,21 @@ def _sources(a_value: int, b_bonus: int, c_value: int, p_value: int) -> dict:
             import java.util.stream.Stream;
             public class Providers {{
                 static Stream<Integer> args() {{ return Stream.of({p_value}); }}
+            }}
+        """,
+        # Auto-detected JUnit extension, registered ONLY in META-INF/services.
+        # It changes what tests observe, yet no test's bytecode names it and
+        # the code that loads it is the harness — which the direction rule
+        # deliberately excludes. Neither the reflection rule nor the harness
+        # boundary can catch this; only the name-addressed fail-open can.
+        "com/acme/Stamp.java": f"""
+            package com.acme;
+            import org.junit.jupiter.api.extension.BeforeEachCallback;
+            import org.junit.jupiter.api.extension.ExtensionContext;
+            public class Stamp implements BeforeEachCallback {{
+                public void beforeEach(ExtensionContext ctx) {{
+                    System.setProperty("stamp", "{tool_value}");
+                }}
             }}
         """,
     }
@@ -99,9 +114,19 @@ TESTS = {
             void v(int given) { assertEquals(3, given); }
         }
     """,
+    # Observes what the auto-detected extension did. Its bytecode references
+    # nothing but `System` — there is no path from this test to `Stamp`.
+    "com/acme/StampTest.java": """
+        package com.acme;
+        import org.junit.jupiter.api.Test;
+        import static org.junit.jupiter.api.Assertions.assertEquals;
+        public class StampTest {
+            @Test void v() { assertEquals("7", System.getProperty("stamp")); }
+        }
+    """,
 }
 
-BASELINE = dict(a_value=1, b_bonus=1, c_value=9, p_value=3)  # all green
+BASELINE = dict(a_value=1, b_bonus=1, c_value=9, p_value=3, tool_value=7)  # all green
 
 
 def _run(tests_dir, code_dir, select_args) -> bool:
@@ -138,7 +163,13 @@ def _verdicts(tests_dir, code_dir, units) -> set:
 def suite(tmp_path_factory):
     """Compile the baseline world once; edits recompile only the code."""
     tmp_path = tmp_path_factory.mktemp("oracle")
-    code = compile_java(tmp_path, _sources(**BASELINE), out="classes")
+    code = compile_java(tmp_path, _sources(**BASELINE), out="classes", classpath=[CONSOLE_JAR])
+    services = code / "META-INF/services"
+    services.mkdir(parents=True, exist_ok=True)
+    (services / "org.junit.jupiter.api.extension.Extension").write_text("com.acme.Stamp\n")
+    (code / "junit-platform.properties").write_text(
+        "junit.jupiter.extensions.autodetection.enabled=true\n"
+    )
     tests = compile_java(
         tmp_path, TESTS, out="tests", classpath=[code, CONSOLE_JAR]
     )
@@ -150,7 +181,13 @@ def test_baseline_is_green(suite):
     """Guard the oracle itself: if the baseline is not green, a later
     'no failures' result would prove nothing."""
     tmp_path, code, tests = suite
-    units = {"com/acme/ATest", "com/acme/BTest", "com/acme/CTest", "com/acme/ParamTest"}
+    units = {
+        "com/acme/ATest",
+        "com/acme/BTest",
+        "com/acme/CTest",
+        "com/acme/ParamTest",
+        "com/acme/StampTest",
+    }
     assert _verdicts(tests, code, units) == set()
 
 
@@ -166,6 +203,10 @@ def test_baseline_is_green(suite):
         # The string-named data provider. No test's bytecode mentions it, so
         # the class closure alone would skip ParamTest and report a false pass.
         ("com/acme/Providers", dict(p_value=4)),
+        # The service-registered extension. Nothing names it in any bytecode,
+        # and its loader is the harness — which direction deliberately
+        # excludes. Only the name-addressed fail-open catches this one.
+        ("com/acme/Stamp", dict(tool_value=8)),
     ],
 )
 def test_selected_run_matches_the_full_run(suite, unit, edit):
@@ -176,7 +217,7 @@ def test_selected_run_matches_the_full_run(suite, unit, edit):
     selection = select_tests(SelectionInput(view, frozenset({unit}), known))
 
     # Apply the edit for real, then ask JUnit what the FULL suite thinks.
-    compile_java(tmp_path, _sources(**{**BASELINE, **edit}), out="classes")
+    compile_java(tmp_path, _sources(**{**BASELINE, **edit}), out="classes", classpath=[CONSOLE_JAR])
     try:
         failing = _verdicts(tests, code, view.all_tests)
         assert failing, f"editing {unit} did not turn anything red — oracle is toothless"
@@ -188,7 +229,7 @@ def test_selected_run_matches_the_full_run(suite, unit, edit):
         # And the selected run really does reproduce the failure.
         assert not _run(tests, code, provider.select_args(selection.tests))
     finally:
-        compile_java(tmp_path, _sources(**BASELINE), out="classes")
+        compile_java(tmp_path, _sources(**BASELINE), out="classes", classpath=[CONSOLE_JAR])
 
 
 @needs_junit

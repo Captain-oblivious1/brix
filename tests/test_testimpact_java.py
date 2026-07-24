@@ -532,6 +532,49 @@ def test_an_unresolvable_string_named_provider_fails_open(tmp_path):
 
 
 @needs_jdk
+def test_a_class_named_in_a_service_file_fails_open(tmp_path):
+    """The audit's structural finding: a class can be loaded by machinery that
+    is in nobody's closure — a platform factory (`DriverManager`, an XML
+    factory, `Charset`) reading `META-INF/services`. Enumerating every such
+    loader is unbounded; recognizing the *targets* is bounded, so we invert it.
+    Changing a name-addressed class runs everything."""
+    runner = compile_java(tmp_path, STUB_JUPITER, out="runner")
+    code = compile_java(
+        tmp_path,
+        {**WORLD, "com/acme/Plug.java": "package com.acme; public class Plug {}"},
+    )
+    (code / "META-INF/services").mkdir(parents=True)
+    (code / "META-INF/services/com.acme.Api").write_text("com.acme.Plug\n")
+    tests = compile_java(
+        tmp_path,
+        {
+            "com/acme/ATest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                public class ATest { @Test void t() { A.v(); } }
+            """,
+            "com/acme/CTest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                public class CTest { @Test void t() { C.v(); } }
+            """,
+        },
+        out="tests",
+        classpath=[code, runner],
+    )
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[runner])
+    view = provider.view()
+    assert view.name_addressed == {"com/acme/Plug"}
+
+    # Nothing in any test references Plug, yet changing it runs everything.
+    sel = _select(provider, {"com/acme/Plug"})
+    assert sel.run_all
+    assert sel.tests == view.all_tests
+    # ...and the registry costs nothing while it sits still.
+    assert _select(provider, {"com/acme/C"}).tests == {"com/acme/CTest"}
+
+
+@needs_jdk
 def test_inherited_tests_are_discovered(tmp_path):
     """`class FooTest extends AbstractContractTest` declares no annotation of
     its own; JUnit still runs it. Missing this would silently skip a real

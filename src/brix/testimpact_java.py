@@ -138,33 +138,67 @@ def top_level(unit: Unit) -> Unit:
     return unit.split("$", 1)[0]
 
 
+# A dotted Java name as it appears inside a text resource. Deliberately loose:
+# every candidate is checked against the scanned universe, so the membership
+# test does the filtering and a false candidate simply never matches.
+_NAME_IN_RESOURCE = re.compile(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+")
+
+# Resources that cannot name a class, skipped so a large binary asset is not
+# decoded and regex-scanned for nothing.
+_UNSCANNED_RESOURCES = (
+    ".class", ".jar", ".zip", ".gz", ".png", ".jpg", ".jpeg", ".gif", ".pdf",
+    ".so", ".dll", ".dylib", ".woff", ".woff2", ".ttf", ".ico", ".mp4", ".bin",
+)
+
+
 @dataclass
 class ScanResult:
     classes: dict[Unit, ClassRefs] = field(default_factory=dict)
     unreadable: set[str] = field(default_factory=set)  # entries we could not parse
+    resource_names: set[str] = field(default_factory=set)  # dotted names in resources
 
 
-def scan_classes(roots: Iterable[str | Path]) -> ScanResult:
+def scan_classes(
+    roots: Iterable[str | Path], *, resources: bool = False
+) -> ScanResult:
     """Read every class in ``roots`` — directories of ``.class`` files and/or
     jars. An entry that fails to parse is recorded rather than raised: the core
     turns that into a full run (`ProviderView.uncovered`), which is the safe
-    reading of "we do not fully understand this classpath"."""
+    reading of "we do not fully understand this classpath".
+
+    With ``resources=True``, also harvests dotted names out of the non-class
+    files, which is how a class gets addressed without any bytecode naming it
+    (`META-INF/services`, `spring.factories`, an XML bean definition)."""
     result = ScanResult()
     for root in roots:
         path = Path(root)
         if not path.exists():
             result.unreadable.add(str(path))
         elif path.is_dir():
-            for class_file in sorted(path.rglob("*.class")):
-                _absorb(result, str(class_file), class_file.read_bytes())
+            for entry in sorted(path.rglob("*")):
+                if not entry.is_file():
+                    continue
+                if entry.suffix == ".class":
+                    _absorb(result, str(entry), entry.read_bytes())
+                elif resources:
+                    _harvest_names(result, entry.name, entry.read_bytes())
         elif zipfile.is_zipfile(path):
             with zipfile.ZipFile(path) as zf:
                 for name in sorted(zf.namelist()):
                     if name.endswith(".class"):
                         _absorb(result, f"{path}!{name}", zf.read(name))
+                    elif resources and not name.endswith("/"):
+                        _harvest_names(result, name, zf.read(name))
         else:
             result.unreadable.add(str(path))
     return result
+
+
+def _harvest_names(result: ScanResult, name: str, data: bytes) -> None:
+    if name.lower().endswith(_UNSCANNED_RESOURCES):
+        return
+    text = data.decode("utf-8", "replace")
+    result.resource_names.update(_NAME_IN_RESOURCE.findall(text))
 
 
 def _absorb(result: ScanResult, label: str, data: bytes) -> None:
@@ -207,8 +241,8 @@ class JavaProvider:
     test_annotations: frozenset[str] = TEST_ANNOTATIONS
 
     def view(self) -> ProviderView:
-        tests_scan = scan_classes(self.test_roots)
-        code_scan = scan_classes(self.classpath)
+        tests_scan = scan_classes(self.test_roots, resources=True)
+        code_scan = scan_classes(self.classpath, resources=True)
         harness = frozenset(scan_classes(self.harness_roots).classes)
         scanned: dict[Unit, ClassRefs] = {**code_scan.classes, **tests_scan.classes}
         # Inert code — the JDK and the test harness — is a fixed boundary, not a
@@ -245,11 +279,21 @@ class JavaProvider:
             edges_by_unit.setdefault(top, {top}).add(unit)
         test_edges = {t: frozenset(e) for t, e in edges_by_unit.items()}
 
+        # A class named as text somewhere on the classpath can be instantiated
+        # by a loader that appears in no closure — a platform factory reading a
+        # service file, a container reading a manifest. Enumerating every such
+        # loader is unbounded; recognizing the targets is not, so we invert it
+        # and let the core fail open when one of *these* changes.
+        named = {
+            n.replace(".", "/")
+            for n in tests_scan.resource_names | code_scan.resource_names
+        }
         return ProviderView(
             code_deps=code_deps,
             test_edges=test_edges,
             dynamic_units=frozenset(dynamic),
             uncovered=frozenset(tests_scan.unreadable | code_scan.unreadable),
+            name_addressed=frozenset(named & universe.keys()),
             binding_unit="class",
         )
 

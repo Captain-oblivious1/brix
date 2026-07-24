@@ -226,6 +226,45 @@ its class closure does not cover:
 | A reference resolving to nothing scanned (and not JDK) | same — an un-supplied library might reflect back into the code under test |
 | `@MethodSource` / `@FieldSource` naming code by string | resolved against the scanned universe: a real edge when it resolves, dynamic when it does not |
 | Test class not statically discoverable (`@Nested`, inherited tests) | grouped to the top-level unit; "carries tests" closed down the subtype graph |
+| **A unit named as *text* in a classpath resource** (`META-INF/services`, `spring.factories`, an XML bean definition) | `ProviderView.name_addressed` + the `config-named-unit-changed` fail-open — see below |
+
+### What the audit method found
+
+Working down from route 2 exposed a gap neither existing rule covers. Both of
+them key on the **reader**: mark the class that *performs* the loading, then run
+the tests that reach it. That fails whenever the reader is not in any closure —
+a platform factory (`DriverManager`, an XML factory, `Charset`) consulting
+`META-INF/services`, or, worse, **the harness itself**, which direction
+deliberately excludes. A JUnit extension registered only in a service file is
+loaded by the launcher, changes what every test observes, and is named in no
+bytecode anywhere. Both rules miss it, by construction.
+
+Enumerating every such loader is unbounded — it is every JDK and framework entry
+point that consults configuration, and the list grows with every library. So
+**invert it and key on the target instead**, which is bounded and mechanical:
+harvest dotted names out of the non-class files on the classpath, keep those
+that match a scanned unit, and fail open when the change set touches that set's
+closure. The closure matters — once a class can be loaded from anywhere, so can
+everything it depends on.
+
+The economics are the point. `dynamic_units` is a property of the *reader* and
+costs the tests reaching it on **every** build; `name_addressed` is a property of
+the *target* and costs **nothing until it changes**. A plugin registry that sits
+still is free.
+
+Proven in `tests/test_testimpact_java_oracle.py` against a real JUnit run: a
+service-registered `BeforeEachCallback` that no test references. With the rule
+disabled the oracle reports `UNDER-SELECTION editing com/acme/Stamp: the full
+run fails ['com/acme/StampTest'] but selection ran []`.
+
+**Audit status: obligation 2 has a known answer; obligation 1 is still open.**
+The JDK entry points that load a caller-named class are still an enumerated
+list (`jvmabi._REFLECTIVE_METHODS`) rather than a derived one — `name_addressed`
+covers the configuration-driven case, but a *caller-named* load through an
+unlisted JDK method would still be missed. Deriving that list mechanically —
+e.g. reachability to `ClassLoader.defineClass` within `java.base` — is the
+remaining work, and needs method-level reachability, which the class-level
+graph cannot express.
 
 **The third was found by argument, not by method** — it was noticed while
 reasoning about direction, not produced by any systematic enumeration. Left
@@ -260,15 +299,23 @@ Reordered from the first draft: the first Opus increment is *the generic core +
 provider interface + oracle*, and Java and C++ arrive as the first two providers
 — not "build a Java feature, then generalize."
 
-## The Fable slice (handed off 2026-07-23)
+## The remaining slices
 
-**Ordering changed from the original plan, deliberately: the audit comes first.**
-The `@MethodSource` hole showed the graph can be missing edges we have no method
-for finding, and there is no value in making the bookkeeping airtight around an
-incomplete graph. C++ is also held until the audit lands, so its provider
-inherits whatever the audit concludes rather than repeating the same mistakes in
-a second language — that is Duane's explicit reason for handing off at this
-point rather than after C++.
+*(Originally reserved for Fable. Fable is no longer available (2026-07-23), so
+this is Opus work — but the **ordering stands on its own merits** and is not a
+consequence of who is doing it: sealing cache bookkeeping around a dependency
+graph not yet known to be complete buys nothing. C++ likewise stays unstarted
+until the audit lands, so its provider inherits the conclusions instead of
+repeating the same gaps in a second language.*
+
+*What the reservation was really buying was **more care than a normal pass**.
+Substituting a stronger method for a stronger reviewer: slice 1 derives its
+answer downward from how the JVM can load a class **at all** — a closed set —
+rather than upward from remembered tricks, which is exactly how the
+`@MethodSource` hole came to be missed; and slice 2 gets a mechanical
+cache-equivalence oracle rather than a review pass, which is the better defence
+against a silent stale pass anyway. `/code-review ultra` is available as a
+scrutiny gate, but only Duane can trigger it.)*
 
 ### Slice 1 — escape-completeness audit (Java)
 
@@ -277,6 +324,24 @@ on code outside its static class closure, and argue the enumeration is *closed* 
 not "here are some more cases," but a structural argument for why there are no
 others. Use the direction lens above: the runner above the test is not a source;
 anything at or below it is.
+
+**The method — work down from class loading, not up from tricks.** A class can
+enter a running JVM by exactly two routes (JVMS 5.3): *resolution* of a symbolic
+reference from some constant pool, or an *explicit loading call*
+(`ClassLoader.defineClass` and everything funnelling into it — `Class.forName`,
+reflection, `ServiceLoader`, `Proxy`, `MethodHandles.Lookup`, JNI `DefineClass`,
+an instrumentation agent). There is no third route. Route 1 *is* the closure.
+So the enumeration closes if, and only if, two things hold for route 2:
+
+1. every JDK entry point that loads a class **named by its caller** is in the
+   detection vocabulary; and
+2. the class making that call is always *inside* the closure — otherwise it is
+   the harness, which sits above the test and is handled by direction.
+
+Every framework trick (Spring's scan, JUnit's extension discovery, cglib
+generation) *must* bottom out in route 2 — there is no other door — so a
+framework class doing the loading is itself in the closure and already marked
+dynamic. That reduces an open-ended hunt to two checkable obligations.
 
 Candidates to confirm or dismiss, none of them yet verified — this list is a
 starting point, **not** a scope boundary:

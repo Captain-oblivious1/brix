@@ -54,6 +54,13 @@ class ProviderView:
       their real dependencies are not statically knowable.
     * ``uncovered`` — units the provider could not analyze (a coverage gap in
       the graph); non-empty forces a full run.
+    * ``name_addressed`` — units reachable **by name from configuration**
+      (a service file, a plugin manifest, an XML bean definition). Whoever
+      loads them may be code we never see, so no test can be proven unaffected
+      by a change to one: if one *changes*, everything runs. Note the asymmetry
+      with ``dynamic_units`` — that is a property of the *reader* and costs the
+      tests reaching it on every build; this is a property of the *target* and
+      costs nothing until it actually changes.
     * ``binding_unit`` — a label for diagnostics (e.g. ``"class"``, ``"object
       file"``).
     """
@@ -62,6 +69,7 @@ class ProviderView:
     test_edges: Mapping[TestUnit, frozenset[Unit]]
     dynamic_units: frozenset[Unit] = frozenset()
     uncovered: frozenset[Unit] = frozenset()
+    name_addressed: frozenset[Unit] = frozenset()
     binding_unit: str = "unit"
 
     @property
@@ -118,6 +126,22 @@ def _incomplete_graph(inp: SelectionInput) -> bool:
     return bool(inp.view.uncovered)
 
 
+def _config_named_reach(inp: SelectionInput) -> set[Unit]:
+    # Not just the named unit: once it can be loaded from anywhere, so can
+    # everything it depends on, so the trigger covers its whole closure.
+    return _reachable(inp.view.name_addressed, inp.view.code_deps)
+
+
+def _config_named_unit_changed(inp: SelectionInput) -> bool:
+    # A unit named by *text* in configuration can be loaded by machinery that
+    # never appears in any closure — a platform factory reading a service file,
+    # a container reading a manifest. Enumerating every such loader is an
+    # unbounded problem; recognizing the *targets* is a bounded one, so we
+    # invert it. Only fires when that closure is among the changes, so an
+    # unchanged plugin registry costs nothing.
+    return bool(inp.changed & _config_named_reach(inp))
+
+
 def _prior_failure(inp: SelectionInput) -> bool:
     # A failed run has unfinished work regardless of what changed since; rerun
     # everything until green (mirrors affected.py's recovery stance).
@@ -134,6 +158,14 @@ DEFAULT_TRIGGERS: tuple[Trigger, ...] = (
         "incomplete-graph",
         _incomplete_graph,
         lambda i: f"provider could not analyze: {sorted(i.view.uncovered)}",
+    ),
+    Trigger(
+        "config-named-unit-changed",
+        _config_named_unit_changed,
+        lambda i: (
+            "changed units are reachable from configuration by name, so code we "
+            f"cannot see may load them: {sorted(i.changed & _config_named_reach(i))}"
+        ),
     ),
     Trigger(
         "prior-failure",

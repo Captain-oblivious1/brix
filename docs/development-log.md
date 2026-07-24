@@ -1,5 +1,41 @@
 # Development log
 
+- **Escape-completeness audit (Java), part 1: the name-addressed fail-open.**
+  First result of doing the audit *by method* instead of by recall. The method:
+  a class enters a running JVM by exactly two routes (JVMS 5.3) — resolution of
+  a constant-pool reference, or an explicit loading call — so the enumeration
+  closes iff every caller-named JDK loading entry point is in the detection
+  vocabulary **and** the class making the call is inside the closure. Working
+  that second obligation found a gap both existing rules miss **by
+  construction**: both key on the *reader* (mark whoever performs the load, run
+  the tests reaching it), which fails when the reader is in no closure — a
+  platform factory consulting `META-INF/services`, or **the harness itself**,
+  which the direction rule deliberately excludes. A JUnit extension registered
+  only in a service file is loaded by the launcher, changes what every test
+  observes, and is named in no bytecode anywhere. Enumerating such loaders is
+  unbounded (every JDK/framework entry point that reads configuration), so the
+  fix **inverts it and keys on the target**, which is bounded: harvest dotted
+  names from non-class classpath resources, keep those matching a scanned unit
+  (`ProviderView.name_addressed`), and fail open when the change set touches
+  that set's **closure** — once a class is loadable from anywhere, so is
+  everything it depends on. The economics are what make it affordable:
+  `dynamic_units` is a property of the reader and costs the tests reaching it on
+  *every* build, while `name_addressed` is a property of the target and costs
+  **nothing until it changes** — an untouched plugin registry is free. Proven in
+  the real-JUnit oracle with a service-registered `BeforeEachCallback` no test
+  references; teeth verified — with the rule disabled it reports
+  `UNDER-SELECTION editing com/acme/Stamp: the full run fails
+  ['com/acme/StampTest'] but selection ran []`. (Two dead ends worth recording:
+  `ToolProvider.findFirst` pins the *system* class loader, which the console
+  launcher's own loader shadows, so it cannot demonstrate this under brix's
+  real `java -jar` invocation; and a monkeypatched `DEFAULT_TRIGGERS` does
+  nothing, because `select_tests` binds it as a default argument at definition
+  time — the first teeth-check passed spuriously until the wrapper was used
+  instead.) **Still open: obligation 1** — the JDK caller-named loading list is
+  enumerated, not derived; deriving it needs method-level reachability to
+  `ClassLoader.defineClass`, which the class-level graph cannot express.
+  599 passed.
+
 - **Test-impact selection: direction fixes the harness question, and closes a real
   under-selection hole.** Duane's observation reframed the JUnit problem entirely:
   the runner reflects *once*, at the entry, to find a class **whose name brix
