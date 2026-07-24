@@ -225,6 +225,15 @@ class JavaProvider:
     silently ignored, it makes its referrers dynamic (they always run), so an
     incomplete classpath costs speed, never correctness.
 
+    ``resource_roots`` are directories of test *data* the suite reads
+    (`JUnitTestAction.test_resource_dirs`). They hold no code, but a fixture
+    file can name a class, so they are scanned for names like any other
+    resource. ``runtime_values`` are the values the suite actually runs with —
+    system properties, environment values, command-line arguments — because a
+    setting like ``-Djavax.xml.parsers.DocumentBuilderFactory=com.acme.MyFactory``
+    names a class that platform code will then load. Both feed
+    `ProviderView.name_addressed`.
+
     ``harness_roots`` are the artifacts brix launches the suite *with* — for
     `JUnitTestAction`, its ``console_jar``. This is a **role, not a
     reputation**: the designation attaches to whatever artifact occupies the
@@ -237,12 +246,15 @@ class JavaProvider:
     test_roots: Sequence[str | Path]
     classpath: Sequence[str | Path] = ()
     harness_roots: Sequence[str | Path] = ()
+    resource_roots: Sequence[str | Path] = ()
+    runtime_values: Sequence[str] = ()
     platform_prefixes: tuple[str, ...] = PLATFORM_PREFIXES
     test_annotations: frozenset[str] = TEST_ANNOTATIONS
 
     def view(self) -> ProviderView:
         tests_scan = scan_classes(self.test_roots, resources=True)
         code_scan = scan_classes(self.classpath, resources=True)
+        data_scan = scan_classes(self.resource_roots, resources=True)
         harness = frozenset(scan_classes(self.harness_roots).classes)
         scanned: dict[Unit, ClassRefs] = {**code_scan.classes, **tests_scan.classes}
         # Inert code — the JDK and the test harness — is a fixed boundary, not a
@@ -279,23 +291,43 @@ class JavaProvider:
             edges_by_unit.setdefault(top, {top}).add(unit)
         test_edges = {t: frozenset(e) for t, e in edges_by_unit.items()}
 
-        # A class named as text somewhere on the classpath can be instantiated
-        # by a loader that appears in no closure — a platform factory reading a
-        # service file, a container reading a manifest. Enumerating every such
-        # loader is unbounded; recognizing the targets is not, so we invert it
-        # and let the core fail open when one of *these* changes.
+        # A class named as text — on the classpath, in test data, or in the
+        # settings the suite runs with — can be instantiated by a loader that
+        # appears in no closure. Enumerating every such loader is unbounded;
+        # enumerating where a *name* can come from is not, so we invert it and
+        # let the core fail open when one of these changes. The name sources
+        # are: our own code (already the closure), configuration (here), and
+        # runtime input (also here). What remains beyond them is a name
+        # assembled at run time from data brix never sees — see the design
+        # note's residual.
         named = {
             n.replace(".", "/")
-            for n in tests_scan.resource_names | code_scan.resource_names
+            for n in (
+                tests_scan.resource_names
+                | code_scan.resource_names
+                | data_scan.resource_names
+                | self._runtime_names()
+            )
         }
         return ProviderView(
             code_deps=code_deps,
             test_edges=test_edges,
             dynamic_units=frozenset(dynamic),
-            uncovered=frozenset(tests_scan.unreadable | code_scan.unreadable),
+            uncovered=frozenset(
+                tests_scan.unreadable | code_scan.unreadable | data_scan.unreadable
+            ),
             name_addressed=frozenset(named & universe.keys()),
             binding_unit="class",
         )
+
+    def _runtime_names(self) -> set[str]:
+        """Dotted names in the values the suite runs with. A JVM setting such as
+        `-Djava.util.logging.config.class=com.acme.LogSetup` hands platform code
+        the name of one of our classes without any file or bytecode saying so."""
+        found: set[str] = set()
+        for value in self.runtime_values:
+            found.update(_NAME_IN_RESOURCE.findall(str(value)))
+        return found
 
     def _inert(self, name: Unit, harness: frozenset[Unit]) -> bool:
         """Code that is a fixed boundary rather than a unit: the JDK, and the

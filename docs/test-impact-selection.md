@@ -257,14 +257,60 @@ service-registered `BeforeEachCallback` that no test references. With the rule
 disabled the oracle reports `UNDER-SELECTION editing com/acme/Stamp: the full
 run fails ['com/acme/StampTest'] but selection ran []`.
 
-**Audit status: obligation 2 has a known answer; obligation 1 is still open.**
-The JDK entry points that load a caller-named class are still an enumerated
-list (`jvmabi._REFLECTIVE_METHODS`) rather than a derived one — `name_addressed`
-covers the configuration-driven case, but a *caller-named* load through an
-unlisted JDK method would still be missed. Deriving that list mechanically —
-e.g. reachability to `ClassLoader.defineClass` within `java.base` — is the
-remaining work, and needs method-level reachability, which the class-level
-graph cannot express.
+### Obligation 1, restated — and why the call-graph version was a trap
+
+The first framing was "enumerate every JDK entry point that can load a class,"
+to be derived by reachability to `ClassLoader.defineClass` inside `java.base`.
+**That is unbuildable and would be useless if built.** Soundness demands
+over-approximating virtual dispatch — any call to an overridable method could
+land on any override — and under that assumption nearly everything in the JDK
+transitively reaches a class loader. The derived answer would be "almost every
+JDK method can load a class," every test would go dynamic, and selection would
+die. Precisely the failure shape as the JUnit launcher: an analysis so cautious
+it conveys nothing.
+
+The obligation was **stated wrong**. The question is not whether a JDK method
+can load *a* class; it is whether it can load **one of our units** — and for
+that, the JDK must first *obtain the name*. Enumerating name **sources** is
+bounded where enumerating loaders never was:
+
+| Where a name can come from | Handling |
+|---|---|
+| Our own code — a `Class` literal or a string in our bytecode | the closure itself (a `Class` literal is a `CONSTANT_Class`); a class computing names reflectively is already dynamic |
+| Configuration shipped with the code — service files, manifests, XML | `name_addressed`, via the classpath resource scan |
+| Test **data** — a fixture file naming a class | `name_addressed`, via `resource_roots` |
+| **Runtime input** — a JVM system property, an environment value, a command-line argument | `name_addressed`, via `runtime_values` |
+
+All four are now handled, and all four are proven against a real JUnit run.
+The property case in particular is not hypothetical:
+`-Djavax.xml.parsers.DocumentBuilderFactory=com.acme.MyFactory` causes the
+platform's factory finder to instantiate one of our classes with **no file and
+no bytecode naming it anywhere**; with `runtime_values` unscanned the oracle
+reports `UNDER-SELECTION editing com/acme/MyFactory: the full run fails
+['com/acme/XmlTest'] but selection ran []`.
+
+### The residual, stated plainly
+
+**A name assembled at run time out of data brix never sees** — read from a
+database, fetched over the network, computed from the clock — is not detectable
+by any static means. No amount of scanning closes it, and it is recorded as a
+known limit rather than papered over. The mitigation that *does* exist is
+already in place: the class performing such a load is calling a reflective API,
+so it is marked dynamic and every test reaching it runs unconditionally. The
+residual is therefore narrow — it requires a loader that is reflective (so,
+dynamic, so covered) yet reached by no test, which for a class that actually
+affects a test's outcome is close to a contradiction. Increment 2's dynamic
+coverage is the only thing that would close it fully.
+
+**Two invocation-dependent findings**, both worth knowing before anything
+changes how brix launches tests: `ToolProvider.findFirst` and
+`java.util.logging`'s `config.class` both resolve through the **system** class
+loader, which brix's `java -jar console.jar --class-path …` invocation leaves
+empty of application classes — so that whole family of name-based loading cannot
+reach user code today. Consumers going through the *context* class loader (the
+XML factory finder above) do reach it. Switching to `java -cp … ConsoleLauncher`
+would widen the exposure; the `runtime_values` scan is correct either way, which
+is why it is not conditioned on the invocation.
 
 **The third was found by argument, not by method** — it was noticed while
 reasoning about direction, not produced by any systematic enumeration. Left

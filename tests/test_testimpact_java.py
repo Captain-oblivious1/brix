@@ -575,6 +575,84 @@ def test_a_class_named_in_a_service_file_fails_open(tmp_path):
 
 
 @needs_jdk
+def test_a_class_named_in_test_data_fails_open(tmp_path):
+    """Test fixtures are data, but a fixture can name a class — and then the
+    same platform machinery loads it. Scanning only code and libraries would
+    miss it."""
+    runner = compile_java(tmp_path, STUB_JUPITER, out="runner")
+    code = compile_java(
+        tmp_path,
+        {**WORLD, "com/acme/Plug.java": "package com.acme; public class Plug {}"},
+    )
+    data = tmp_path / "test-resources"
+    data.mkdir()
+    (data / "fixture.properties").write_text("handler=com.acme.Plug\n")
+    tests = compile_java(
+        tmp_path,
+        {
+            "com/acme/CTest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                public class CTest { @Test void t() { C.v(); } }
+            """,
+        },
+        out="tests",
+        classpath=[code, runner],
+    )
+    blind = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[runner])
+    assert blind.view().name_addressed == frozenset()  # data dir not scanned
+
+    seeing = JavaProvider(
+        test_roots=[tests],
+        classpath=[code],
+        harness_roots=[runner],
+        resource_roots=[data],
+    )
+    assert seeing.view().name_addressed == {"com/acme/Plug"}
+    assert _select(seeing, {"com/acme/Plug"}).run_all
+
+
+@needs_jdk
+def test_a_class_named_by_a_runtime_setting_fails_open(tmp_path):
+    """`-Djava.util.logging.config.class=com.acme.LogSetup` hands platform code
+    the name of one of our classes with no file and no bytecode saying so."""
+    runner = compile_java(tmp_path, STUB_JUPITER, out="runner")
+    code = compile_java(
+        tmp_path,
+        {**WORLD, "com/acme/LogSetup.java": "package com.acme; public class LogSetup {}"},
+    )
+    tests = compile_java(
+        tmp_path,
+        {
+            "com/acme/CTest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                public class CTest { @Test void t() { C.v(); } }
+            """,
+        },
+        out="tests",
+        classpath=[code, runner],
+    )
+    provider = JavaProvider(
+        test_roots=[tests],
+        classpath=[code],
+        harness_roots=[runner],
+        runtime_values=["-Djava.util.logging.config.class=com.acme.LogSetup"],
+    )
+    assert provider.view().name_addressed == {"com/acme/LogSetup"}
+    assert _select(provider, {"com/acme/LogSetup"}).run_all
+    # Unrelated settings are inert — the membership test does the filtering.
+    noisy = JavaProvider(
+        test_roots=[tests],
+        classpath=[code],
+        harness_roots=[runner],
+        runtime_values=["-Xmx2g", "PATH=/usr/bin:/bin", "-Dfoo.bar=baz.qux"],
+    )
+    assert noisy.view().name_addressed == frozenset()
+    assert _select(noisy, {"com/acme/C"}).tests == {"com/acme/CTest"}
+
+
+@needs_jdk
 def test_inherited_tests_are_discovered(tmp_path):
     """`class FooTest extends AbstractContractTest` declares no annotation of
     its own; JUnit still runs it. Missing this would silently skip a real

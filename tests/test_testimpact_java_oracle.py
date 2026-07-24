@@ -50,7 +50,9 @@ needs_junit = pytest.mark.skipif(
 
 # A/B/C with a real dependency edge (B calls A) and one assertion per class, so
 # a changed return value actually turns a test red.
-def _sources(a_value: int, b_bonus: int, c_value: int, p_value: int, tool_value: int) -> dict:
+def _sources(
+    a_value: int, b_bonus: int, c_value: int, p_value: int, tool_value: int, xml_value: int
+) -> dict:
     return {
         "com/acme/A.java": f"package com.acme; public class A {{ public static int v() {{ return {a_value}; }} }}",
         "com/acme/B.java": f"package com.acme; public class B {{ public static int v() {{ return A.v() + {b_bonus}; }} }}",
@@ -79,7 +81,27 @@ def _sources(a_value: int, b_bonus: int, c_value: int, p_value: int, tool_value:
                 }}
             }}
         """,
+        # Named ONLY by a JVM system property on the run command. No file and
+        # no bytecode mentions it; the platform's factory finder loads it.
+        "com/acme/MyFactory.java": f"""
+            package com.acme;
+            import javax.xml.parsers.DocumentBuilder;
+            import javax.xml.parsers.DocumentBuilderFactory;
+            public class MyFactory extends DocumentBuilderFactory {{
+                public MyFactory() {{ System.setProperty("xmlstamp", "{xml_value}"); }}
+                public DocumentBuilder newDocumentBuilder() {{ return null; }}
+                public void setAttribute(String n, Object v) {{}}
+                public Object getAttribute(String n) {{ return null; }}
+                public void setFeature(String n, boolean v) {{}}
+                public boolean getFeature(String n) {{ return false; }}
+            }}
+        """,
     }
+
+
+# The setting that names `MyFactory`. Passed to the JVM, and handed to the
+# provider as `runtime_values` — the third and last source a name can come from.
+XML_PROPERTY = "-Djavax.xml.parsers.DocumentBuilderFactory=com.acme.MyFactory"
 
 
 TESTS = {
@@ -124,9 +146,25 @@ TESTS = {
             @Test void v() { assertEquals("7", System.getProperty("stamp")); }
         }
     """,
+    # Observes what the property-named factory did. References only platform
+    # types; nothing connects this test to `MyFactory`.
+    "com/acme/XmlTest.java": """
+        package com.acme;
+        import javax.xml.parsers.DocumentBuilderFactory;
+        import org.junit.jupiter.api.Test;
+        import static org.junit.jupiter.api.Assertions.assertEquals;
+        public class XmlTest {
+            @Test void v() {
+                DocumentBuilderFactory.newInstance();
+                assertEquals("7", System.getProperty("xmlstamp"));
+            }
+        }
+    """,
 }
 
-BASELINE = dict(a_value=1, b_bonus=1, c_value=9, p_value=3, tool_value=7)  # all green
+BASELINE = dict(  # all green
+    a_value=1, b_bonus=1, c_value=9, p_value=3, tool_value=7, xml_value=7
+)
 
 
 def _run(tests_dir, code_dir, select_args) -> bool:
@@ -134,6 +172,7 @@ def _run(tests_dir, code_dir, select_args) -> bool:
     proc = subprocess.run(
         [
             "java",
+            XML_PROPERTY,
             "-jar",
             str(CONSOLE_JAR),
             "execute",
@@ -187,6 +226,7 @@ def test_baseline_is_green(suite):
         "com/acme/CTest",
         "com/acme/ParamTest",
         "com/acme/StampTest",
+        "com/acme/XmlTest",
     }
     assert _verdicts(tests, code, units) == set()
 
@@ -207,11 +247,19 @@ def test_baseline_is_green(suite):
         # and its loader is the harness — which direction deliberately
         # excludes. Only the name-addressed fail-open catches this one.
         ("com/acme/Stamp", dict(tool_value=8)),
+        # Named only by a JVM setting — the third name source. Caught only
+        # because `runtime_values` is scanned.
+        ("com/acme/MyFactory", dict(xml_value=8)),
     ],
 )
 def test_selected_run_matches_the_full_run(suite, unit, edit):
     tmp_path, code, tests = suite
-    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[CONSOLE_JAR])
+    provider = JavaProvider(
+        test_roots=[tests],
+        classpath=[code],
+        harness_roots=[CONSOLE_JAR],
+        runtime_values=[XML_PROPERTY],
+    )
     view = provider.view()
     known = frozenset(view.code_deps) | frozenset(view.test_edges)
     selection = select_tests(SelectionInput(view, frozenset({unit}), known))
@@ -237,7 +285,12 @@ def test_selection_actually_skips_work(suite):
     """The other half of the deal: equivalence is trivial if we always run
     everything. Editing C must leave A's and B's tests unselected."""
     tmp_path, code, tests = suite
-    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[CONSOLE_JAR])
+    provider = JavaProvider(
+        test_roots=[tests],
+        classpath=[code],
+        harness_roots=[CONSOLE_JAR],
+        runtime_values=[XML_PROPERTY],
+    )
     view = provider.view()
     known = frozenset(view.code_deps) | frozenset(view.test_edges)
     selection = select_tests(SelectionInput(view, frozenset({"com/acme/C"}), known))

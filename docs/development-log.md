@@ -1,5 +1,43 @@
 # Development log
 
+- **Escape-completeness audit (Java), part 2: all four name sources closed.**
+  The first framing of obligation 1 — derive the JDK's class-loading entry
+  points by reachability to `ClassLoader.defineClass` — was **withdrawn as a
+  trap**. Soundness requires over-approximating virtual dispatch, under which
+  nearly everything in the JDK reaches a class loader; the derived answer would
+  be "almost every JDK method can load a class", every test would go dynamic,
+  and selection would die — the same failure shape as the JUnit launcher, an
+  analysis so cautious it conveys nothing. The obligation was stated wrong. The
+  question is not whether a JDK method can load *a* class but whether it can
+  load **one of our units**, and for that the JDK must first *obtain the name*.
+  Enumerating name **sources** is bounded where enumerating loaders never was,
+  and there are exactly four: our own code (the closure — a `Class` literal is a
+  `CONSTANT_Class`, and a class computing names reflectively is already
+  dynamic), configuration shipped with the code (classpath resource scan),
+  **test data** (new: `resource_roots`, since a fixture can name a class and
+  only code and libraries were being scanned), and **runtime input** (new:
+  `runtime_values` — a JVM system property, env value or CLI argument). All four
+  now feed `name_addressed`; all four are proven against a real JUnit run.
+  The property case is not hypothetical: `-Djavax.xml.parsers.DocumentBuilder
+  Factory=com.acme.MyFactory` makes the platform's factory finder instantiate
+  one of our classes with **no file and no bytecode naming it anywhere**; teeth
+  verified — blinded to `runtime_values` the oracle reports `UNDER-SELECTION
+  editing com/acme/MyFactory: the full run fails ['com/acme/XmlTest'] but
+  selection ran []`. **Residual, stated rather than papered over:** a name
+  assembled at run time from data brix never sees (a database row, a network
+  response) is undetectable statically; the existing mitigation is that such a
+  loader is calling a reflective API and is therefore already dynamic, which
+  makes the residual require a loader that is reflective yet reached by no test
+  — near-contradictory for one that actually affects a verdict. Increment 2
+  closes it fully. **Two invocation-dependent findings** worth knowing before
+  anything changes how brix launches tests: `ToolProvider.findFirst` and
+  `java.util.logging`'s `config.class` both resolve via the **system** class
+  loader, which brix's `java -jar console.jar --class-path …` leaves empty of
+  application classes, so that family cannot reach user code today; context-class
+  loader consumers (the XML factory finder) do. Moving to `java -cp …
+  ConsoleLauncher` would widen exposure — the scan is deliberately not
+  conditioned on the invocation. 602 passed.
+
 - **Escape-completeness audit (Java), part 1: the name-addressed fail-open.**
   First result of doing the audit *by method* instead of by recall. The method:
   a class enters a running JVM by exactly two routes (JVMS 5.3) — resolution of
