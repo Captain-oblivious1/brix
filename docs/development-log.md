@@ -1,5 +1,39 @@
 # Development log
 
+- **Test-impact selection: direction fixes the harness question, and closes a real
+  under-selection hole.** Duane's observation reframed the JUnit problem entirely:
+  the runner reflects *once*, at the entry, to find a class **whose name brix
+  supplied on the command line** — it is the test's *caller*, sitting above it,
+  and everything the test does from there is ordinary static Java. So the
+  launcher's internals were never a dependency of the test. The earlier reading
+  ("should JUnit get an exemption from the safety rule?") was the wrong question;
+  the reference walk was simply wandering upstream — from `Assertions` through a
+  shared utility into the launcher — following *reference* edges that are not
+  *call* edges, and then treating what it found as unknowable. Excluding the
+  harness is a bug fix, not a carve-out. Mechanically that made the fix better
+  too: `HARNESS_PREFIXES` (package-name matching, which anyone can claim — the
+  same weakness Duane had just rejected in version numbers) is replaced by
+  `harness_roots`, the **artifact** brix launched the suite with. A **role, not a
+  reputation**: the designation follows whatever occupies the runner slot in a
+  command brix generated. Withhold it and the same bytes are ordinary code whose
+  reflection makes every test always-run — safe and useless, the correct
+  direction to fail. Pinned by a test asserting both halves on identical
+  bytecode. **The same reframing said where to actually look — at or below the
+  test class — and that turned up a genuine hole:** `@MethodSource("com.acme.
+  Providers#args")` makes a test's verdict depend on a class its bytecode never
+  references, so the class closure would silently skip it. Now resolved —
+  `STRING_CODE_ANNOTATIONS` + a well-formed-name match over the constant pool
+  (annotation string values live in raw Utf8, not CONSTANT_String) — becoming a
+  real edge when the named class resolves, and marking the test dynamic when it
+  does not. The **real-JUnit oracle now covers it end to end**: a parameterized
+  test whose provider is named only by a string, edited for real. Teeth verified —
+  with the resolution disabled the oracle reports `UNDER-SELECTION editing
+  com/acme/Providers: the full run fails ['com/acme/ParamTest'] but selection ran
+  []`, i.e. exactly the false pass the invariant forbids. Still open and now
+  higher priority: the escape list is demonstrably **not** proven complete —
+  this one was found by argument, not by method — so the completeness audit
+  should go to Fable *before* the fingerprint/cache wiring, not alongside it.
+
 - **Test-impact selection, increment 1b: the Java provider, proven against real
   JUnit.** The first real provider behind `testimpact.Provider`, at Java's coarse
   binding unit — the class. `jvmabi.class_refs` reuses the existing class-file

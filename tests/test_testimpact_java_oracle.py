@@ -50,11 +50,20 @@ needs_junit = pytest.mark.skipif(
 
 # A/B/C with a real dependency edge (B calls A) and one assertion per class, so
 # a changed return value actually turns a test red.
-def _sources(a_value: int, b_bonus: int, c_value: int) -> dict:
+def _sources(a_value: int, b_bonus: int, c_value: int, p_value: int) -> dict:
     return {
         "com/acme/A.java": f"package com.acme; public class A {{ public static int v() {{ return {a_value}; }} }}",
         "com/acme/B.java": f"package com.acme; public class B {{ public static int v() {{ return A.v() + {b_bonus}; }} }}",
         "com/acme/C.java": f"package com.acme; public class C {{ public static int v() {{ return {c_value}; }} }}",
+        # Reached only by the string in ParamTest's @MethodSource annotation —
+        # nothing in any test's bytecode references this class.
+        "com/acme/Providers.java": f"""
+            package com.acme;
+            import java.util.stream.Stream;
+            public class Providers {{
+                static Stream<Integer> args() {{ return Stream.of({p_value}); }}
+            }}
+        """,
     }
 
 
@@ -77,9 +86,22 @@ TESTS = {
         import static org.junit.jupiter.api.Assertions.assertEquals;
         public class CTest { @Test void v() { assertEquals(9, C.v()); } }
     """,
+    # The escape: this test's data comes from a class named only by a string.
+    # Its compiled bytecode contains no reference to `Providers` at all.
+    "com/acme/ParamTest.java": """
+        package com.acme;
+        import org.junit.jupiter.params.ParameterizedTest;
+        import org.junit.jupiter.params.provider.MethodSource;
+        import static org.junit.jupiter.api.Assertions.assertEquals;
+        public class ParamTest {
+            @ParameterizedTest
+            @MethodSource("com.acme.Providers#args")
+            void v(int given) { assertEquals(3, given); }
+        }
+    """,
 }
 
-BASELINE = dict(a_value=1, b_bonus=1, c_value=9)  # all green
+BASELINE = dict(a_value=1, b_bonus=1, c_value=9, p_value=3)  # all green
 
 
 def _run(tests_dir, code_dir, select_args) -> bool:
@@ -128,7 +150,7 @@ def test_baseline_is_green(suite):
     """Guard the oracle itself: if the baseline is not green, a later
     'no failures' result would prove nothing."""
     tmp_path, code, tests = suite
-    units = {"com/acme/ATest", "com/acme/BTest", "com/acme/CTest"}
+    units = {"com/acme/ATest", "com/acme/BTest", "com/acme/CTest", "com/acme/ParamTest"}
     assert _verdicts(tests, code, units) == set()
 
 
@@ -141,11 +163,14 @@ def test_baseline_is_green(suite):
         ("com/acme/A", dict(a_value=5)),
         ("com/acme/B", dict(b_bonus=7)),
         ("com/acme/C", dict(c_value=0)),
+        # The string-named data provider. No test's bytecode mentions it, so
+        # the class closure alone would skip ParamTest and report a false pass.
+        ("com/acme/Providers", dict(p_value=4)),
     ],
 )
 def test_selected_run_matches_the_full_run(suite, unit, edit):
     tmp_path, code, tests = suite
-    provider = JavaProvider(test_roots=[tests], classpath=[code, CONSOLE_JAR])
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[CONSOLE_JAR])
     view = provider.view()
     known = frozenset(view.code_deps) | frozenset(view.test_edges)
     selection = select_tests(SelectionInput(view, frozenset({unit}), known))
@@ -171,7 +196,7 @@ def test_selection_actually_skips_work(suite):
     """The other half of the deal: equivalence is trivial if we always run
     everything. Editing C must leave A's and B's tests unselected."""
     tmp_path, code, tests = suite
-    provider = JavaProvider(test_roots=[tests], classpath=[code, CONSOLE_JAR])
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[CONSOLE_JAR])
     view = provider.view()
     known = frozenset(view.code_deps) | frozenset(view.test_edges)
     selection = select_tests(SelectionInput(view, frozenset({"com/acme/C"}), known))

@@ -498,6 +498,10 @@ class ClassRefs:
     * ``reflective`` — the reflective entry points called, as ``owner.member``
       strings; non-empty means this class's real dependencies are unknowable.
     * ``abstract`` — abstract or interface (cannot itself be instantiated).
+    * ``strings`` — every Utf8 constant (annotation string values live there,
+      not in CONSTANT_String). Only interesting where a framework lets an
+      annotation *name code by string* — JUnit's ``@MethodSource`` — so callers
+      that do not need it should drop it; see `testimpact_java`.
     """
 
     name: str
@@ -505,6 +509,7 @@ class ClassRefs:
     refs: frozenset[str]
     reflective: frozenset[str]
     abstract: bool
+    strings: frozenset[str] = frozenset()
 
     @property
     def dynamic(self) -> bool:
@@ -548,6 +553,7 @@ def class_refs(data: bytes) -> ClassRefs:
 
     refs: set[str] = set()
     reflective: set[str] = set()
+    strings: set[str] = set()
     for entry in pool:
         if entry is None:
             continue
@@ -557,10 +563,15 @@ def class_refs(data: bytes) -> ClassRefs:
             if name:
                 refs.add(name)
         elif tag == _UTF8:
+            text = entry[1].decode("utf-8", "replace")
             # Descriptors and generic signatures name types that may have no
             # CONSTANT_Class of their own (e.g. a parameter type never touched
             # in the body) yet must still resolve.
-            refs.update(_TYPE_IN_DESCRIPTOR.findall(entry[1].decode("utf-8", "replace")))
+            refs.update(_TYPE_IN_DESCRIPTOR.findall(text))
+            # Utf8, not CONSTANT_String: an annotation's string-valued element
+            # points straight at a Utf8 (JVMS 4.7.16.1, tag `s`), so the
+            # `@MethodSource("pkg.C#m")` case is only visible here.
+            strings.add(text)
         elif tag in (_METHODREF, _INTERFACE_METHODREF):
             owner = _class_name_text(pool, entry[1])
             member = _text(pool, pool[entry[2]][1])
@@ -575,6 +586,7 @@ def class_refs(data: bytes) -> ClassRefs:
         refs=frozenset(refs),
         reflective=frozenset(reflective),
         abstract=bool(access & ACC_ABSTRACT),
+        strings=frozenset(strings),
     )
 
 

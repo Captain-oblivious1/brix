@@ -23,6 +23,18 @@ reflects back into the code under test, so we must not assume it inert. It
 degrades **locally** — the tests touching that class always run, the rest still
 select — rather than collapsing the whole suite to a full run.
 
+**Direction is what separates a real escape from a phantom one.** The test
+runner reflects to *find* the test — it is the caller, sitting above the test,
+and it loads a name brix itself supplied on the command line. Everything the
+test does from there is ordinary static Java. So the runner's internals were
+never part of what a test depends on; a reference walk that wanders into them
+(via, say, `Assertions` sharing a utility class with the launcher) is following
+reference edges that are not call edges, and treating what it finds there as
+"unknowable" would mark every test dynamic and disable selection permanently.
+`harness_roots` names those artifacts so the walk stops at them. Reflection at
+or *below* the test class — a component scan the test triggers, an annotation
+naming code by string — is a genuine escape and still fails open.
+
 Test units are **top-level** classes, because that is what JUnit's
 `--select-class` addresses: a `@Nested` inner class runs with its enclosing
 class, so the group's references are unioned onto the top-level unit. A class
@@ -34,10 +46,11 @@ a real test.
 
 from __future__ import annotations
 
+import re
 import struct
 import zipfile
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .jvmabi import ClassFormatError, ClassRefs, class_refs
@@ -75,28 +88,25 @@ PLATFORM_PREFIXES: tuple[str, ...] = (
     "org/xml/sax/",
 )
 
-# The test harness itself. JUnit's launcher is wall-to-wall reflection, and it
-# is in the closure of *every* test — so treating it as ordinary code marks
-# every test dynamic and collapses selection to a full run, always. It is
-# excluded on a narrower ground than "frameworks are fine":
-#
-#   * brix builds the run command, so it knows the launcher is invoked with
-#     `--select-class`, under which the classes it reflects on are exactly the
-#     ones we selected, plus their annotations — all already in the graph. This
-#     is brix knowing its own tool, the same way it knows javac's semantics; it
-#     is NOT a user vouching that their code is reflection-clean (which the
-#     design rules out — docs/test-impact-selection.md, decision 3).
-#   * The harness jars are a byte-lens input of the run action already, so a
-#     change to *them* invalidates the whole suite a level up.
-#
-# Application frameworks get no such pass: Spring's component scan really does
-# instantiate arbitrary application classes by name, so it stays an ordinary
-# unit, stays dynamic, and its tests always run.
-HARNESS_PREFIXES: tuple[str, ...] = (
-    "org/junit/",
-    "junit/",  # JUnit 3/4 (`junit.framework`), reachable via the vintage engine
-    "org/opentest4j/",
-    "org/apiguardian/",
+# Frameworks whose annotations name code by **string** rather than by a class
+# literal. `@MethodSource("com.acme.Providers#args")` makes a test's result
+# depend on `Providers` with no reference to it anywhere in the bytecode — a
+# genuine hole in the class closure, and one that sits *below* the test rather
+# than above it (unlike the harness, see `harness_roots`). Default: fail open;
+# recover only when every such string resolves to a class we actually scanned.
+STRING_CODE_ANNOTATIONS: frozenset[str] = frozenset(
+    {
+        "org/junit/jupiter/params/provider/MethodSource",
+        "org/junit/jupiter/params/provider/FieldSource",
+    }
+)
+
+# What a string reference to code must look like: `pkg.Class#member`, or a bare
+# member name (which means "in this same class" and is therefore not an escape).
+# A string that is not a well-formed Java name cannot be one of these, so
+# ignoring it loses nothing.
+_STRING_CODE_REF = re.compile(
+    r"^(?P<cls>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)#(?P<member>[\w$]+)"
 )
 
 # Mentioning any of these annotation types means the class declares tests.
@@ -163,6 +173,10 @@ def _absorb(result: ScanResult, label: str, data: bytes) -> None:
     except (ClassFormatError, struct.error, IndexError, TypeError):
         result.unreadable.add(label)  # unknown format -> the graph has a hole
         return
+    if not refs.refs & STRING_CODE_ANNOTATIONS:
+        # Only classes that can name code by string need their string pool kept;
+        # holding every literal on a real classpath would be gratuitous.
+        refs = replace(refs, strings=frozenset())
     result.classes[refs.name] = refs
 
 
@@ -176,31 +190,45 @@ class JavaProvider:
     it the **whole** runtime classpath: a library that is missing here is not
     silently ignored, it makes its referrers dynamic (they always run), so an
     incomplete classpath costs speed, never correctness.
+
+    ``harness_roots`` are the artifacts brix launches the suite *with* — for
+    `JUnitTestAction`, its ``console_jar``. This is a **role, not a
+    reputation**: the designation attaches to whatever artifact occupies the
+    runner slot in a command brix generated, never to a package name (which
+    anyone can claim) or a library brix merely recognizes. Left empty, the
+    runner is treated as ordinary code and its reflection makes every test
+    dynamic — safe, and useless, which is the correct direction to fail.
     """
 
     test_roots: Sequence[str | Path]
     classpath: Sequence[str | Path] = ()
+    harness_roots: Sequence[str | Path] = ()
     platform_prefixes: tuple[str, ...] = PLATFORM_PREFIXES
-    harness_prefixes: tuple[str, ...] = HARNESS_PREFIXES
     test_annotations: frozenset[str] = TEST_ANNOTATIONS
 
     def view(self) -> ProviderView:
         tests_scan = scan_classes(self.test_roots)
         code_scan = scan_classes(self.classpath)
+        harness = frozenset(scan_classes(self.harness_roots).classes)
         scanned: dict[Unit, ClassRefs] = {**code_scan.classes, **tests_scan.classes}
         # Inert code — the JDK and the test harness — is a fixed boundary, not a
-        # unit: it cannot change without invalidating the run a level up, and
-        # keeping it would drag its reflection into every closure.
-        universe = {u: r for u, r in scanned.items() if not self._inert(u)}
+        # unit: it cannot change without invalidating the run a level up, and it
+        # is the test's caller rather than its dependency.
+        universe = {u: r for u, r in scanned.items() if not self._inert(u, harness)}
 
         code_deps: dict[Unit, frozenset[Unit]] = {}
         dynamic: set[Unit] = set()
         for unit, refs in universe.items():
-            code_deps[unit] = frozenset(refs.refs & universe.keys())
+            deps = set(refs.refs & universe.keys())
+            named, unresolved_names = self._string_named_code(refs, universe)
+            deps |= named
+            code_deps[unit] = frozenset(deps)
             unresolved = {
-                r for r in refs.refs if r not in universe and not self._inert(r)
+                r
+                for r in refs.refs
+                if r not in universe and not self._inert(r, harness)
             }
-            if refs.reflective or unresolved:
+            if refs.reflective or unresolved or unresolved_names:
                 dynamic.add(unit)
 
         test_classes = {u: r for u, r in tests_scan.classes.items() if u in universe}
@@ -225,13 +253,39 @@ class JavaProvider:
             binding_unit="class",
         )
 
-    def _inert(self, name: Unit) -> bool:
-        """Code that is a fixed boundary rather than a unit: the JDK and the
-        test harness. Neither can change without invalidating the run through
-        the tool/console-jar fingerprint a level up."""
-        return name.startswith(self.platform_prefixes) or name.startswith(
-            self.harness_prefixes
-        )
+    def _inert(self, name: Unit, harness: frozenset[Unit]) -> bool:
+        """Code that is a fixed boundary rather than a unit: the JDK, and the
+        harness artifacts brix launched the suite with. Neither can change
+        without invalidating the run through the tool / console-jar fingerprint
+        a level up, and the harness is the test's *caller*, not its
+        dependency."""
+        return name in harness or name.startswith(self.platform_prefixes)
+
+    def _string_named_code(
+        self, refs: ClassRefs, universe: dict[Unit, ClassRefs]
+    ) -> tuple[set[Unit], set[str]]:
+        """Resolve annotation values that name code by string, e.g.
+        `@MethodSource("com.acme.Providers#args")`.
+
+        Returns the units such a string resolves to, and the strings it does
+        not. A resolved one becomes a real edge (the test now tracks its data
+        provider); an unresolved one makes the class dynamic, because its
+        result depends on code we cannot locate. Bare member names mean "this
+        same class" and are not an escape."""
+        if not refs.refs & STRING_CODE_ANNOTATIONS:
+            return set(), set()
+        found: set[Unit] = set()
+        missing: set[str] = set()
+        for text in refs.strings:
+            match = _STRING_CODE_REF.match(text)
+            if match is None:
+                continue  # not a well-formed reference, so it cannot be one
+            unit = match.group("cls").replace(".", "/")
+            if unit in universe:
+                found.add(unit)
+            elif not unit.startswith(self.platform_prefixes):
+                missing.add(text)
+        return found, missing
 
     def _test_carriers(
         self, tests: dict[Unit, ClassRefs], universe: dict[Unit, ClassRefs]

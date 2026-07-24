@@ -179,7 +179,7 @@ def world(tmp_path):
         out="tests",
         classpath=[code, jupiter],
     )
-    return JavaProvider(test_roots=[tests], classpath=[code, jupiter])
+    return JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[jupiter])
 
 
 def _select(provider, changed):
@@ -260,7 +260,7 @@ def test_virtual_dispatch_does_not_escape_the_class_closure(tmp_path):
         out="tests",
         classpath=[code, jupiter],
     )
-    provider = JavaProvider(test_roots=[tests], classpath=[code, jupiter])
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[jupiter])
     # ShapeTest never names Square, but Shapes does — so editing the
     # implementation still selects the test.
     sel = _select(provider, {"com/acme/Square"})
@@ -306,7 +306,7 @@ def test_reflective_code_makes_its_tests_always_run(tmp_path):
         out="tests",
         classpath=[code, jupiter],
     )
-    provider = JavaProvider(test_roots=[tests], classpath=[code, jupiter])
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[jupiter])
     view = provider.view()
     assert "com/acme/Registry" in view.dynamic_units
 
@@ -354,16 +354,181 @@ def test_unresolvable_reference_degrades_locally(tmp_path):
         classpath=[code, lib, jupiter],
     )
     # Deliberately omit `lib` from the classpath we hand the provider.
-    provider = JavaProvider(test_roots=[tests], classpath=[code, jupiter])
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[jupiter])
     view = provider.view()
     assert "com/acme/UsesExt" in view.dynamic_units
     sel = _select(provider, {"com/acme/Plain"})
     assert "com/acme/ExtTest" in sel.tests  # always-run, unknowable deps
     assert "com/acme/PlainTest" in sel.tests
     # ...and with `lib` supplied, the same code selects normally again.
-    complete = JavaProvider(test_roots=[tests], classpath=[code, lib, jupiter])
+    complete = JavaProvider(test_roots=[tests], classpath=[code, lib], harness_roots=[jupiter])
     assert "com/acme/UsesExt" not in complete.view().dynamic_units
     assert _select(complete, {"com/acme/Plain"}).tests == {"com/acme/PlainTest"}
+
+
+@needs_jdk
+def test_the_harness_is_a_role_not_a_name(tmp_path):
+    """The runner is the test's *caller*, not its dependency: it reflects to
+    find a class whose name brix supplied. Walking into its internals follows
+    reference edges that are not call edges, and would mark every test dynamic.
+
+    The designation attaches to the artifact brix launched with — pass it and
+    selection works; withhold it and the same bytes are ordinary code, so its
+    reflection makes everything dynamic. Nothing keys off the package name."""
+    runner = compile_java(
+        tmp_path,
+        {
+            **STUB_JUPITER,
+            # A launcher that loads test classes by name, as a real one does.
+            "org/junit/platform/Launcher.java": """
+                package org.junit.platform;
+                public class Launcher {
+                    public static Object load(String n) throws Exception {
+                        return Class.forName(n).getDeclaredConstructor().newInstance();
+                    }
+                }
+                """,
+            # The assertion facade a test legitimately calls into, sharing a
+            # package with the launcher — this is the edge the walk crosses.
+            "org/junit/jupiter/api/Assertions.java": """
+                package org.junit.jupiter.api;
+                public class Assertions {
+                    public static void check(boolean b) {
+                        if (!b) throw new AssertionError(org.junit.platform.Launcher.class.getName());
+                    }
+                }
+                """,
+        },
+        out="runner",
+    )
+    code = compile_java(tmp_path, WORLD)
+    tests = compile_java(
+        tmp_path,
+        {
+            "com/acme/ATest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                import org.junit.jupiter.api.Assertions;
+                public class ATest { @Test void t() { Assertions.check(A.v() == 1); } }
+            """,
+            "com/acme/CTest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                import org.junit.jupiter.api.Assertions;
+                public class CTest { @Test void t() { Assertions.check(C.v() == 9); } }
+            """,
+        },
+        out="tests",
+        classpath=[code, runner],
+    )
+    designated = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[runner])
+    assert _select(designated, {"com/acme/C"}).tests == {"com/acme/CTest"}
+
+    # Same bytes, no designation: the walk reaches the launcher's reflection
+    # through Assertions and every test becomes always-run. Safe, useless.
+    undesignated = JavaProvider(test_roots=[tests], classpath=[code, runner])
+    sel = _select(undesignated, {"com/acme/C"})
+    assert sel.tests == {"com/acme/ATest", "com/acme/CTest"}
+    assert sel.always_run == {"com/acme/ATest", "com/acme/CTest"}
+
+
+STUB_METHOD_SOURCE = {
+    "org/junit/jupiter/params/ParameterizedTest.java": """
+        package org.junit.jupiter.params;
+        import java.lang.annotation.*;
+        @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD)
+        public @interface ParameterizedTest {}
+    """,
+    "org/junit/jupiter/params/provider/MethodSource.java": """
+        package org.junit.jupiter.params.provider;
+        import java.lang.annotation.*;
+        @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD)
+        public @interface MethodSource { String[] value() default {}; }
+    """,
+}
+
+
+@needs_jdk
+def test_a_string_named_data_provider_becomes_a_real_edge(tmp_path):
+    """`@MethodSource("com.acme.Providers#args")` makes the test's result depend
+    on `Providers` with no bytecode reference to it — the class closure alone
+    would silently skip this test when the provider changes."""
+    runner = compile_java(tmp_path, {**STUB_JUPITER, **STUB_METHOD_SOURCE}, out="runner")
+    code = compile_java(
+        tmp_path,
+        {
+            **WORLD,
+            "com/acme/Providers.java": """
+                package com.acme;
+                import java.util.stream.Stream;
+                public class Providers { public static Stream<Object> args() { return Stream.of(1); } }
+            """,
+        },
+    )
+    tests = compile_java(
+        tmp_path,
+        {
+            "com/acme/ParamTest.java": """
+                package com.acme;
+                import org.junit.jupiter.params.ParameterizedTest;
+                import org.junit.jupiter.params.provider.MethodSource;
+                public class ParamTest {
+                    @ParameterizedTest
+                    @MethodSource("com.acme.Providers#args")
+                    void t(Object o) { C.v(); }
+                }
+            """,
+            "com/acme/CTest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                public class CTest { @Test void t() { C.v(); } }
+            """,
+        },
+        out="tests",
+        classpath=[code, runner],
+    )
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[runner])
+    view = provider.view()
+    assert "com/acme/Providers" in view.code_deps["com/acme/ParamTest"]
+    # Editing the data provider selects the parameterized test — and only it.
+    sel = _select(provider, {"com/acme/Providers"})
+    assert sel.tests == {"com/acme/ParamTest"}
+    assert "com/acme/ParamTest" not in view.dynamic_units  # resolved, so provable
+
+
+@needs_jdk
+def test_an_unresolvable_string_named_provider_fails_open(tmp_path):
+    """If the named code is not on the classpath we were given, we cannot prove
+    anything about it — that test runs every time."""
+    runner = compile_java(tmp_path, {**STUB_JUPITER, **STUB_METHOD_SOURCE}, out="runner")
+    code = compile_java(tmp_path, WORLD)
+    tests = compile_java(
+        tmp_path,
+        {
+            "com/acme/ParamTest.java": """
+                package com.acme;
+                import org.junit.jupiter.params.ParameterizedTest;
+                import org.junit.jupiter.params.provider.MethodSource;
+                public class ParamTest {
+                    @ParameterizedTest
+                    @MethodSource("com.elsewhere.Unknown#args")
+                    void t(Object o) { C.v(); }
+                }
+            """,
+            "com/acme/CTest.java": """
+                package com.acme;
+                import org.junit.jupiter.api.Test;
+                public class CTest { @Test void t() { C.v(); } }
+            """,
+        },
+        out="tests",
+        classpath=[code, runner],
+    )
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[runner])
+    assert "com/acme/ParamTest" in provider.view().dynamic_units
+    sel = _select(provider, {"com/acme/A"})  # nothing to do with either test
+    assert sel.tests == {"com/acme/ParamTest"}
+    assert sel.always_run == {"com/acme/ParamTest"}
 
 
 @needs_jdk
@@ -389,7 +554,7 @@ def test_inherited_tests_are_discovered(tmp_path):
         out="tests",
         classpath=[code, jupiter],
     )
-    view = JavaProvider(test_roots=[tests], classpath=[code, jupiter]).view()
+    view = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[jupiter]).view()
     # The concrete subclass is the unit; the abstract base is not runnable.
     assert set(view.test_edges) == {"com/acme/InheritedTest"}
 
@@ -415,7 +580,7 @@ def test_nested_tests_group_under_the_enclosing_class(tmp_path):
         out="tests",
         classpath=[code, jupiter],
     )
-    provider = JavaProvider(test_roots=[tests], classpath=[code, jupiter])
+    provider = JavaProvider(test_roots=[tests], classpath=[code], harness_roots=[jupiter])
     view = provider.view()
     assert set(view.test_edges) == {"com/acme/OuterTest"}
     # The nested class's dependency counts as the group's.
@@ -428,7 +593,11 @@ def test_nested_tests_group_under_the_enclosing_class(tmp_path):
 def test_unreadable_classpath_entry_forces_a_full_run(tmp_path, world):
     bogus = tmp_path / "broken.jar"
     bogus.write_bytes(b"not a jar")
-    provider = JavaProvider(test_roots=world.test_roots, classpath=[*world.classpath, bogus])
+    provider = JavaProvider(
+        test_roots=world.test_roots,
+        classpath=[*world.classpath, bogus],
+        harness_roots=world.harness_roots,
+    )
     view = provider.view()
     assert view.uncovered
     sel = _select(provider, {"com/acme/C"})
