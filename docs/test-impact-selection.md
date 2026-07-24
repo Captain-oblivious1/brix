@@ -1,19 +1,21 @@
 # Design: minimal correct test selection (test-impact analysis)
 
-**Status (2026-07-23): core + Java provider implemented; handed to Fable.**
+**Status (2026-07-24): core + Java (provider, audit, real-build wiring) + C++
+provider all implemented.**
 
 | Increment | State | Where |
 |---|---|---|
-| 1a — language-agnostic core + equivalence oracle | **done** (Opus) | `src/brix/testimpact.py`, `tests/test_testimpact.py` |
-| 1b — Java provider, proven against a real JUnit run | **done** (Opus) | `src/brix/testimpact_java.py`, `jvmabi.class_refs`, `tests/test_testimpact_java*.py` |
-| Escape-completeness audit (Java) | **next — Fable** | "The Fable slice" below |
-| Fingerprint / cache wiring into `JUnitTestAction` | Fable, *after* the audit | "The Fable slice" below |
-| 1c — C++ provider | Opus, *after* the audit | deliberately not started, see below |
+| 1a — language-agnostic core + equivalence oracle | **done** | `src/brix/testimpact.py`, `tests/test_testimpact.py` |
+| 1b — Java provider, proven against a real JUnit run | **done** | `src/brix/testimpact_java.py`, `jvmabi.class_refs`, `tests/test_testimpact_java*.py` |
+| Escape-completeness audit (Java) | **done** | "Known escapes" / "name sources" below |
+| Wiring into `JUnitTestAction` (real build selects tests) | **done** | `testimpact_java.plan_suite`, `examples/tested_lib`, cache-equivalence oracle |
+| 1c — C++ provider, proven against a real gtest run | **done** | `src/brix/testimpact_cpp.py`, `tests/test_testimpact_cpp*.py` |
+| Wiring C++ selection into a real CTest build | **next** | see "The C++ provider" below |
 | 2 — dynamic per-test coverage | later | "Granularity, per provider" |
 
-Nothing here is selected in a real build yet: the provider computes a selection,
-but no action consumes it. That wiring is the fingerprint-crossing slice and is
-Fable's, by the reserved-review rule.
+The Java path selects tests in a real build (`examples/tested_lib`). The C++
+provider computes a selection and is proven equivalent against real gtest, but no
+C++ build action consumes it yet — that is the remaining wiring slice.
 
 ## The problem
 
@@ -155,6 +157,44 @@ fail-open trigger. This is the same shape as brix's existing language integratio
   staleness triggers — new test, new/renamed code, a changed reflection surface.
   Same equivalence rule, one level down; coverage buys speedup *where provable*,
   full suite otherwise.
+
+## The C++ provider
+
+`src/brix/testimpact_cpp.py`, proven against real gtest binaries in
+`tests/test_testimpact_cpp_oracle.py`. It is the same soundness model as Java at
+C++'s binding unit, and — as predicted before it was built — C++ turned out to be
+the *easier* language: static linking and `#include` graphs, none of Java's
+reflect-by-string dynamism as the normal case.
+
+- **Binding unit for a test: the executable, not the case.** A gtest binary
+  links a fixed set of objects, and every `TEST()` in it links the same objects,
+  so nothing static can attribute one case to a subset of them. The executable is
+  the finest *sound* static granularity; per-case selection needs coverage (gcov,
+  increment 2). Overshooting to the whole binary is the safe direction.
+- **The graph is re-pointed, not recomputed.** Each object's `-MMD` depfile
+  (`<obj>.d`, which brix already emits and the incremental layer already scans)
+  gives `object → {source, user headers}`; the link graph gives `test binary →
+  {objects}`. A header edit re-stales exactly the objects that include it, so it
+  selects exactly the binaries that transitively compile it in — and nothing
+  else. Verified: editing an inline in `util.h` selects `a_test` (which includes
+  it via the depfile) and never `b_test`.
+- **`dlopen` is the reflection analogue.** An object whose symbols reference
+  `dlopen`/`dlsym`/`dlmopen` (read straight off the object with `nm -u`, the way
+  the Java provider reads bytecode) binds code by name at run time, so it is
+  marked *dynamic* and every test linking it always runs. This subsumes the
+  config-named-plugin case for v1: the loader is dynamic, so its tests never rely
+  on the link graph seeing the plugin.
+- **One thing the Java shortcut hid.** In Java the changed units *are* the graph
+  keys (classes); in C++ the changed units are **source and header files**, which
+  are edge *targets* (a compile's prerequisites), not keys. So `known` (the
+  new-or-renamed baseline) must be the full vocabulary — keys **and** targets —
+  or every source edit reads as new code and forces a full run. The wiring must
+  carry this.
+
+**Still to wire:** no C++ build action consumes the selection yet (the Java
+`plan_suite`/`JUnitTestAction` equivalent for CTest). The subsetter is ready —
+`select_args` emits an anchored `ctest -R` filter — but the run-action
+integration and a cache-equivalence pass over a CTest build are the next slice.
 
 ## The equivalence oracle (how we prove it)
 

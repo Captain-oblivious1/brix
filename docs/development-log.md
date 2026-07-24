@@ -1,5 +1,26 @@
 # Development log
 
+- **C++ test-impact provider, proven against real gtest (increment 1c).** The
+  same soundness model as Java, at C++'s binding unit — and, as predicted before
+  building it, the *easier* language: static linking and `#include` graphs, no
+  reflect-by-string dynamism as the normal case. For a test the sound static unit
+  is the **executable**, not the `TEST()` case: a gtest binary links a fixed set
+  of objects and every case links the same ones, so nothing static attributes a
+  case to a subset (per-case needs gcov, increment 2). The graph is re-pointed,
+  not recomputed: each object's `-MMD` depfile (which brix already emits) gives
+  `object → {source, user headers}`, the link graph gives `test binary →
+  {objects}`, and `dlopen`/`dlsym`/`dlmopen` read off the object with `nm -u` is
+  the reflection analogue — a dlopen object is dynamic, so every test linking it
+  always runs (this subsumes config-named plugins for v1). Proven end to end
+  against real gtest binaries: editing an inline in `util.h` selects `a_test`
+  (which compiles it in, via the depfile) and never `b_test`; teeth-checked —
+  blinded to the change, selection misses `a_test` → UNDER-SELECTION. One
+  Java-vs-C++ difference surfaced and is recorded for the wiring: C++'s changed
+  units are **source/header files** — edge *targets*, not the object keys — so
+  `known` must be the full vocabulary or every source edit reads as new code.
+  Subsetter emits an anchored `ctest -R` filter; the run-action wiring (the CTest
+  analogue of `plan_suite`) is the next slice. 629 passed.
+
 - **Test-impact selection wired into a real build (`JUnitTestAction`), oracle
   first.** The selection machinery was proven but inert — nothing in a build
   called it. Landed in two moves. First the safety net: a **cache-equivalence
