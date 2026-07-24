@@ -48,6 +48,7 @@ __all__ = [
     'CompileSourceAction',
     'LinkApplicationAction',
     'ArchiveAction',
+    'RunTestAction',
     'DoxygenAction',
     'pkg_config',
 ]
@@ -247,6 +248,75 @@ class ArchiveAction(Action):
                 command_line="{ar} Dcrs {output} {objects}",
                 inputs={"ar": self.ar, "objects": self.object_files},
                 outputs={"output": self.output_file},
+            )
+        ]
+
+
+class RunTestAction(Action):
+    """Run a compiled test executable as a tracked action.
+
+    The binary is a byte-lens input and the action declares **no outputs**, so it
+    replays on its input fingerprint: a passing run is cached like any result, a
+    failing one re-runs until its inputs change (the same contract as
+    ``java.JUnitTestAction``'s run step).
+
+    Because a test binary is itself a build product, brix's existing header
+    (``-MMD``) and link tracking already make it stale exactly when code it
+    *statically* links changes. So running **one ``RunTestAction`` per test
+    binary is per-binary impact selection with no extra machinery**: edit a
+    source, and only the binaries that link it re-run — every other test replays
+    from cache. The selection unit (a binary) equals the run unit, so the
+    incremental engine does the selecting.
+
+    The one dependency this cannot see is code loaded at run time — a ``dlopen``'d
+    plugin ``.so``, a data file read by path — which is not in the link graph and
+    so does not re-stale the binary. Declare those as ``runtime_inputs`` (tracked
+    byte-lens) so a change to them re-runs the test. ``brix.testimpact_cpp``
+    detects the ``dlopen`` case from an object's symbols; a test that loads code
+    by a name computed at run time and cannot enumerate it belongs in a suite that
+    always runs.
+    """
+
+    def __init__(
+        self,
+        *,
+        test_binary: str | FileData,
+        name: str | None = None,
+        args: list[str] | DataExpr | None = None,
+        runtime_inputs: "list[str | DataExpr] | None" = None,
+        runner: ToolData | None = None,
+    ) -> None:
+        self.test_binary = (
+            test_binary if isinstance(test_binary, FileData) else FileData(test_binary)
+        )
+        self.name = name or f"run {self.test_binary.path}"
+        self.args = args
+        self.runtime_inputs = list(runtime_inputs or [])
+        # An optional wrapper (e.g. a sandbox or `valgrind`); by default the
+        # binary is executed directly. A leading "./" is added at render so a
+        # repo-relative path is found without a PATH lookup.
+        self.runner = runner
+
+    def lower(self) -> list[Action]:
+        inputs: dict[str, DataExpr] = {"binary": self.test_binary}
+        for i, extra in enumerate(self.runtime_inputs):
+            inputs[f"runtime{i}"] = (
+                extra if isinstance(extra, DataExpr) else FileData(extra)
+            )
+        inputs["args"] = _options_expr(self.args)
+        if self.runner is not None:
+            inputs["runner"] = self.runner
+            command = "{runner} {binary} {args}"
+        else:
+            # Execute the binary by path (it has a path separator, so no PATH
+            # lookup); "./"-relative works under the workspace root.
+            command = "./{binary} {args}"
+        return [
+            ExternalProcessAction(
+                name=self.name,
+                command_line=command,
+                inputs=inputs,
+                outputs={},  # exit code only — replays on the input fingerprint
             )
         ]
 

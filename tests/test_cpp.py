@@ -260,3 +260,77 @@ def test_static_library_archive_link_run(tmp_path):
         [str(tmp_path / "build/bin/app")], capture_output=True, text=True
     ).stdout.strip()
     assert out == "hi brix"
+
+
+def test_run_test_lowers_to_a_tracked_run():
+    """A RunTestAction is an exit-code-only process: the binary is a byte-lens
+    input and there are NO outputs, so it replays on its fingerprint."""
+    graph = Graph()
+    graph.add(cpp.RunTestAction(test_binary="build/test/foo_test"))
+    (action,) = graph.actions
+    assert isinstance(action, ExternalProcessAction)
+    assert action.name == "run build/test/foo_test"
+    assert action.outputs == {}  # exit code only
+    assert action.inputs["binary"].path == "build/test/foo_test"  # byte lens
+
+
+def test_runtime_inputs_are_tracked():
+    """A dlopen'd plugin / data file the linker never sees is declared here so a
+    change to it re-runs the test."""
+    graph = Graph()
+    graph.add(
+        cpp.RunTestAction(
+            test_binary="build/test/foo_test",
+            runtime_inputs=["build/plugins/libx.so"],
+        )
+    )
+    (action,) = graph.actions
+    assert action.inputs["runtime0"].path == "build/plugins/libx.so"
+
+
+needs_cxx = pytest.mark.skipif(shutil.which("c++") is None, reason="no c++")
+
+
+@needs_cxx
+def test_editing_one_lib_reruns_only_its_test(tmp_path):
+    """The whole C++ selection claim, end to end: one RunTestAction per test
+    binary, and editing a source re-runs only the binaries that link it — the
+    incremental engine does the selecting, because a binary is a build product."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "test").mkdir()
+    (tmp_path / "src/a.cpp").write_text("int a() { return 1; }\n")
+    (tmp_path / "src/b.cpp").write_text("int b() { return 2; }\n")
+    (tmp_path / "test/a_test.cpp").write_text("int a(); int main() { return a()==1?0:1; }\n")
+    (tmp_path / "test/b_test.cpp").write_text("int b(); int main() { return b()==2?0:1; }\n")
+
+    def create_graph():
+        graph = Graph()
+        d = graph.data
+        for tree in ("src", "test"):
+            graph.add(cpp.CompileSourceAction(
+                source_files=d.glob(f"{tree}/{{name}}.cpp"),
+                object_files=d.glob(f"build/obj/{tree}/{{name}}.o"),
+            ))
+        for name, objs in {"a_test": ["src/a", "test/a_test"],
+                           "b_test": ["src/b", "test/b_test"]}.items():
+            link = d.file(f"build/obj/{objs[0]}.o")
+            for o in objs[1:]:
+                link = link + d.file(f"build/obj/{o}.o")
+            graph.add(cpp.LinkApplicationAction(
+                object_files=link, output_file=d.file(f"build/test/{name}")))
+            graph.add(cpp.RunTestAction(test_binary=f"build/test/{name}"))
+        return graph
+
+    def builder():
+        return IncrementalBuilder(create_graph, root=tmp_path)
+
+    assert builder().build().success
+    assert all(r.source == "replayed" for r in builder().build().process_results)
+
+    # Edit a's implementation (behavior-preserving): only a_test re-runs.
+    (tmp_path / "src/a.cpp").write_text("int a() { return 1; }\nint a_meta() { return 7; }\n")
+    third = builder().build()
+    assert third.success
+    ran = sorted(r.action_name for r in third.process_results if r.source == "process")
+    assert "run build/test/a_test" in ran
+    assert "run build/test/b_test" not in ran  # provably unaffected -> replayed

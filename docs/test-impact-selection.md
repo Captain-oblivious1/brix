@@ -10,12 +10,12 @@ provider all implemented.**
 | Escape-completeness audit (Java) | **done** | "Known escapes" / "name sources" below |
 | Wiring into `JUnitTestAction` (real build selects tests) | **done** | `testimpact_java.plan_suite`, `examples/tested_lib`, cache-equivalence oracle |
 | 1c — C++ provider, proven against a real gtest run | **done** | `src/brix/testimpact_cpp.py`, `tests/test_testimpact_cpp*.py` |
-| Wiring C++ selection into a real CTest build | **next** | see "The C++ provider" below |
+| C++ selection in a real build (`cpp.RunTestAction`) | **done** | `cpp.RunTestAction`, `examples/tested_cpp`, `tests/test_cpp.py` |
 | 2 — dynamic per-test coverage | later | "Granularity, per provider" |
 
-The Java path selects tests in a real build (`examples/tested_lib`). The C++
-provider computes a selection and is proven equivalent against real gtest, but no
-C++ build action consumes it yet — that is the remaining wiring slice.
+Both languages select tests in a real build: Java via `examples/tested_lib`
+(eval-time `plan_suite` narrowing one JUnit process), C++ via `examples/tested_cpp`
+(the engine's per-binary staleness *is* the selection — see below). No CMake.
 
 ## The problem
 
@@ -191,10 +191,18 @@ reflect-by-string dynamism as the normal case.
   or every source edit reads as new code and forces a full run. The wiring must
   carry this.
 
-**Still to wire:** no C++ build action consumes the selection yet (the Java
-`plan_suite`/`JUnitTestAction` equivalent for CTest). The subsetter is ready —
-`select_args` emits an anchored `ctest -R` filter — but the run-action
-integration and a cache-equivalence pass over a CTest build are the next slice.
+**Wired — and simpler than Java.** A test binary is a build product, so brix's
+existing `-MMD` + link tracking already makes it stale exactly when code it
+statically links changes. `cpp.RunTestAction` runs a binary as a tracked,
+exit-code-only action that replays on the binary's fingerprint; one per binary is
+therefore already impact selection — **the incremental engine does the selecting**,
+because the run unit (a binary) *is* the selection unit. No `plan_suite`, no
+index, no eval-time analysis, no CMake. Proven in `examples/tested_cpp` and
+`tests/test_cpp.py`: editing one unit re-runs only the binaries that link it. The
+`select_args` `ctest -R` filter remains for users who drive CTest; the direct
+per-binary path is the default. The one gap — code loaded at run time (`dlopen`),
+invisible to the link graph — is declared via `RunTestAction(runtime_inputs=…)`,
+and `references_dl` (an `nm -u` scan) is the detector for it.
 
 ## The equivalence oracle (how we prove it)
 

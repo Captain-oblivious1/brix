@@ -60,7 +60,7 @@ def test_top_level_exports_are_the_supported_v1_contract():
 # helpers stay out; adding a genuinely public name means updating this set.
 MODULE_EXPORTS = {
     "cpp": {"CompileSourceAction", "LinkApplicationAction", "ArchiveAction",
-            "DoxygenAction", "pkg_config"},
+            "RunTestAction", "DoxygenAction", "pkg_config"},
     "java": {"JarAction", "JUnitTestAction", "JavadocAction", "javac_worker",
              "abi", "AbiFile", "AbiGlob", "pom", "maven", "gradle"},
     "kotlin": {"JarAction", "kotlinc_worker", "abi", "KotlinAbiFile", "KotlinAbiGlob"},

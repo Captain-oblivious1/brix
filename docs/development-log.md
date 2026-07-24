@@ -1,5 +1,25 @@
 # Development log
 
+- **C++ test selection wired into a real build — and it's simpler than Java.**
+  The key realization: a C++ test binary is itself a build product, so brix's
+  existing `-MMD` (header) + link-graph tracking already makes it stale exactly
+  when code it *statically* links changes. So `cpp.RunTestAction` — a tracked,
+  exit-code-only run that replays on the binary's fingerprint (same contract as
+  `JUnitTestAction`'s run step) — gives per-binary impact selection with **no
+  eval-time selector, no index, no CMake**: one `RunTestAction` per binary, and
+  the incremental engine does the selecting, because the run unit (a binary)
+  *is* the selection unit. This is why Java needed `plan_suite` and C++ does not:
+  one JUnit process runs many classes (run unit ≠ selection unit), whereas each
+  C++ test is its own executable. Proven in `examples/tested_cpp` and
+  `tests/test_cpp.py::test_editing_one_lib_reruns_only_its_test`: edit one unit,
+  only the binaries linking it re-run. The one thing the link graph cannot see is
+  runtime-loaded code (`dlopen`); it is declared via
+  `RunTestAction(runtime_inputs=…)`, with `testimpact_cpp.references_dl` (an
+  `nm -u` scan) as the detector. A demo-writing gotcha worth noting: g++ folds a
+  no-op edit like `+ 0` away, so the object is byte-identical and brix correctly
+  re-runs nothing — a behavior-preserving demo edit must actually change the
+  object (add a helper). 632 passed.
+
 - **C++ test-impact provider, proven against real gtest (increment 1c).** The
   same soundness model as Java, at C++'s binding unit — and, as predicted before
   building it, the *easier* language: static linking and `#include` graphs, no
