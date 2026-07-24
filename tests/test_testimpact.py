@@ -12,9 +12,13 @@ core's dynamic-unsafe rule is actually necessary and sufficient.
 import random
 
 from brix.testimpact import (
+    INDEX_VERSION,
     ProviderView,
     Selection,
     SelectionInput,
+    known_units,
+    plan,
+    record_index,
     select_tests,
     _reachable,
 )
@@ -265,3 +269,70 @@ def _random_world(rng):
             truth.add(hidden)
         test_truth[t] = list(truth)
     return World(code_deps, test_static, test_truth, dynamic_units)
+
+
+# --- the persisted index + plan() --------------------------------------------
+
+def test_known_units_fails_open_on_missing_or_stale_index():
+    # Every way the index can be untrustworthy must yield an empty `known`, so
+    # that every changed unit reads as new and the whole suite runs.
+    assert known_units(None) == frozenset()
+    assert known_units({}) == frozenset()
+    assert known_units({"version": INDEX_VERSION + 1, "known": ["A"]}) == frozenset()
+    assert known_units({"version": INDEX_VERSION, "known": "not-a-list"}) == frozenset()
+    assert known_units("corrupt") == frozenset()
+    # A well-formed current index round-trips.
+    assert known_units({"version": INDEX_VERSION, "known": ["A", "B"]}) == {"A", "B"}
+
+
+def test_record_index_captures_the_full_vocabulary():
+    view = _view(
+        code_deps={"A": [], "B": ["A"], "C": []},
+        test_edges={"tB": ["B"], "tC": ["C"]},
+        dynamic=("C",),
+    )
+    idx = record_index(view)
+    assert idx["version"] == INDEX_VERSION
+    # keys, edge targets, and dynamic units alike — everything the view mentions
+    assert set(idx["known"]) == {"A", "B", "C", "tB", "tC"}
+    # and it round-trips through known_units
+    assert known_units(idx) == {"A", "B", "C", "tB", "tC"}
+
+
+def test_plan_with_no_index_runs_everything():
+    # First build (or a blown index): no `known`, so a changed unit is "new" and
+    # the new-or-renamed trigger forces a full run.
+    view = _view(code_deps={"A": [], "B": []}, test_edges={"tA": ["A"], "tB": ["B"]})
+    sel, new_index = plan(view, {"A"}, index=None)
+    assert sel.run_all
+    assert sel.tests == view.all_tests
+    # and it hands back an index that would make the next build incremental
+    assert known_units(new_index) == {"A", "B", "tA", "tB"}
+
+
+def test_plan_with_a_warm_index_selects_a_subset():
+    view = _view(code_deps={"A": [], "B": []}, test_edges={"tA": ["A"], "tB": ["B"]})
+    warm = record_index(view)  # last build knew this vocabulary
+    sel, _ = plan(view, {"A"}, index=warm)
+    assert not sel.run_all
+    assert sel.tests == frozenset({"tA"})
+
+
+def test_plan_forwards_prior_failure_as_a_full_run():
+    view = _view(code_deps={"A": [], "B": []}, test_edges={"tA": ["A"], "tB": ["B"]})
+    warm = record_index(view)
+    sel, _ = plan(view, {"A"}, index=warm, prior_failed=True)
+    assert sel.run_all  # a previous failure reruns everything until green
+
+
+def test_plan_reruns_a_renamed_unit_against_a_stale_index():
+    # The index knew {A, B, tA, tB}. The code is refactored: A becomes A2, and a
+    # new test tA2 references it. A2 is not in `known`, so it is treated as new
+    # and the suite runs in full rather than trusting edges that never existed.
+    old_view = _view(code_deps={"A": [], "B": []}, test_edges={"tA": ["A"], "tB": ["B"]})
+    stale = record_index(old_view)
+    new_view = _view(
+        code_deps={"A2": [], "B": []}, test_edges={"tA2": ["A2"], "tB": ["B"]}
+    )
+    sel, _ = plan(new_view, {"A2"}, index=stale)
+    assert sel.run_all

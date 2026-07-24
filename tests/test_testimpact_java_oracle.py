@@ -296,3 +296,99 @@ def test_selection_actually_skips_work(suite):
     selection = select_tests(SelectionInput(view, frozenset({"com/acme/C"}), known))
     assert not selection.run_all
     assert selection.tests == {"com/acme/CTest"}
+
+
+# --- the cache-equivalence oracle --------------------------------------------
+#
+# The single-edit oracle above proves each selection is equivalent to a full
+# run *in isolation*. Selection in a real build is not isolated: it runs over a
+# sequence of edits against warm state (the `known` set grows, `prior_failed`
+# carries), and skips accumulate. The danger this introduces is a *stale pass* —
+# a test skipped across several edits because each edit alone looked unrelated,
+# while a fresh full run would now fail it.
+#
+# This oracle drives that sequence for real. It maintains a `believed` verdict
+# for every test — green until a *selected* run says otherwise, and never
+# refreshed for a skipped test — exactly the memory a warm build carries. After
+# each edit it compares `believed` against a from-scratch full run of the whole
+# suite. Equivalence is: what the build believes without re-running == what
+# reality says. A wrongful skip shows up as believed-green where reality is red.
+
+# Which source parameter names which unit, so an edit maps to a changed unit.
+_PARAM_UNIT = {
+    "a_value": "com/acme/A",
+    "b_bonus": "com/acme/B",
+    "c_value": "com/acme/C",
+    "p_value": "com/acme/Providers",
+    "tool_value": "com/acme/Stamp",
+    "xml_value": "com/acme/MyFactory",
+}
+
+# A deliberately adversarial sequence: a clean skip (the case a stale pass would
+# corrupt), a prior-failure that must force a full rerun until green, and edits
+# to each of the three name-addressed units (the string-named provider, the
+# service-registered extension, the property-named factory) whose changes must
+# fan out to a full run.
+_SEQUENCE = [
+    ("cold build", {}),
+    ("break A (drags B via A->B)", {"a_value": 5}),
+    ("edit C while A still broken", {"a_value": 5, "c_value": 0}),
+    ("fix everything", {}),
+    ("edit C only — A/B must stay skipped-green", {"c_value": 0}),
+    ("fix", {}),
+    ("edit the string-named provider", {"p_value": 4}),
+    ("fix", {}),
+    ("edit the service-registered extension", {"tool_value": 8}),
+    ("fix", {}),
+    ("edit the property-named factory", {"xml_value": 8}),
+]
+
+
+@needs_junit
+def test_a_warm_sequence_of_selections_matches_from_scratch(suite):
+    tmp_path, code, tests = suite
+    provider = JavaProvider(
+        test_roots=[tests],
+        classpath=[code],
+        harness_roots=[CONSOLE_JAR],
+        runtime_values=[XML_PROPERTY],
+    )
+    all_tests = provider.view().all_tests
+
+    believed: dict[str, bool] = {}  # test -> is-red, as the warm build remembers it
+    known: frozenset[str] = frozenset()  # units the last selection knew about
+    prior_failed = False
+    prev_params = dict(BASELINE)
+
+    try:
+        for label, edit in _SEQUENCE:
+            params = {**BASELINE, **edit}
+            changed = frozenset(
+                _PARAM_UNIT[k] for k in _PARAM_UNIT if params[k] != prev_params[k]
+            )
+            compile_java(tmp_path, _sources(**params), out="classes", classpath=[CONSOLE_JAR])
+
+            view = provider.view()
+            selection = select_tests(
+                SelectionInput(view, changed, known, prior_failed=prior_failed)
+            )
+
+            # Run only what selection chose, and update memory only for those —
+            # a skipped test keeps whatever verdict it last had.
+            ran_failing = _verdicts(tests, code, selection.tests)
+            for t in selection.tests:
+                believed[t] = t in ran_failing
+            prior_failed = bool(ran_failing)
+            known = frozenset(view.code_deps) | frozenset(view.test_edges)
+
+            # Ground truth: what a full from-scratch run says right now.
+            fresh_failing = _verdicts(tests, code, all_tests)
+            believed_failing = {t for t, red in believed.items() if red}
+            assert believed_failing == fresh_failing, (
+                f"after '{label}': the warm build believes {sorted(believed_failing)} "
+                f"are failing, but a from-scratch run fails {sorted(fresh_failing)} "
+                f"(selection ran {sorted(selection.tests)}, run_all={selection.run_all})"
+            )
+            prev_params = params
+    finally:
+        compile_java(tmp_path, _sources(**BASELINE), out="classes", classpath=[CONSOLE_JAR])

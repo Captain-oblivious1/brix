@@ -205,6 +205,71 @@ def _reachable(starts: Iterable[Unit], deps: Mapping[Unit, frozenset[Unit]]) -> 
     return seen
 
 
+# --- the persisted index -----------------------------------------------------
+#
+# select_tests needs `known` — the vocabulary the *last* selection saw — to fire
+# the new-or-renamed trigger. That is the one fact a build must carry forward,
+# so it is persisted per suite. The index is deliberately tiny and its only
+# failure mode is fail-open: a missing, corrupt, or version-mismatched index
+# yields an empty `known`, under which every changed unit reads as new and the
+# whole suite runs. Widening the vocabulary can never *narrow* a selection, so
+# there is no unsafe way for this record to be wrong.
+
+INDEX_VERSION = 1
+
+
+def _vocabulary(view: ProviderView) -> set[Unit]:
+    """Every unit name the view mentions — keys and edge targets alike. This is
+    what a changed unit is checked against to tell 'known code' from 'new or
+    renamed code whose edges we cannot trust'."""
+    vocab: set[Unit] = set(view.code_deps) | set(view.test_edges)
+    vocab |= set(view.dynamic_units) | set(view.uncovered) | set(view.name_addressed)
+    for deps in view.code_deps.values():
+        vocab |= set(deps)
+    for edges in view.test_edges.values():
+        vocab |= set(edges)
+    return vocab
+
+
+def known_units(index: Mapping | None) -> frozenset[Unit]:
+    """The `known` set from a persisted index, or empty (fail-open) if the
+    index is absent, malformed, or from a different version."""
+    if not isinstance(index, Mapping) or index.get("version") != INDEX_VERSION:
+        return frozenset()
+    known = index.get("known", ())
+    if not isinstance(known, (list, tuple)):
+        return frozenset()
+    return frozenset(str(u) for u in known)
+
+
+def record_index(view: ProviderView) -> dict:
+    """The index to persist after a selection, capturing this build's
+    vocabulary so the next build can tell new code from known code."""
+    return {"version": INDEX_VERSION, "known": sorted(_vocabulary(view))}
+
+
+def plan(
+    view: ProviderView,
+    changed: Iterable[Unit],
+    *,
+    index: Mapping | None = None,
+    prior_failed: bool = False,
+    triggers: tuple[Trigger, ...] = DEFAULT_TRIGGERS,
+) -> tuple[Selection, dict]:
+    """One build's selection decision, end to end: read `known` from the
+    persisted `index` (fail-open), decide what to run, and return the selection
+    together with the index to persist for next time.
+
+    This is the language-agnostic seam the run-action wiring calls — the same
+    for every provider. It never touches what an action *fingerprints*; it only
+    decides which tests to execute (see docs, "the footprint rule")."""
+    selection = select_tests(
+        SelectionInput(view, frozenset(changed), known_units(index), prior_failed),
+        triggers=triggers,
+    )
+    return selection, record_index(view)
+
+
 def select_tests(
     inp: SelectionInput,
     *,
