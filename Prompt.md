@@ -19,13 +19,18 @@ doc seems wrong or odd, it is probably load-bearing: raise it, don't
 - docs/boundary-schema.md  — wire schema + TS mirror-API contract
 - docs/java-fast-builds.md — persistent workers + ABI fingerprints
 - docs/build-layers.html   — architecture with diagrams (open in browser)
+- docs/test-impact-selection.md — test-impact selection; core + Java provider
+  are built, and "The Fable slice" is the live handoff brief
 
-First task: generate class diagrams for every class in src/brix/ (Duane is
-a visual person; SVG or Mermaid, added to docs/, verified renderable —
-use rsvg-convert or headless Vivaldi for screenshots, NOT Firefox). Then
-proceed with the roadmap in order (1. pluggable cache store, 2. JVM
-fast-builds phases 1–2, 3. Rust port phases 1–2), pausing at anything the
-docs flag as needing full-strength review (Rust phase 3, JVM phase 3).
+Current task (handed to Fable 2026-07-23): **docs/test-impact-selection.md,
+"The Fable slice"** — the escape-completeness audit for Java, then the
+fingerprint/cache wiring. Take them in that order; the ordering is itself a
+decision (an under-selection hole was found by argument rather than by any
+systematic method, so the dependency graph is not yet known to be complete,
+and sealing the cache bookkeeping around an incomplete graph buys nothing).
+The C++ provider is deliberately NOT started until the audit lands, so it can
+inherit whatever the audit concludes instead of repeating the same gaps in a
+second language.
 
 Real-world test project: ~/Projects/animation (run /add-dir first). Its
 brix.py uses the full stack; build with venv/bin/python brix.py --dryRun

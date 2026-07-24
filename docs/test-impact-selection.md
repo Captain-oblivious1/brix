@@ -1,8 +1,19 @@
-# Design sketch: minimal correct test selection (test-impact analysis)
+# Design: minimal correct test selection (test-impact analysis)
 
-**Status: proposal / design sketch (2026-07-22, Opus). Nothing implemented.**
-For Duane to react to before any code. It ends by drawing the explicit Opus/Fable
-line so the handoff point is decided up front.
+**Status (2026-07-23): core + Java provider implemented; handed to Fable.**
+
+| Increment | State | Where |
+|---|---|---|
+| 1a — language-agnostic core + equivalence oracle | **done** (Opus) | `src/brix/testimpact.py`, `tests/test_testimpact.py` |
+| 1b — Java provider, proven against a real JUnit run | **done** (Opus) | `src/brix/testimpact_java.py`, `jvmabi.class_refs`, `tests/test_testimpact_java*.py` |
+| Escape-completeness audit (Java) | **next — Fable** | "The Fable slice" below |
+| Fingerprint / cache wiring into `JUnitTestAction` | Fable, *after* the audit | "The Fable slice" below |
+| 1c — C++ provider | Opus, *after* the audit | deliberately not started, see below |
+| 2 — dynamic per-test coverage | later | "Granularity, per provider" |
+
+Nothing here is selected in a real build yet: the provider computes a selection,
+but no action consumes it. That wiring is the fingerprint-crossing slice and is
+Fable's, by the reserved-review rule.
 
 ## The problem
 
@@ -154,6 +165,77 @@ introduce a dynamic-load call, delete code under test — assert the
 subset ever passes where the full run fails, the oracle has caught
 under-selection. One oracle, run against every provider.
 
+## Direction: what separates a real escape from a phantom one
+
+*(Duane, 2026-07-23 — this supersedes an earlier framing that asked whether the
+test runner should be granted an exemption from the fail-open rule. It should
+not, and it does not need one.)*
+
+The runner reflects **once**, at the entry, to load a class **whose name brix
+itself wrote on the command line**. It is the test's *caller*, sitting above it.
+Everything the test does from there — instantiating collaborators, calling
+through interfaces — is ordinary static binding, already covered by the closure.
+So the launcher's internals were never part of what a test depends on.
+
+The first implementation nonetheless marked every test dynamic, because the
+reference walk wandered *upstream*: a test legitimately calls `Assertions`,
+`Assertions` shares a utility class with the launcher, and the launcher contains
+`Class.forName`. That is a path through **reference edges that are not call
+edges** — unreachable at run time. Excluding the harness is therefore a **bug
+fix, not a carve-out**, and decision 3 (no user-vouching override) stands
+untouched.
+
+Two consequences, both load-bearing:
+
+- **The harness designation is a role, not a reputation.** It attaches to the
+  *artifact* brix launched the suite with (`JavaProvider.harness_roots`, fed from
+  `JUnitTestAction.console_jar`) — never to a package name, which anyone can
+  claim, and never to a list of libraries brix recognizes. Withhold the artifact
+  and the identical bytes are ordinary code whose reflection makes every test
+  always-run: safe, useless, and the correct direction to fail.
+- **Look below the test, not above it.** Reflection *at or under* the test class
+  is a genuine escape: a component scan the test triggers, a service-loaded
+  extension, or an annotation naming code by string. That reading is what
+  surfaced the `@MethodSource` hole (below) — and it is the lens the
+  completeness audit should use.
+
+## Identity is content, not labels
+
+*(Duane, 2026-07-23.)* An earlier idea — treat a versioned external package as
+unchanged until its version pin moves — was withdrawn on the right grounds: the
+same coordinates can be re-pushed, so the version is a label somebody types while
+the hash is what the artifact *is*. brix already hashes every input, which
+catches it regardless.
+
+Two things follow. Versioning is not load-bearing for correctness (it never was —
+an external package's reflection reaching *your* changed code is a separate
+question that pinning does not touch). And the per-artifact analysis cache — so a
+50-service monorepo parses a shared jar's constant pool once, not once per
+service — is keyed by **content hash**, which needs no invalidation logic at all
+(same bytes ⇒ same reference graph), dedupes across differing version labels, and
+works for artifacts with no version at all.
+
+## Known escapes, and the one that was missed
+
+The Java provider currently handles four ways a test's verdict can depend on code
+its class closure does not cover:
+
+| Escape | Handling |
+|---|---|
+| Reflection / `ClassLoader` / `ServiceLoader` / JNI reachable from the test | referencing class marked dynamic ⇒ its tests always run |
+| A reference resolving to nothing scanned (and not JDK) | same — an un-supplied library might reflect back into the code under test |
+| `@MethodSource` / `@FieldSource` naming code by string | resolved against the scanned universe: a real edge when it resolves, dynamic when it does not |
+| Test class not statically discoverable (`@Nested`, inherited tests) | grouped to the top-level unit; "carries tests" closed down the subtype graph |
+
+**The third was found by argument, not by method** — it was noticed while
+reasoning about direction, not produced by any systematic enumeration. Left
+unhandled it produced a genuine false pass, reproduced against real JUnit: edit
+a data provider no test references, the full run goes red, selection runs
+nothing. That is precisely the failure the governing invariant forbids.
+
+The honest conclusion: **the escape list is not proven complete.** That is now
+the top open risk of the feature, and it is why the audit precedes the wiring.
+
 ## The Opus / Fable line
 
 **Opus (mechanism + scaffolding):**
@@ -177,6 +259,79 @@ under-selection. One oracle, run against every provider.
 Reordered from the first draft: the first Opus increment is *the generic core +
 provider interface + oracle*, and Java and C++ arrive as the first two providers
 — not "build a Java feature, then generalize."
+
+## The Fable slice (handed off 2026-07-23)
+
+**Ordering changed from the original plan, deliberately: the audit comes first.**
+The `@MethodSource` hole showed the graph can be missing edges we have no method
+for finding, and there is no value in making the bookkeeping airtight around an
+incomplete graph. C++ is also held until the audit lands, so its provider
+inherits whatever the audit concludes rather than repeating the same mistakes in
+a second language — that is Duane's explicit reason for handing off at this
+point rather than after C++.
+
+### Slice 1 — escape-completeness audit (Java)
+
+**The question:** enumerate every way a JUnit test's pass/fail verdict can depend
+on code outside its static class closure, and argue the enumeration is *closed* —
+not "here are some more cases," but a structural argument for why there are no
+others. Use the direction lens above: the runner above the test is not a source;
+anything at or below it is.
+
+Candidates to confirm or dismiss, none of them yet verified — this list is a
+starting point, **not** a scope boundary:
+
+- service-loaded JUnit extensions (`junit.jupiter.extensions.autodetection.enabled`,
+  `META-INF/services`) — registered without the test naming anything;
+- Spring `@SpringBootTest` / `@ContextConfiguration(locations=…)` — beans named
+  by string in XML or discovered by component scan;
+- `Class.forName` in a **static initializer** of something in the closure;
+- classpath *resources* that name code (properties files, service files) —
+  note `JUnitTestAction` already declares `test_resource_dirs` as byte-lens
+  inputs, so establish whether that stays sufficient once a selection narrows
+  the footprint;
+- `-javaagent` / instrumentation, and classes generated at run time;
+- annotations taking a `Class` literal (`@ExtendWith`, `@ArgumentsSource`) —
+  believed safe because the literal is a `CONSTANT_Class`; confirm.
+
+Each confirmed escape must land as either a real edge or a fail-open, with a test
+in `tests/test_testimpact_java.py` and — where it can turn a real suite red — a
+case in `tests/test_testimpact_java_oracle.py`.
+
+**Verify the existing rules actually fire**, rather than trusting them: the
+reflective-entry-point list in `jvmabi._REFLECTIVE_METHODS`, the deliberate
+exclusion of `LambdaMetafactory`/`StringConcatFactory` (marking those dynamic
+would disable selection everywhere — check the exclusion is sound, not just
+convenient), the `PLATFORM_PREFIXES` guess (the non-guessy version is to ask the
+JDK what it ships and key that to the `java` tool fingerprint), and the
+`_STRING_CODE_REF` shape match.
+
+### Slice 2 — fingerprint / cache bookkeeping (the reserved-review kernel)
+
+Only after slice 1. Wire selection into `java.JUnitTestAction` and the persisted
+index. The properties that must hold:
+
+- a test **provably skipped** counts as green for status and cache — it is not
+  "unknown," it is proven unaffected;
+- a **narrowed input footprint must never serve a stale pass.** The hazard is
+  concrete: today the run action takes the whole under-test classpath as a byte
+  lens and declares no outputs, so it replays purely on its input fingerprint. If
+  selection narrows that footprint, a test skipped today because unrelated code
+  changed must not, tomorrow, find a cached pass keyed on a fingerprint that
+  omitted the code it *does* depend on;
+- the persisted test→code closure index (sibling to the `affected` index) needs a
+  version, and staleness must fail open — `SelectionInput.known` exists for
+  exactly this and is currently supplied by callers, not persisted;
+- `prior_failed` must be plumbed from real recorded failures (`BuildMetadata.
+  has_failed_actions()` is the analogue `affected.py` uses).
+
+### What is deliberately NOT in scope
+
+Dynamic per-test coverage (increment 2), the optional speed/correctness dial
+(designed-for, not built), and any relaxation of decision 3. If the audit
+concludes some escape can only be recovered by coverage, record that and fail
+open — do not introduce an annotation or setting by which a user asserts their
+code is clean.
 
 ## Decisions (2026-07-22, with Duane)
 

@@ -352,6 +352,14 @@ The remaining work is mainly Rust-engine soak and cleanup, more real-project
 dogfooding, usability improvements, and the future non-Python authoring API.
 See the [roadmap](docs/roadmap.md) for the full prioritized list.
 
+**In flight:** [test-impact selection](docs/test-impact-selection.md) — run only
+the tests a change could affect, under the same absolute equivalence guarantee
+brix already makes for incremental vs. clean builds. The language-agnostic core
+and the Java provider are built and held to an oracle that edits code and runs a
+real JUnit; nothing is wired into a build yet. Handed to Fable (2026-07-23) for
+the escape-completeness audit and then the fingerprint/cache bookkeeping; the
+C++ provider waits on that audit.
+
 ## Documentation
 
 The user-facing **HTML site** (purpose, tenets, and an API reference generated

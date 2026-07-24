@@ -517,6 +517,23 @@ These are self-contained and come with tests. No Fable needed.
   the default. Opus builds the core + provider interface + oracle + Java/C++ coarse
   providers; **Fable** owns the uniform soundness model + the cache/fingerprint
   bookkeeping (the fingerprint-crossing kernel).
+  **Status (2026-07-23, Opus):** increments 1a (language-agnostic core +
+  equivalence oracle) and 1b (Java provider, proven against a real JUnit run)
+  are **done** — `src/brix/testimpact.py`, `src/brix/testimpact_java.py`,
+  `jvmabi.class_refs`; see the development log. Two further decisions settled
+  with Duane, both recorded in the design doc: **identity is content, not
+  labels** (version pins rejected — a re-pushed jar reuses the number, and brix
+  already hashes; so the per-artifact analysis cache is keyed by content hash),
+  and **direction separates a real escape from a phantom one** — the test runner
+  is the test's *caller*, so its internals were never a dependency, and
+  excluding them is a bug fix rather than an exemption. **Handed to Fable
+  2026-07-23**, with the ordering changed: the **escape-completeness audit runs
+  BEFORE the fingerprint/cache wiring**, because the `@MethodSource` hole was
+  found by argument rather than by method, so the graph is not yet known to be
+  complete and there is no point sealing bookkeeping around it. C++ is
+  deliberately **not** started until that audit lands, so its provider inherits
+  whatever the audit finds. Fable's brief: `docs/test-impact-selection.md`,
+  "The Fable slice".
 
 ### Fable queue — for the careful model only
 
