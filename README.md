@@ -354,11 +354,13 @@ See the [roadmap](docs/roadmap.md) for the full prioritized list.
 
 **In flight:** [test-impact selection](docs/test-impact-selection.md) — run only
 the tests a change could affect, under the same absolute equivalence guarantee
-brix already makes for incremental vs. clean builds. The language-agnostic core
-and the Java provider are built and held to an oracle that edits code and runs a
-real JUnit; nothing is wired into a build yet. Handed to Fable (2026-07-23) for
-the escape-completeness audit and then the fingerprint/cache bookkeeping; the
-C++ provider waits on that audit.
+brix already makes for incremental vs. clean builds. The language-agnostic core,
+the Java provider (with its escape-completeness audit), and the C++ provider are
+built and each held to an oracle that edits real code and runs a real JUnit /
+gtest. **Java selects tests in a real build today** — see `examples/tested_lib`
+(edit one class, only its test re-runs), guarded by a cache-equivalence oracle
+over an edit sequence. The C++ provider is proven equivalent but not yet wired
+into a CTest build; that run-action wiring is the next slice.
 
 ## Documentation
 
