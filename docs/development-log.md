@@ -1,5 +1,34 @@
 # Development log
 
+- **Test-impact selection wired into a real build (`JUnitTestAction`), oracle
+  first.** The selection machinery was proven but inert — nothing in a build
+  called it. Landed in two moves. First the safety net: a **cache-equivalence
+  oracle** that drives an adversarial edit *sequence* against warm state
+  (`known` grows, `prior_failed` carries) and asserts a believed-verdict map —
+  green until a *selected* run says otherwise, never refreshed for a skipped
+  test — equals a from-scratch full run at every step. Teeth-verified: blinding
+  the change detector trips it exactly at the stale-pass moment. Then the wiring,
+  on the design's **footprint rule** — selection changes only which classes the
+  runner executes, never what the suite fingerprints (still the whole classpath),
+  so any change that could matter still re-fires the suite and a stale pass is
+  impossible. Selection is decided at **build-file evaluation time** (the
+  `load_affected` seam), not in a new action type: `plan_suite` reads the
+  provider's view of the *last build's* compiled artifacts — whose vocabulary
+  **is** the set of units that existed last build, so `known` comes live from the
+  view with no persisted-list drift and no warm-up lag — maps changed **source
+  paths** to **units** (widening to inner classes; failing open on anything it
+  cannot attribute), calls the core, and emits either `--select-class …` or the
+  fail-open `--scan-class-path`. Two non-obvious correctness points found while
+  building: (1) a missing artifact root lands in `uncovered`, so a cold build
+  fails open through the incomplete-graph trigger — correct, if cosmetically
+  leaking paths into `known`; (2) recomputing the command each build would
+  **oscillate** (select→scan→select) and defeat the engine's replay, so a change
+  that maps to nothing reuses the last command, keeping a no-op build a clean
+  cache hit. Proven end to end on `examples/tested_lib`: edit `Adder` →
+  `--select-class com.acme.AdderTest`, `GreeterTest` skipped, and the very next
+  no-op build replays with nothing run. `prior_failed` from
+  `BuildMetadata.has_failed_actions()` (coarse but safe for v1). 614 passed.
+
 - **Escape-completeness audit (Java), part 2: all four name sources closed.**
   The first framing of obligation 1 — derive the JDK's class-loading entry
   points by reachability to `ClassLoader.defineClass` — was **withdrawn as a

@@ -1,44 +1,48 @@
 # tested_lib — running tests under brix
 
-A minimal, self-contained example of how you declare and run tests in a brix
-build, and what makes it different from Maven or Gradle.
+A minimal, self-contained example of how you declare tests in a brix build, and
+the two things brix does that Maven and Gradle do not:
 
-## The idea in one sentence
-
-**A test suite is a cacheable action.** brix runs a suite only when something
-the suite actually reads has changed; otherwise it restores the previous
-*passing* result from cache, exactly like it restores a compiled jar. Typing
-`build` on an unchanged tree runs zero tests.
+1. **A test suite is a cacheable action.** An unchanged tree re-runs zero tests.
+2. **Impact selection.** When something *does* change, brix runs only the test
+   classes that change could reach — not the whole suite.
 
 ## What's here
 
 ```
-src/com/acme/Adder.java        # unit under test
-src/com/acme/Greeter.java      # a second, independent unit
-test/com/acme/AdderTest.java   # exercises Adder only
-test/com/acme/GreeterTest.java # exercises Greeter only
-brix_build.py                  # two jars, two suites
+src/com/acme/Adder.java        # two trivial, independent units
+src/com/acme/Greeter.java
+test/com/acme/AdderTest.java   # one suite, one test per unit
+test/com/acme/GreeterTest.java
+brix_build.py                  # one jar, one suite, selection wired in
 ```
 
-Two library jars (`adder.jar`, `greeter.jar`) and one test suite wired to each.
-The suites are independent on purpose — that independence is what the demo shows.
+`AdderTest` depends only on `Adder`, `GreeterTest` only on `Greeter`. That
+independence is what selection exploits.
 
-## How you declare a suite
+## How you declare the suite
 
-The entire authoring surface is one action:
+The authoring surface is one action. The only line specific to selection is
+`select=` — everything else is how you'd write any test target:
 
 ```python
 java.JUnitTestAction(
-    name="adder tests",
-    test_sources=d.file("test/com/acme/AdderTest.java"),  # the .java tests
-    classpath=[d.file("build/libs/adder.jar")],           # the code under test
-    console_jar=CONSOLE,                                  # the JUnit runner
+    name="lib tests",
+    test_sources=d.glob("test/com/acme/{name}.java"),  # the .java tests
+    classpath=[d.file(LIB_JAR)],                        # the code under test
+    console_jar=CONSOLE,                               # the JUnit runner
     javac_worker=worker,
     options=["--release", "17", "-encoding", "UTF-8"],
+    select=_select(),   # which classes to run this build (see below)
 )
 ```
 
-You do not tell brix *when* to run it. brix works that out from the inputs.
+`_select()` runs at build-file evaluation time — the same place brix's monorepo
+lazy-loader decides which packages to load. It reads what changed since the last
+build (from brix's own file-hash cache — no VCS required), asks the Java provider
+which test classes that reaches, and returns a JUnit `--select-class` list. When
+proof runs out — a cold build, a new or renamed class, a change it cannot pin to
+a unit — it falls open to `--scan-class-path`, running everything.
 
 ## Run it
 
@@ -46,58 +50,57 @@ You do not tell brix *when* to run it. brix works that out from the inputs.
 python brix_build.py build
 ```
 
-Requires a `junit-platform-console-standalone` jar (the runner). Set
+Requires a `junit-platform-console-standalone` jar. Set
 `BRIX_JUNIT_CONSOLE_JAR=/path/to/...jar`, or drop one under
 `~/Projects/brix_test/*/lib/`.
 
-### First build — everything runs
+### The sequence, and what brix does
 
 ```
-run: run adder tests
-run: run greeter tests
-BUILD OK (10 done)
+# 1. cold build — nothing to select against, so run everything
+run: run lib tests
+BUILD OK
+
+# 2. build again, no changes — the suite replays from cache
+ok: run lib tests (replayed)
+BUILD OK
+
+# 3. edit Adder's implementation, build
+ok:  compile lib tests (replayed)          # tests NOT recompiled — Adder's ABI is unchanged
+run: run lib tests                         # suite RE-RUNS,
+  selected: --select-class com.acme.AdderTest   #   but only AdderTest; GreeterTest is skipped
+
+# 4. build again, no changes — replays cleanly, nothing runs
+ok: run lib tests (replayed)
+BUILD OK
 ```
 
-### Build again with no changes — nothing runs
-
-```
-ok: run adder tests (replayed)
-ok: run greeter tests (replayed)
-BUILD OK (10 done)
-```
-
-Both suites are `(replayed)` — restored from cache. This is the part Maven and
-Gradle don't do: an unchanged suite is not re-run.
-
-### Edit `Adder`'s implementation — only its suite re-runs
-
-Change the body of `Adder.add` (e.g. `return a + b + 0;`) and build:
-
-```
-run: javac(worker) -> build/classes/adder      # Adder recompiled
-ok:  compile adder tests (replayed)            # tests NOT recompiled
-run: run adder tests                           # Adder suite RE-RUN
-ok:  run greeter tests (replayed)              # Greeter suite untouched
-```
-
-Three things happened, and each is deliberate:
+Every step is deliberate:
 
 | Observation | Why |
 |---|---|
-| The Adder suite **re-ran** | The test *run* depends on `adder.jar` through its **bytes**. Behavior may have changed, so the suite must run again. |
-| The Adder tests were **not recompiled** | The test *compile* depends on Adder through its **ABI**. `+ 0` changed no signature, so recompiling would be wasted work. |
-| The Greeter suite **stayed cached** | Its classpath is `greeter.jar`, which nothing touched. There is no input path from an Adder edit to the Greeter suite, so it cannot be stale. |
+| Step 2 runs nothing | The suite is a cacheable action; no input changed, so its recorded pass is restored. |
+| Step 3 does **not** recompile the tests | The test *compile* depends on `Adder` through its **ABI**; an implementation edit changes no signature. |
+| Step 3 re-runs the suite | The test *run* depends on the jar's **bytes**; behavior may have changed, so it must run. |
+| Step 3 runs **only** `AdderTest` | `GreeterTest`'s one dependency, `Greeter`, did not change — so it is provably unaffected and skipped. |
+| Step 4 replays cleanly | Selection reuses the previous command when nothing changed, so a no-op build stays a pure cache hit — no spurious re-run. |
 
-That two-lens split — **ABI for compile, bytes for run** — is what lets brix
-skip the compile without ever skipping a run that might matter.
+## The guarantee
 
-## What this example does *not* yet show
+Selection never trades correctness for speed. The rule that makes it safe: it
+changes only *which classes the runner executes*, never *what the suite watches
+for staleness* — the suite is still fingerprinted against the whole classpath.
+So any change that could matter still re-fires the suite; selection only ever
+shrinks the run down to what the change provably reaches. Whenever that proof is
+incomplete — reflection, a class named only by a string or by configuration, a
+new or renamed unit, a prior failure — it runs everything.
 
-This is suite-level caching: the unit brix skips is a whole suite. Editing a jar
-that a suite depends on re-runs **all** of that suite's test classes, even ones
-that don't touch the changed code.
+That equivalence (a selected run reaches the same verdict as a full run, across
+a whole sequence of edits) is held down by an oracle that runs real JUnit:
+`tests/test_testimpact_java_oracle.py`.
 
-Finer-grained **per-test-class selection** — "edit one class, re-run only the
-test classes that could observe it" — is being built (see
-`docs/test-impact-selection.md`). When it lands, the same `JUnitTestAction`
-authoring surface stays; only the granularity of what gets skipped improves.
+## Scope
+
+This is per-test-**class** selection for a single Java suite. Finer-grained
+per-method selection, and the other language providers (C++, …), build on the
+same core (`docs/test-impact-selection.md`).

@@ -15,7 +15,12 @@ import pytest
 
 from brix.jvmabi import class_refs
 from brix.testimpact import SelectionInput, select_tests
-from brix.testimpact_java import JavaProvider, fqn, scan_classes
+from brix.testimpact_java import (
+    JavaProvider,
+    changed_units_from_paths,
+    fqn,
+    scan_classes,
+)
 
 needs_jdk = pytest.mark.skipif(
     shutil.which("javac") is None or shutil.which("java") is None,
@@ -743,3 +748,55 @@ def test_scan_reads_jars(tmp_path, world):
 
 def test_fqn_maps_internal_names_to_java_names():
     assert fqn("com/acme/Outer$Inner") == "com.acme.Outer$Inner"
+
+
+# --- source-path -> unit mapping (the run-action wiring) ----------------------
+
+def test_changed_path_maps_to_its_unit():
+    changed = changed_units_from_paths(
+        ["src/com/acme/Adder.java"],
+        source_roots=["src", "test"],
+        vocabulary={"com/acme/Adder", "com/acme/Greeter"},
+    )
+    assert changed == frozenset({"com/acme/Adder"})
+
+
+def test_a_changed_source_widens_to_its_inner_classes():
+    # Editing Outer.java can change Outer$Inner too; a test reaching only the
+    # inner class must still be selected, so the map includes every inner unit.
+    changed = changed_units_from_paths(
+        ["src/com/acme/Outer.java"],
+        source_roots=["src"],
+        vocabulary={"com/acme/Outer", "com/acme/Outer$Inner", "com/acme/Other"},
+    )
+    assert changed == frozenset({"com/acme/Outer", "com/acme/Outer$Inner"})
+
+
+def test_a_test_source_maps_through_its_own_root():
+    changed = changed_units_from_paths(
+        ["test/com/acme/AdderTest.java"],
+        source_roots=["src", "test"],
+        vocabulary={"com/acme/AdderTest"},
+    )
+    assert changed == frozenset({"com/acme/AdderTest"})
+
+
+def test_a_path_under_no_known_root_fails_open():
+    # A change we cannot attribute to a unit must force a full run (None).
+    assert (
+        changed_units_from_paths(
+            ["generated/com/acme/A.java"], source_roots=["src"], vocabulary=set()
+        )
+        is None
+    )
+
+
+def test_a_non_java_change_fails_open():
+    # A resource or config change is not a class; we cannot prove which tests it
+    # affects from the path alone, so run everything.
+    assert (
+        changed_units_from_paths(
+            ["src/com/acme/data.properties"], source_roots=["src"], vocabulary=set()
+        )
+        is None
+    )

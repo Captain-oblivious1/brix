@@ -46,15 +46,24 @@ a real test.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import struct
 import zipfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .jvmabi import ClassFormatError, ClassRefs, class_refs
-from .testimpact import ProviderView, TestUnit, Unit
+from .testimpact import (
+    ProviderView,
+    TestUnit,
+    Unit,
+    _vocabulary,
+    plan,
+    record_index,
+)
 
 # Platform code: shipped with the JDK, so it cannot change without the
 # toolchain changing (which already invalidates through the tool fingerprint),
@@ -393,3 +402,143 @@ class JavaProvider:
         for unit in sorted(tests):
             args += ["--select-class", fqn(unit)]
         return args
+
+
+# --- the run-action wiring ----------------------------------------------------
+#
+# Everything above decides *which tests* to run from a snapshot. This turns that
+# decision into what a `JUnitTestAction` runs, at build-file evaluation time —
+# the same place `load_affected` selects packages. The footprint rule (docs)
+# holds throughout: selection changes only the runner's `--select-class` set,
+# never what the action fingerprints (still the whole classpath), so a stale
+# pass is impossible — any relevant change still re-fires the action.
+
+# The console-launcher flag that runs the whole suite: JUnit scans the classpath
+# itself. This is the fail-open command — emitted on a cold build, a full-run
+# trigger, or any change we cannot attribute to a unit.
+SCAN_ALL: tuple[str, ...] = ("--scan-class-path",)
+
+
+def changed_units_from_paths(
+    paths: Iterable[str],
+    source_roots: Iterable[str],
+    vocabulary: Iterable[Unit],
+) -> frozenset[Unit] | None:
+    """Map changed **source paths** to the compiled **units** they define.
+
+    Returns ``None`` — fail open, run everything — if any changed path cannot be
+    attributed to a unit (a path under no known source root, or a non-``.java``
+    input we cannot relate to a class). A ``.java`` maps to its unit by stripping
+    the source root; the result is widened to every inner class of that unit
+    present in the vocabulary, so a test that reaches only an inner class is
+    never missed. Paths are repo-relative POSIX; roots likewise."""
+    roots = [PurePosixPath(str(r).strip("/")) for r in source_roots]
+    vocab = frozenset(vocabulary)
+    units: set[Unit] = set()
+    for p in paths:
+        pp = PurePosixPath(str(p))
+        rel = None
+        for r in roots:
+            try:
+                rel = pp.relative_to(r)
+                break
+            except ValueError:
+                continue
+        if rel is None or rel.suffix != ".java":
+            return None  # cannot attribute this change to a unit -> fail open
+        base = rel.with_suffix("").as_posix()
+        inner = {u for u in vocab if u == base or u.startswith(base + "$")}
+        units |= inner or {base}
+    return frozenset(units)
+
+
+def changed_since_last_build(
+    metadata, root: str | Path, rel_paths: Iterable[str]
+) -> list[str]:
+    """The subset of ``rel_paths`` whose current bytes differ from the hash the
+    last build recorded — a self-contained change signal that needs no VCS. A
+    path with no recorded hash (first build, new file) counts as changed. Keys
+    match the incremental layer's own (absolute path string)."""
+    root = Path(root)
+    changed: list[str] = []
+    for rel in rel_paths:
+        f = root / rel
+        current = hashlib.sha256(f.read_bytes()).hexdigest() if f.is_file() else None
+        if metadata.hash_by_path(str(f)) != current:
+            changed.append(rel)
+    return changed
+
+
+@dataclass(frozen=True)
+class SuitePlan:
+    """The outcome of selecting for one suite: ``select`` is the runner flag
+    tuple to hand a ``JUnitTestAction`` (via ``select=" ".join(plan.select)``);
+    the rest is for diagnostics/tests."""
+
+    select: tuple[str, ...]
+    run_all: bool
+    tests: frozenset[TestUnit]
+    changed: frozenset[Unit] | None
+
+
+def plan_suite(
+    provider: JavaProvider,
+    *,
+    index_path: str | Path,
+    source_roots: Iterable[str],
+    changed_paths: Iterable[str],
+    prior_failed: bool = False,
+) -> SuitePlan:
+    """Select for one suite and persist its index. Reads the provider's view of
+    the *last build's* compiled artifacts (which is all that exists at
+    evaluation time) and the changed source paths, decides the runner flags, and
+    writes the index for next time.
+
+    When nothing maps to a change, the last build's command is reused rather than
+    flipped to a full scan — so a no-op build stays a clean replay instead of
+    re-running the suite once more just because the command string moved.
+
+    ``known`` (for the new-or-renamed trigger) is taken **live** from the view,
+    not from the stored index: the view reads the *last build's* compiled
+    artifacts, so its vocabulary already is exactly the set of units that existed
+    as of the last build. A brand-new or renamed source has no artifact yet, so
+    it is absent from that vocabulary and correctly forces a full run — with no
+    warm-up lag, and no way for a persisted list to drift from what is on disk."""
+    view = provider.view()
+    changed = changed_units_from_paths(changed_paths, source_roots, _vocabulary(view))
+
+    index_path = Path(index_path)
+    try:
+        stored = json.loads(index_path.read_text())
+    except (OSError, ValueError):
+        stored = None
+
+    if changed is None:
+        select: tuple[str, ...] = SCAN_ALL
+        run_all, tests = True, view.all_tests
+    else:
+        # index=record_index(view) sets known := the live vocabulary (above).
+        selection, _ = plan(
+            view, changed, index=record_index(view), prior_failed=prior_failed
+        )
+        run_all, tests = selection.run_all, selection.tests
+        if run_all:
+            select = SCAN_ALL
+        elif not selection.tests:
+            # Provably nothing affected (commonly: no source changed). Reuse the
+            # last command so an unchanged classpath still replays.
+            last = (stored or {}).get("last_select")
+            select = tuple(last) if last else SCAN_ALL
+        else:
+            select = tuple(provider.select_args(selection.tests))
+
+    new_index = record_index(view)
+    new_index["last_select"] = list(select)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = index_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(new_index, sort_keys=True, indent=1))
+    tmp.replace(index_path)
+
+    return SuitePlan(
+        select=select, run_all=run_all, tests=frozenset(tests), changed=changed
+    )

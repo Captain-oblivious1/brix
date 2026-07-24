@@ -1,31 +1,29 @@
 #!/usr/bin/env python3
-"""A minimal, self-contained example of running tests under brix.
+"""Running tests under brix, with per-test-class impact selection.
 
-The point of this example is *not* the code — it is two trivial classes and
-two tiny JUnit suites. The point is how brix treats a test suite: as a
-**cacheable action**. Unlike Maven or Gradle, brix does not re-run a suite
-just because you typed `build`. It runs a suite only when something the suite
-actually reads has changed, and otherwise restores the previous *passing*
-result from cache — the same way it restores a compiled jar.
+Two trivial classes (Adder, Greeter) in one library jar, and one JUnit suite
+holding a test for each. The interesting part is what happens on a rebuild:
 
-Two lenses on the code under test make this sound (see JUnitTestAction):
+  * brix treats the suite as a **cacheable action** — an unchanged tree re-runs
+    zero tests (the run replays from cache, like any output).
+  * when something *does* change, brix runs only the **test classes the change
+    could reach**. Editing Adder re-runs AdderTest; GreeterTest is provably
+    unaffected (its only dependency, Greeter, did not change) and is skipped.
 
-  * the test *compile* depends on the code through its **ABI** — so an
-    implementation-only edit does not recompile the tests;
-  * the test *run* depends on the code through its **bytes** — so that same
-    edit does re-run the suite, because behavior may have changed.
+Selection is decided here, at build-file evaluation time — the same place the
+monorepo lazy-loader decides which packages to load. It reads what changed since
+the last build (from brix's own file-hash cache — no VCS needed), asks the Java
+provider which test classes that reaches, and hands the JUnit runner a
+`--select-class` list. The suite's *fingerprint* is untouched (still the whole
+classpath), so any change that could matter still re-fires the suite — selection
+only ever narrows which classes execute, never what is watched for staleness.
 
-The two suites here are wired to two *separate* jars (adder.jar, greeter.jar).
-That independence is the whole demonstration: editing Adder rebuilds adder.jar,
-whose bytes are an input to the Adder suite, so that suite re-runs — while
-greeter.jar is untouched, so the Greeter suite stays cached and runs zero tests.
-
-    python brix_build.py build      # first run: compiles and runs both suites
-    python brix_build.py build      # both suites CACHED — nothing runs
+    python brix_build.py build      # first run: compiles and runs both tests
+    python brix_build.py build      # CACHED — nothing runs
     # edit src/com/acme/Adder.java
-    python brix_build.py build      # only the Adder suite re-runs
+    python brix_build.py build      # runs AdderTest only; GreeterTest skipped
 
-Requires a `junit-platform-console-standalone` jar (the runner). Point
+Requires a `junit-platform-console-standalone` jar. Point
 BRIX_JUNIT_CONSOLE_JAR at one, or drop it under ~/Projects/brix_test/*/lib/.
 """
 
@@ -37,12 +35,27 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 from brix import CacheBuilder, Graph, IncrementalBuilder, cli, java  # noqa: E402
+from brix import testimpact_java as ti  # noqa: E402
+from brix.metadata import BuildMetadata  # noqa: E402
 
 ROOT = HERE
+METADATA_DIR = "build/.brix"
+LIB_JAR = "build/libs/lib.jar"
+TEST_CLASSES = "build/test-classes/lib"
+SUITE_INDEX = "build/.brix/testimpact/lib.json"
+
+# Where source lives, and every source file, so the change detector can diff
+# them against the last build. Two roots: main code and test code.
+SOURCE_ROOTS = ["src", "test"]
+SOURCES = [
+    "src/com/acme/Adder.java",
+    "src/com/acme/Greeter.java",
+    "test/com/acme/AdderTest.java",
+    "test/com/acme/GreeterTest.java",
+]
 
 
 def _console_jar() -> str:
-    """The one external input: the JUnit console launcher jar."""
     env = os.environ.get("BRIX_JUNIT_CONSOLE_JAR")
     if env and Path(env).is_file():
         return env
@@ -61,61 +74,65 @@ CONSOLE = _console_jar()
 OPTIONS = ["--release", "17", "-encoding", "UTF-8"]
 
 
+def _select() -> str:
+    """Decide which test classes this build needs to run, as JUnit console
+    flags. Reads the last build's compiled artifacts (all that exists yet) and
+    what changed since, and fails open to a full scan whenever proof runs out."""
+    meta = BuildMetadata(ROOT, METADATA_DIR)
+    meta.load()
+    provider = ti.JavaProvider(
+        test_roots=[ROOT / TEST_CLASSES],
+        classpath=[ROOT / LIB_JAR],
+        harness_roots=[CONSOLE],
+    )
+    plan = ti.plan_suite(
+        provider,
+        index_path=ROOT / SUITE_INDEX,
+        source_roots=SOURCE_ROOTS,
+        changed_paths=ti.changed_since_last_build(meta, ROOT, SOURCES),
+        prior_failed=meta.has_failed_actions(),
+    )
+    return " ".join(plan.select)
+
+
 def create_graph() -> Graph:
     graph = Graph()
     d = graph.data
     worker = java.javac_worker(graph)
 
-    # Two independent library jars. Each test suite depends on exactly one.
-    adder_jar = "build/libs/adder.jar"
-    greeter_jar = "build/libs/greeter.jar"
-
+    # One library jar holding both classes.
     graph.add(
         java.JarAction(
-            source_files=d.file("src/com/acme/Adder.java"),
-            output_file=d.file(adder_jar),
-            classes_dir="build/classes/adder",
-            javac_worker=worker,
-            options=OPTIONS,
-        )
-    )
-    graph.add(
-        java.JarAction(
-            source_files=d.file("src/com/acme/Greeter.java"),
-            output_file=d.file(greeter_jar),
-            classes_dir="build/classes/greeter",
+            source_files=d.glob("src/com/acme/{name}.java"),
+            output_file=d.file(LIB_JAR),
+            classes_dir="build/classes/lib",
             javac_worker=worker,
             options=OPTIONS,
         )
     )
 
-    # One suite per jar. This is the whole authoring surface a user needs:
-    #   - test_sources: the .java test files
-    #   - classpath:    the code under test (byte lens at run time)
-    #   - console_jar:  the runner (and the Jupiter API the tests compile against)
-    suites = (
-        ("adder tests", "test/com/acme/AdderTest.java", adder_jar),
-        ("greeter tests", "test/com/acme/GreeterTest.java", greeter_jar),
-    )
-    for name, source, jar in suites:
-        graph.add(
-            java.JUnitTestAction(
-                name=name,
-                test_sources=d.file(source),
-                classpath=[d.file(jar)],
-                console_jar=CONSOLE,
-                test_classes_dir=f"build/test-classes/{name.split()[0]}",
-                javac_worker=worker,
-                options=OPTIONS,
-            )
+    # One suite over both test classes. `select=` is the only new part: instead
+    # of always scanning the whole classpath, run just the classes this build's
+    # change set could reach.
+    graph.add(
+        java.JUnitTestAction(
+            name="lib tests",
+            test_sources=d.glob("test/com/acme/{name}.java"),
+            classpath=[d.file(LIB_JAR)],
+            console_jar=CONSOLE,
+            test_classes_dir=TEST_CLASSES,
+            javac_worker=worker,
+            options=OPTIONS,
+            select=_select(),
         )
+    )
     return graph
 
 
 def builder():
     # The JUnit runner reads real jar paths, so outputs are written in place.
     return CacheBuilder(
-        IncrementalBuilder(create_graph, root=ROOT, metadata_dir="build/.brix"),
+        IncrementalBuilder(create_graph, root=ROOT, metadata_dir=METADATA_DIR),
         cache_dir="build/.brix-cache",
     )
 
@@ -125,7 +142,7 @@ if __name__ == "__main__":
         cli.main(
             create_graph,
             root=ROOT,
-            metadata_dir="build/.brix",
+            metadata_dir=METADATA_DIR,
             builder_factory=builder,
         )
     )
