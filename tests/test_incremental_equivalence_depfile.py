@@ -62,8 +62,8 @@ def build_graph() -> Graph:
     data = graph.data
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("src/{name}.c"),
-            object_files=data.glob("build/obj/{name}.o"),
+            source_file=data.glob("src/{name}.c"),
+            object_file=data.glob("build/obj/{name}.o"),
             compiler=ToolData("cc"),
             compile_options=["-Iinclude"],
         )

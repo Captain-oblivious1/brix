@@ -219,8 +219,8 @@ Strongly typed, ergonomic helpers — no magic string keys:
 
 ```python
 cpp.CompileSourceAction(
-    source_files=data.glob("src/{name}.cpp"),
-    object_files=data.glob("build/obj/{name}.o"),
+    source_file=data.glob("src/{name}.cpp"),
+    object_file=data.glob("build/obj/{name}.o"),
     compiler=data.tool("c++"),
     compile_options=["-O2", "-std=c++20"],
 )

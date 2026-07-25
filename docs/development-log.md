@@ -1,5 +1,14 @@
 # Development log
 
+- **`cpp.CompileSourceAction` params renamed to singular (`source_file=` /
+  `object_file=`).** Duane's call: each expanded invocation compiles one source
+  into one object, so the singular reads truer; the glob's `{name}` binding is
+  what fans the declaration out. Link/archive keep the plural `object_files=`
+  (there many objects genuinely feed one output), as does `DoxygenAction`
+  (a collection of sources → one doc set). Updated every call site (examples,
+  tests, golden generator) and the reference docs; fingerprints are unchanged
+  (param names are not fingerprint material).
+
 - **Dogfooded test selection on the real jackson-databind suite — and learned
   it barely helps here, on purpose.** `examples/jackson/databind_testimpact.py`
   compiles and runs Jackson's *actual* test tree (708 files, ~3,400 tests) under

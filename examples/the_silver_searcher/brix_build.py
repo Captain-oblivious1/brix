@@ -50,8 +50,8 @@ def create_graph() -> Graph:
     graph.add(
         cpp.CompileSourceAction(
             # print_w32.c is Windows-only — drop it with the glob `-` operator.
-            source_files=data.glob("src/{name}.c") - "*print_w32.c",
-            object_files=data.glob("build/obj/{name}.o"),
+            source_file=data.glob("src/{name}.c") - "*print_w32.c",
+            object_file=data.glob("build/obj/{name}.o"),
             compiler=data.tool("cc"),
             compile_options=[
                 "-std=gnu89", "-D_GNU_SOURCE", "-DHAVE_CONFIG_H",

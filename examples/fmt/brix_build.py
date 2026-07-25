@@ -39,8 +39,8 @@ def create_graph() -> Graph:
     data = graph.data
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("build-src/{name}.cc"),
-            object_files=data.glob("build/obj/{name}.o"),
+            source_file=data.glob("build-src/{name}.cc"),
+            object_file=data.glob("build/obj/{name}.o"),
             compile_options=CXX_OPTIONS,
         ),
         cpp.LinkApplicationAction(

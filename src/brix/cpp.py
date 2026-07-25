@@ -6,8 +6,8 @@ added to a graph. Raw and typed forms compose freely.
 
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("src/{name}.cpp"),
-            object_files=data.glob("build/obj/{name}.o"),
+            source_file=data.glob("src/{name}.cpp"),
+            object_file=data.glob("build/obj/{name}.o"),
             compiler=data.tool("c++"),
             compile_options=["-O2", "-std=c++20"],
         ),
@@ -102,29 +102,33 @@ def _single_binding(collection: GlobData, what: str) -> str:
 class CompileSourceAction(Action):
     """Compile every matching source into its object file, in parallel.
 
-    Lowers to an ExpandAll over ``source_files`` whose child compiles one
-    translation unit; ``source_files`` and ``object_files`` must share one
-    binding name (e.g. ``src/{name}.cpp`` → ``build/obj/{name}.o``).
+    Lowers to an ExpandAll over ``source_file`` whose child compiles one
+    translation unit; ``source_file`` and ``object_file`` must share one
+    binding name (e.g. ``src/{name}.cpp`` → ``build/obj/{name}.o``). The names
+    are singular because each expanded invocation compiles one source into one
+    object; the glob's ``{name}`` binding is what fans the declaration out into
+    many such invocations. (Link/archive keep the plural ``object_files=``:
+    there many objects genuinely feed one output.)
     """
 
     def __init__(
         self,
         *,
-        source_files: GlobData,
-        object_files: GlobData,
+        source_file: GlobData,
+        object_file: GlobData,
         compiler: ToolData | None = None,
         compile_options: list[str] | DataExpr | None = None,
         deps: DepSet | None = None,
     ) -> None:
-        source_binding = _single_binding(source_files, "source_files")
-        object_binding = _single_binding(object_files, "object_files")
+        source_binding = _single_binding(source_file, "source_file")
+        object_binding = _single_binding(object_file, "object_file")
         if source_binding != object_binding:
             raise ValueError(
-                f"source_files binds {{{source_binding}}} but object_files "
+                f"source_file binds {{{source_binding}}} but object_file "
                 f"binds {{{object_binding}}}; they must match"
             )
-        self.source_files = source_files
-        self.object_files = object_files
+        self.source_file = source_file
+        self.object_file = object_file
         self.compiler = compiler if compiler is not None else ToolData("c++")
         self.compile_options = compile_options
         # A DepSet's compile flags (-I/-D from e.g. cpp.pkg_config) are added to
@@ -135,13 +139,13 @@ class CompileSourceAction(Action):
 
     def lower(self) -> list[Action]:
         name = self._binding
-        obj_template = self.object_files.pattern.template
+        obj_template = self.object_file.pattern.template
         depfile = f"{obj_template}.d"
         dep_cflags = " ".join(self.deps.compile_flags) if self.deps is not None else ""
         return [
             ExpandAll(
                 element_name=name,
-                collection=self.source_files,
+                collection=self.source_file,
                 child=ExternalProcessAction(
                     name=f"compile {{{name}}}",
                     # -MMD writes user-header (not system-header) prerequisites;
@@ -155,7 +159,7 @@ class CompileSourceAction(Action):
                         "compiler": self.compiler,
                         "options": _options_expr(self.compile_options),
                         "dep_cflags": ValueData(dep_cflags),
-                        "source": FileData(self.source_files.pattern.template),
+                        "source": FileData(self.source_file.pattern.template),
                     },
                     outputs={
                         "object": FileData(obj_template),

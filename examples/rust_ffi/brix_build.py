@@ -35,8 +35,8 @@ def create_graph() -> Graph:
         # cargo builds the staticlib; its .a is this action's tracked output.
         rust.cargo("crate/Cargo.toml", root=ROOT),
         cpp.CompileSourceAction(
-            source_files=d.glob("src/{name}.c"),
-            object_files=d.glob("build/obj/{name}.o"),
+            source_file=d.glob("src/{name}.c"),
+            object_file=d.glob("build/obj/{name}.o"),
             # Compile as C (not the default c++): the Rust symbol is exported
             # unmangled via the C ABI, so the caller must not C++-mangle it.
             compiler=d.tool("cc"),

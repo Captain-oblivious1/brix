@@ -339,8 +339,8 @@ def test_compile_action_adds_dep_compile_flags():
 
     ds = DepSet(compile_flags=("-I/usr/include/foo",))
     action = cpp.CompileSourceAction(
-        source_files=data.glob("src/{n}.cpp"),
-        object_files=data.glob("build/{n}.o"),
+        source_file=data.glob("src/{n}.cpp"),
+        object_file=data.glob("build/{n}.o"),
         deps=ds,
     )
     (expand,) = action.lower()

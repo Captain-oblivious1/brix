@@ -50,8 +50,8 @@ def create_graph() -> Graph:
     data = graph.data
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("src/{name}.cpp"),
-            object_files=data.glob("build/{name}.o"),
+            source_file=data.glob("src/{name}.cpp"),
+            object_file=data.glob("build/{name}.o"),
         ),
         cpp.LinkApplicationAction(
             object_files=data.glob("build/{name}.o"),

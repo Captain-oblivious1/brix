@@ -259,8 +259,8 @@ def graph_cpp():
     d = g.data
     g.add(
         cpp.CompileSourceAction(
-            source_files=d.glob("src/{name}.cpp"),
-            object_files=d.glob("build/obj/{name}.o"),
+            source_file=d.glob("src/{name}.cpp"),
+            object_file=d.glob("build/obj/{name}.o"),
         ),
         cpp.LinkApplicationAction(
             object_files=d.glob("build/obj/{name}.o"),

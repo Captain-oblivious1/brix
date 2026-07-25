@@ -15,8 +15,8 @@ def test_compile_lowers_to_expandall():
     graph = Graph()
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("src/{name}.cpp"),
-            object_files=data.glob("build/obj/{name}.o"),
+            source_file=data.glob("src/{name}.cpp"),
+            object_file=data.glob("build/obj/{name}.o"),
             compile_options=["-O2"],
         )
     )
@@ -65,8 +65,8 @@ def test_archive_lowers_to_ar():
 def test_binding_mismatch_rejected():
     with pytest.raises(ValueError, match="must match"):
         cpp.CompileSourceAction(
-            source_files=data.glob("src/{name}.cpp"),
-            object_files=data.glob("build/obj/{unit}.o"),
+            source_file=data.glob("src/{name}.cpp"),
+            object_file=data.glob("build/obj/{unit}.o"),
         )
 
 
@@ -74,8 +74,8 @@ def test_typed_and_raw_forms_compose_in_one_graph():
     graph = Graph()
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("src/{name}.cpp"),
-            object_files=data.glob("build/obj/{name}.o"),
+            source_file=data.glob("src/{name}.cpp"),
+            object_file=data.glob("build/obj/{name}.o"),
         ),
         ExternalProcessAction(
             name="raw",
@@ -105,8 +105,8 @@ def test_compile_link_run_with_all_layers(tmp_path):
         d = graph.data
         graph.add(
             cpp.CompileSourceAction(
-                source_files=d.glob("src/{name}.cpp"),
-                object_files=d.glob("build/obj/{name}.o"),
+                source_file=d.glob("src/{name}.cpp"),
+                object_file=d.glob("build/obj/{name}.o"),
                 compile_options=["-O1"],
             ),
             cpp.LinkApplicationAction(
@@ -160,8 +160,8 @@ def test_header_change_rebuilds_only_dependent_object(tmp_path):
         d = graph.data
         graph.add(
             cpp.CompileSourceAction(
-                source_files=d.glob("src/{name}.cpp"),
-                object_files=d.glob("build/obj/{name}.o"),
+                source_file=d.glob("src/{name}.cpp"),
+                object_file=d.glob("build/obj/{name}.o"),
                 compile_options=["-I", "include"],
             )
         )
@@ -218,16 +218,16 @@ def test_static_library_archive_link_run(tmp_path):
         d = graph.data
         graph.add(
             cpp.CompileSourceAction(
-                source_files=d.glob("lib/{name}.cpp"),
-                object_files=d.glob("build/obj/lib/{name}.o"),
+                source_file=d.glob("lib/{name}.cpp"),
+                object_file=d.glob("build/obj/lib/{name}.o"),
             ),
             cpp.ArchiveAction(
                 object_files=d.glob("build/obj/lib/{name}.o"),
                 output_file=d.file("build/libgreet.a"),
             ),
             cpp.CompileSourceAction(
-                source_files=d.glob("app/{name}.cpp"),
-                object_files=d.glob("build/obj/app/{name}.o"),
+                source_file=d.glob("app/{name}.cpp"),
+                object_file=d.glob("build/obj/app/{name}.o"),
             ),
             cpp.LinkApplicationAction(
                 object_files=d.glob("build/obj/app/{name}.o") + d.file("build/libgreet.a"),
@@ -308,8 +308,8 @@ def test_editing_one_lib_reruns_only_its_test(tmp_path):
         d = graph.data
         for tree in ("src", "test"):
             graph.add(cpp.CompileSourceAction(
-                source_files=d.glob(f"{tree}/{{name}}.cpp"),
-                object_files=d.glob(f"build/obj/{tree}/{{name}}.o"),
+                source_file=d.glob(f"{tree}/{{name}}.cpp"),
+                object_file=d.glob(f"build/obj/{tree}/{{name}}.o"),
             ))
         for name, objs in {"a_test": ["src/a", "test/a_test"],
                            "b_test": ["src/b", "test/b_test"]}.items():

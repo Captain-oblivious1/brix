@@ -29,7 +29,9 @@
       "Bash(cargo test *)",
       "Bash(python -m pytest tests/test_docgen.py tests/test_public_api.py -q)",
       "Bash(python -m pytest tests/test_docgen.py -q)",
-      "Bash(python -m pytest tests/test_cpp.py tests/test_ts.py tests/test_java.py tests/test_public_api.py -q)"
+      "Bash(python -m pytest tests/test_cpp.py tests/test_ts.py tests/test_java.py tests/test_public_api.py -q)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }

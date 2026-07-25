@@ -40,8 +40,8 @@ def create_graph() -> Graph:
 
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("tools/schema_generator/{name}.cpp"),
-            object_files=data.glob("build/tools/obj/{name}.o"),
+            source_file=data.glob("tools/schema_generator/{name}.cpp"),
+            object_file=data.glob("build/tools/obj/{name}.o"),
             compiler=data.tool("c++"),
             compile_options=["-O2", "-std=c++17"],
         ),

@@ -62,24 +62,24 @@ def create_graph() -> Graph:
         # Library sources per dir, straight from leveldb's tree, minus the
         # non-library files. Every kept source -> its object, in parallel.
         cpp.CompileSourceAction(
-            source_files=data.glob("db/{name}.cc") - ["*_test.cc", "db/leveldbutil.cc"],
-            object_files=data.glob("build/obj/db/{name}.o"),
+            source_file=data.glob("db/{name}.cc") - ["*_test.cc", "db/leveldbutil.cc"],
+            object_file=data.glob("build/obj/db/{name}.o"),
             compile_options=LIB_OPTIONS,
         ),
         cpp.CompileSourceAction(
-            source_files=data.glob("table/{name}.cc") - "*_test.cc",
-            object_files=data.glob("build/obj/table/{name}.o"),
+            source_file=data.glob("table/{name}.cc") - "*_test.cc",
+            object_file=data.glob("build/obj/table/{name}.o"),
             compile_options=LIB_OPTIONS,
         ),
         cpp.CompileSourceAction(
-            source_files=data.glob("util/{name}.cc")
+            source_file=data.glob("util/{name}.cc")
             - ["*_test.cc", "util/env_windows.cc", "util/histogram.cc", "util/testutil.cc"],
-            object_files=data.glob("build/obj/util/{name}.o"),
+            object_file=data.glob("build/obj/util/{name}.o"),
             compile_options=LIB_OPTIONS,
         ),
         cpp.CompileSourceAction(
-            source_files=data.glob("helpers/{name}.cc") - "*_test.cc",
-            object_files=data.glob("build/obj/helpers/{name}.o"),
+            source_file=data.glob("helpers/{name}.cc") - "*_test.cc",
+            object_file=data.glob("build/obj/helpers/{name}.o"),
             compile_options=LIB_OPTIONS,
         ),
         # Bundle the objects into the static library.
@@ -89,8 +89,8 @@ def create_graph() -> Graph:
         ),
         # Compile the smoke program.
         cpp.CompileSourceAction(
-            source_files=data.glob("smoke/{name}.cc"),
-            object_files=data.glob("build/smoke/{name}.o"),
+            source_file=data.glob("smoke/{name}.cc"),
+            object_file=data.glob("build/smoke/{name}.o"),
             compile_options=SMOKE_OPTIONS,
         ),
         # Link it against the archive (-lpthread: leveldb's POSIX env uses it).

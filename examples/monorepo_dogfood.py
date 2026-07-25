@@ -53,8 +53,8 @@ from brix.data import ToolData
 def create_graph():
     g = Graph(); d = g.data
     g.add(cpp.CompileSourceAction(
-        source_files=d.glob("services/util/src/{name}.c"),
-        object_files=d.glob("build/util/{name}.o"),
+        source_file=d.glob("services/util/src/{name}.c"),
+        object_file=d.glob("build/util/{name}.o"),
         compiler=ToolData("cc"),
         compile_options=["-Iservices/util/include"],
     ))
@@ -73,8 +73,8 @@ from brix.data import DataUnion, ToolData
 def create_graph():
     g = Graph(); d = g.data
     g.add(cpp.CompileSourceAction(
-        source_files=d.glob("services/app/src/{name}.c"),
-        object_files=d.glob("build/app/{name}.o"),
+        source_file=d.glob("services/app/src/{name}.c"),
+        object_file=d.glob("build/app/{name}.o"),
         compiler=ToolData("cc"),
         compile_options=["-Iservices/util/include"],
     ))

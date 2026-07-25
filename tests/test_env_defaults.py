@@ -42,8 +42,8 @@ def test_jaraction_tracks_jvm_behaviour_vars():
 
 def test_cpp_compile_and_link_track_toolchain_vars():
     compile_action = cpp.CompileSourceAction(
-        source_files=data.glob("src/{name}.cpp"),
-        object_files=data.glob("build/obj/{name}.o"),
+        source_file=data.glob("src/{name}.cpp"),
+        object_file=data.glob("build/obj/{name}.o"),
     )
     tracked = _env_used_of(compile_action, "compile")
     assert {"CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH",

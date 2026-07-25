@@ -54,8 +54,8 @@ def create_graph() -> Graph:
     for tree in ("src", "test"):
         graph.add(
             cpp.CompileSourceAction(
-                source_files=d.glob(f"{tree}/{{name}}.cpp"),
-                object_files=d.glob(f"build/obj/{tree}/{{name}}.o"),
+                source_file=d.glob(f"{tree}/{{name}}.cpp"),
+                object_file=d.glob(f"build/obj/{tree}/{{name}}.o"),
                 compile_options=CXXFLAGS,
             )
         )

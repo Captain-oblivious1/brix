@@ -35,8 +35,8 @@ def create_graph() -> Graph:
 
     graph.add(
         cpp.CompileSourceAction(
-            source_files=data.glob("src/{name}.cpp"),
-            object_files=data.glob("build/obj/{name}.o"),
+            source_file=data.glob("src/{name}.cpp"),
+            object_file=data.glob("build/obj/{name}.o"),
             compiler=data.tool("c++"),
             compile_options=["-O2", "-std=c++17", "-Wall"],
         ),

@@ -145,8 +145,8 @@ def test_rust_staticlib_links_into_c_and_relinks_on_edit(tmp_path):
         g.add(
             rust.cargo("crate/Cargo.toml", root=tmp_path),
             cpp.CompileSourceAction(
-                source_files=d.glob("src/{name}.c"),
-                object_files=d.glob("build/obj/{name}.o"),
+                source_file=d.glob("src/{name}.c"),
+                object_file=d.glob("build/obj/{name}.o"),
                 compiler=d.tool("cc"),
             ),
             cpp.LinkApplicationAction(
