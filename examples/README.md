@@ -71,12 +71,13 @@ Each has its own `README.md` with clone + setup steps. Checkouts go in
 |---|---|---|
 | `junit5/` | JUnit 5 (Gradle) | multi-module Java compile + `jvm-abi` ABI avoidance + warm javac worker; `benchmark.py` beats Gradle on the edit-compile loop. Found the jvm-abi String-annotation bug. |
 | `fmt/` | fmtlib/fmt (CMake) | `brix.cpp` compile/link + automatic `#include` header-dep tracking on real headers |
-| `jackson/` | Jackson core + annotations + databind | three real modules and selective JUnit suites: a core implementation edit reruns core/databind tests without recompiling databind or touching annotations; includes an automated reversible verifier |
+| `jackson/` | Jackson core + annotations + databind | three real modules and selective JUnit suites: a core implementation edit reruns core/databind tests without recompiling databind or touching annotations; includes an automated reversible verifier. `databind_testimpact.py` additionally runs Jackson's *real* 708-file / ~3,400-test suite under `plan_suite` per-class selection, and `characterize_databind_selection.py` measures the honest payoff — which on this monolith is ~nothing, and correctly so (everything routes through a reflective, widely-referenced `ObjectMapper`), the concrete case for per-method selection |
 | `leveldb/` | google/leveldb (CMake) | C++ static library at scale: 38 TUs compiled in parallel, `cpp.ArchiveAction` → `libleveldb.a`, linked + run against a smoke program; header-dep tracking stays selective on the real tree |
 | `spring-petclinic/` | spring-petclinic (Maven) | a real Spring Boot app: `java.pom("pom.xml")` drives Maven for the ~90-jar classpath, compiled + packaged + `brix.springboot.SpringBootJar` → an executable fat jar that boots with `java -jar`. brix drives the resolver and owns compile + package + incremental |
 | `spring-petclinic-kotlin/` | spring-petclinic-kotlin (Gradle KTS) | the Kotlin Spring Boot app: `java.gradle(...)` adopts the Kotlin-DSL build's `compileClasspath`, `brix.kotlin` compiles the module with the Spring **all-open** plugin (`spring_allopen=`, the `kotlin("plugin.spring")` equivalent — a correctness feature: without it Spring-annotated classes stay `final` and fail to proxy at boot), and the app boots a full context against the resolved runtime classpath |
 | `the_silver_searcher/` | ggreer/the_silver_searcher (autotools) | a real C tool (`ag`): `cpp.pkg_config(["libpcre","zlib","liblzma"])` resolves its system-library deps; brix compiles the 12 TUs (win32 one dropped via glob `-`) and links the working binary |
 
-**Next dogfood target** (see the [roadmap's feature-completeness dogfooding
-section](../docs/roadmap.md#feature-completeness-dogfooding-in-progress--prove-brix-on-real-projects-before-starting-track-3)):
-`jackson-databind` (multi-module test selection).
+**Dogfood status** (see the [roadmap](../docs/roadmap.md)): `jackson-databind`
+multi-module test selection is now covered (the `jackson/` row above — class-level
+selection proved sound but low-payoff on a coupled monolith, motivating per-method
+selection, the top remaining roadmap item).

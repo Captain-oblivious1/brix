@@ -58,11 +58,12 @@ def _generated_version(
     )
 
 
-def create_graph() -> Graph:
-    graph = Graph()
+def build_module_jars(graph: Graph, worker) -> dict[str, str]:
+    """Add the three real Jackson module jars to ``graph`` and return their
+    output paths keyed by module. Shared so a second build file (the real
+    databind test-impact demo) can reuse the exact same jar graph and worker
+    without recompiling the smoke suites."""
     d = graph.data
-    worker = java.javac_worker(graph)
-
     annotations_jar = "build/libs/jackson-annotations.jar"
     core_jar = "build/libs/jackson-core.jar"
     databind_jar = "build/libs/jackson-databind.jar"
@@ -124,6 +125,18 @@ def create_graph() -> Graph:
             options=["--release", "17", "-encoding", "UTF-8"],
         )
     )
+    return {"annotations": annotations_jar, "core": core_jar, "databind": databind_jar}
+
+
+def create_graph() -> Graph:
+    graph = Graph()
+    d = graph.data
+    worker = java.javac_worker(graph)
+
+    jars = build_module_jars(graph, worker)
+    annotations_jar = jars["annotations"]
+    core_jar = jars["core"]
+    databind_jar = jars["databind"]
 
     suites = (
         ("annotations", "AnnotationsSmokeTest.java", [annotations_jar]),

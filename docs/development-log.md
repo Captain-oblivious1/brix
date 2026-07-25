@@ -1,5 +1,27 @@
 # Development log
 
+- **Dogfooded test selection on the real jackson-databind suite — and learned
+  it barely helps here, on purpose.** `examples/jackson/databind_testimpact.py`
+  compiles and runs Jackson's *actual* test tree (708 files, ~3,400 tests) under
+  brix as one cached, selectable `JUnitTestAction` with `plan_suite` per-class
+  selection; the whole suite runs in ~5.5s and an unchanged tree replays. The
+  honest result (measured by `characterize_databind_selection.py`): on databind,
+  class-level selection skips almost nothing, and that is correct rather than a
+  bug. Two reasons. First, nearly every test builds an `ObjectMapper`, which uses
+  reflection — "could load anything by name" — so those tests must always run;
+  with an empty change set, all 668 test classes are still selected. Second, even
+  if you ignore reflection entirely, databind is a tightly-coupled monolith:
+  `ObjectMapper` statically references most of the module, so a random class edit
+  still pulls in a median ~100% of the suite (only 8 of 80 sampled peripheral
+  classes narrow below 5%). The selection stays provably sound throughout — a
+  peripheral class narrows to a single test with zero missed referencers. The
+  point: how much class-level selection saves is a property of the code, not the
+  algorithm — a decoupled framework like JUnit 5 skips ~96% of its suite on a
+  median edit, a monolith like databind skips ~0%. That contrast is the concrete
+  case for per-method (runtime-coverage) selection, which can still narrow inside
+  a coupled module. (Refactored the sibling build's jar-building into a shared
+  `build_module_jars()`; the existing example and verifier are unchanged.)
+
 - **TS test selection wired into a real build — C++-style, so all three targets
   now select.** `ts.RunTestAction` runs `vitest run <file>` per test file as a
   tracked, exit-code-only action that replays on its input fingerprint. Its
