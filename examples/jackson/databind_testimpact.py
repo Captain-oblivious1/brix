@@ -1,29 +1,24 @@
 #!/usr/bin/env python3
-"""The real jackson-databind test suite under brix, with per-class impact selection.
+"""The real jackson-databind test suite under brix, with per-class impact
+selection **by runtime discovery**.
 
-This is the large-scale companion to ``examples/tested_lib`` (which shows the
-same mechanism on two toy classes). Here the suite is Jackson's *actual*
-``src/test/java`` tree — 708 test files, ~3,400 executed tests — run against the
-three real module jars built by the sibling ``brix_build.py``.
+The large-scale companion to ``examples/tested_lib``. The suite is Jackson's
+*actual* ``src/test/java`` tree — ~700 test files, ~3,400 executed tests — and
+each test class runs as its own action against databind's exploded classes.
+brix records which ``.class`` files each test actually loads (``-Xlog:class+load``
+→ a depfile) and re-runs a test only when a class it loaded changes.
 
-The move is identical to ``tested_lib``: one ``java.JUnitTestAction`` over the
-whole test tree, but with ``select=`` decided at build-file eval time by
-``testimpact_java.plan_suite``. It reads the last build's compiled test classes
-(their real bytecode reference graph) plus what changed since (from brix's own
-file-hash cache, no VCS), and hands the JUnit console a ``--select-class`` list
-of just the test classes the change can reach. The suite's *fingerprint* stays
-the whole classpath, so any change that could matter still re-fires the suite —
-selection only narrows which classes execute, and fails open to a full scan
-whenever proof runs out.
+This is the same mechanism as ``tested_lib``, and it is the headline result of
+the whole test-impact feature: **databind is the case where static class-level
+selection skipped ~0%** (everything is statically reachable through a reflective
+``ObjectMapper``), yet runtime discovery selects **~1.5%** — editing one leaf
+class re-runs ~11 of ~700 tests in seconds, because discovery sees the *narrow
+set a test really loads*, not the conservative static closure.
 
-    python databind_testimpact.py build   # cold: compiles + runs the whole suite
+    python databind_testimpact.py build   # cold: ~700 test classes, ~1 min (24-wide parallel)
     python databind_testimpact.py build   # CACHED: nothing runs
-    # edit a databind main source
-    python databind_testimpact.py build   # runs only the reachable test classes
-
-``verify_databind_selection.py`` is the proof: it edits one databind class and
-asserts the selected subset is small, contains exactly the reachable test
-classes, and reaches the same verdict the full run gave those classes.
+    # edit one databind main source (a real bytecode change)
+    python databind_testimpact.py build   # re-runs only the tests that loaded it
 
 Requires the three sibling checkouts (see README) and the
 ``junit-platform-console-standalone`` jar shipped in ``jackson-core/lib``.
@@ -45,13 +40,12 @@ sys.modules[_spec.name] = jackson
 _spec.loader.exec_module(jackson)
 
 from brix import CacheBuilder, Graph, IncrementalBuilder, cli, java  # noqa: E402
-from brix import testimpact_java as ti  # noqa: E402
-from brix.metadata import BuildMetadata  # noqa: E402
 
 ROOT = jackson.ROOT
 DATABIND = jackson.DATABIND
 CONSOLE = jackson.CONSOLE
 FASTDOUBLE = jackson.FASTDOUBLE
+DATABIND_CLASSES = "build/classes/databind"
 OPTIONS = ["--release", "17", "-encoding", "UTF-8"]
 METADATA_DIR = "build/.brix"
 
@@ -59,8 +53,6 @@ MAIN_ROOT = f"{DATABIND}/src/main/java"
 TEST_ROOT = f"{DATABIND}/src/test/java"
 TEST_GLOB = f"{TEST_ROOT}/{{name}}.java"
 TEST_CLASSES = "build/test-classes/databind-real"
-SUITE_INDEX = "build/.brix/testimpact/databind-real.json"
-SOURCE_ROOTS = [MAIN_ROOT, TEST_ROOT]
 
 # The 14 test files that need test-only libraries we deliberately do not stage
 # (assertj / guava / mockito / jol / junit4-vintage / javax.measure). Excluding
@@ -100,56 +92,18 @@ EXCLUDE += [
 ]
 
 
-def _all_sources() -> list[str]:
-    """Every databind source (main + kept test), workspace-relative to ROOT, so
-    the change detector can diff each against the last build's hash."""
-    excluded = {p.lstrip("*") for p in EXCLUDE}
-    out: list[str] = []
-    for root in (MAIN_ROOT, TEST_ROOT):
-        for path in sorted((ROOT / root).rglob("*.java")):
-            if any(path.name == name for name in excluded):
-                continue
-            out.append(str(path.relative_to(ROOT)))
-    return out
-
-
-def make_provider() -> "ti.JavaProvider":
-    """The Java provider over the last build's compiled test classes and the
-    real module jars — the reference graph selection reads. Shared with
-    ``characterize_databind_selection.py``."""
-    jars = ["jackson-databind", "jackson-core", "jackson-annotations"]
-    return ti.JavaProvider(
-        test_roots=[ROOT / TEST_CLASSES],
-        classpath=[ROOT / f"build/libs/{j}.jar" for j in jars] + [ROOT / FASTDOUBLE],
-        harness_roots=[ROOT / CONSOLE],
-    )
-
-
-def _select() -> str:
-    """Which test classes this build needs, as JUnit console flags. Reads the
-    last build's compiled test classes + real module jars (the reference graph)
-    and what changed since, and fails open to a full scan when proof runs out."""
-    meta = BuildMetadata(ROOT, METADATA_DIR)
-    meta.load()
-    provider = make_provider()
-    plan = ti.plan_suite(
-        provider,
-        index_path=ROOT / SUITE_INDEX,
-        source_roots=SOURCE_ROOTS,
-        changed_paths=ti.changed_since_last_build(meta, ROOT, _all_sources()),
-        prior_failed=meta.has_failed_actions(),
-    )
-    return " ".join(plan.select)
-
-
 def create_graph() -> Graph:
     graph = Graph()
     d = graph.data
     worker = java.javac_worker(graph)
 
     jars = jackson.build_module_jars(graph, worker)
+    # The code under test: databind's own classes as an EXPLODED dir (so a
+    # single class's change is visible on its own → per-class selection), plus
+    # core/annotations/fastdouble as jars (third-party to these tests → whole-jar,
+    # coarse but sound).
     classpath = [
-        d.file(jars["databind"]),
+        d.file(DATABIND_CLASSES),
         d.file(jars["core"]),
         d.file(jars["annotations"]),
         d.file(FASTDOUBLE),
@@ -164,7 +118,6 @@ def create_graph() -> Graph:
             test_classes_dir=TEST_CLASSES,
             javac_worker=worker,
             options=OPTIONS,
-            select=_select(),
         )
     )
     return graph

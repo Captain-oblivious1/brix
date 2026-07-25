@@ -1,25 +1,27 @@
 # Design: minimal correct test selection (test-impact analysis)
 
-**Status (2026-07-24): core + Java (provider, audit, real-build wiring) + C++
-provider all implemented.**
+**Status (2026-07-25): Java, C++, and TS all select tests in real builds — all by
+runtime discovery.** Java was rebuilt from static prediction to discovery
+(2026-07-25), retiring the `plan_suite`/provider subsystem — see
+[test-impact-java-per-class-proposal.md](test-impact-java-per-class-proposal.md),
+now the authoritative design for Java. The sections below describing the static
+Java provider (`JavaProvider`, `plan_suite`, the escape audit) are **historical**:
+they document the approach that discovery replaced, kept for the reasoning.
 
 | Increment | State | Where |
 |---|---|---|
-| 1a — language-agnostic core + equivalence oracle | **done** | `src/brix/testimpact.py`, `tests/test_testimpact.py` |
-| 1b — Java provider, proven against a real JUnit run | **done** | `src/brix/testimpact_java.py`, `jvmabi.class_refs`, `tests/test_testimpact_java*.py` |
-| Escape-completeness audit (Java) | **done** | "Known escapes" / "name sources" below |
-| Wiring into `JUnitTestAction` (real build selects tests) | **done** | `testimpact_java.plan_suite`, `examples/tested_lib`, cache-equivalence oracle |
-| 1c — C++ provider, proven against a real gtest run | **done** | `src/brix/testimpact_cpp.py`, `tests/test_testimpact_cpp*.py` |
-| C++ selection in a real build (`cpp.RunTestAction`) | **done** | `cpp.RunTestAction`, `examples/tested_cpp`, `tests/test_cpp.py` |
-| 1d — TS provider, proven against a real vitest run | **done** | `src/brix/testimpact_ts.py`, `tests/test_testimpact_ts*.py`, `examples/tested_ts` |
-| TS selection in a real build (`ts.RunTestAction`) | **done** | `ts.RunTestAction`, `TsProvider.test_input_sets`, `examples/tested_ts` |
-| 2 — dynamic per-test coverage | later | "Granularity, per provider" |
+| 1a — language-agnostic core (`ProviderView`, closures) | **done** | `src/brix/testimpact.py` (C++/TS use `ProviderView`/`_reachable`) |
+| Java selection by runtime discovery | **done** | `JUnitTestAction` (`ExpandAll` + `-Xlog:class+load` depfile), `_java/junit_classload.py`, `examples/tested_lib`, `tests/test_testimpact_java_discovery_oracle.py` |
+| 1c — C++ provider + selection in a real build | **done** | `src/brix/testimpact_cpp.py`, `cpp.RunTestAction`, `examples/tested_cpp` |
+| 1d — TS provider + selection in a real build | **done** | `src/brix/testimpact_ts.py`, `ts.RunTestAction`, `TsProvider.test_input_sets`, `examples/tested_ts` |
+| 2 — sub-class (per-method) coverage | largely obviated | discovery already selects finely (databind ~1.5%); see roadmap |
 
-All three targets — Java, C++, TypeScript — now select tests in a real build.
-
-Both languages select tests in a real build: Java via `examples/tested_lib`
-(eval-time `plan_suite` narrowing one JUnit process), C++ via `examples/tested_cpp`
-(the engine's per-binary staleness *is* the selection — see below). No CMake.
+All three targets select by the same principle — **discover what a test actually
+used, re-run only when that changes** — never static prediction: C++ per binary
+(`-MMD` + link graph), TS per file (import closure), Java per class
+(`-Xlog:class+load`). Proven on jackson-databind, where static class-level
+selection skipped ~0% (reflective `ObjectMapper` reaches everything) yet discovery
+selects ~1.5%. No CMake.
 
 ## The problem
 

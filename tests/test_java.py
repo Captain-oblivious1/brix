@@ -103,11 +103,12 @@ def test_processorpath_requires_worker():
         _jar_action(processorpath=[data.file("lib/processors.jar")])
 
 
-def test_junit_test_action_uses_two_lenses():
+def test_junit_test_action_compiles_abi_and_expands_per_class():
     """The heart of selective test-running: the test *compile* depends on the
-    classpath through the jvm-abi lens (API), the test *run* depends on the
-    same jars through their bytes (implementation), and the run has no file
-    outputs so it replays purely on its input fingerprint."""
+    classpath through the jvm-abi lens (API), and the run lowers to an ExpandAll
+    over the compiled test classes — one discovery-wrapped run per test class,
+    each with its own depfile output so brix folds in the classes it loaded."""
+    from brix.actions import ExpandAll
     from brix.workers import WorkerSpec
 
     worker = WorkerSpec(name="javac", command_line="{java} -jar {jar}", inputs={})
@@ -116,55 +117,49 @@ def test_junit_test_action_uses_two_lenses():
         java.JUnitTestAction(
             name="mytests",
             test_sources=data.glob("src/test/java/{n}.java"),
-            classpath=[data.file("build/libs/app.jar")],
+            classpath=[data.file("build/classes/app")],
             console_jar="lib/console.jar",
             javac_worker=worker,
         )
     )
-    compile_tests, run_tests = graph.actions
+    compile_tests, expand = graph.actions
 
-    # Compile: classpath jars carry the jvm-abi lens (compile cares about API).
-    cp_atoms = list(compile_tests.inputs["classpath"].atoms())
-    cp = {a.path: a.content_key for a in cp_atoms}
-    assert cp["build/libs/app.jar"] == "jvm-abi"
+    # Compile: classpath carries the jvm-abi lens (compile cares about API).
+    cp = {a.path: a.content_key for a in compile_tests.inputs["classpath"].atoms()}
+    assert cp["build/classes/app"] == "jvm-abi"
     assert cp["lib/console.jar"] == "jvm-abi"  # the console jar supplies the Jupiter API
 
-    # Run: the code under test is a byte-lens input (no lens — impl matters),
-    # the run has NO file outputs (replays on fingerprint), and drives the
-    # console launcher with --class-path entries.
-    under_test = list(run_tests.inputs["under_test"].atoms())
-    assert [a.path for a in under_test] == ["build/libs/app.jar"]
-    assert all(a.content_key is None for a in under_test)  # byte lens
-    assert run_tests.outputs == {}
-    assert "-jar {console}" in run_tests.command_line
-    assert "--class-path build/test-classes" in run_tests.command_line
-    assert "--class-path build/libs/app.jar" in run_tests.command_line
+    # Run: an ExpandAll over the compiled classes (inner `$` classes excluded),
+    # one child run per class, discovery-driven (a depfile output, `depfile=`).
+    assert isinstance(expand, ExpandAll)
+    assert expand.element_name == "name"
+    assert "*$*.class" in expand.collection.exclude
+    run_one = expand.child
+    assert run_one.depfile == "build/test-classes/.brix-classload/{name}.d"
+    assert set(run_one.outputs) == {"depfile"}
+    assert "{recorder}" in run_one.command_line
+    # The run classpath (a value) carries the compiled tests + the code under test.
+    classpath = run_one.inputs["classpath"].text
+    assert "build/test-classes" in classpath
+    assert "build/classes/app" in classpath
 
 
-def test_junit_test_action_tracks_test_resources():
-    """Test data dirs are on the run classpath and their files are byte-lens
-    inputs — editing test data re-runs the suite (declare what a test reads)."""
+def test_junit_test_action_puts_test_resources_on_the_classpath():
+    """Test data dirs join each run's classpath so a test can read its fixtures."""
     from brix.workers import WorkerSpec
 
     graph = Graph()
     graph.add(
         java.JUnitTestAction(
             test_sources=data.glob("src/test/java/{n}.java"),
-            classpath=[data.file("build/libs/app.jar")],
+            classpath=[data.file("build/classes/app")],
             console_jar="lib/console.jar",
             test_resource_dirs=["src/test/resources"],
             javac_worker=WorkerSpec(name="javac", command_line="{j}", inputs={}),
         )
     )
-    _, run_tests = graph.actions
-    assert "--class-path src/test/resources" in run_tests.command_line
-    res_inputs = [
-        atom.pattern.template
-        for key, expr in run_tests.inputs.items()
-        if key.startswith("data")
-        for atom in expr.atoms()
-    ]
-    assert res_inputs == ["src/test/resources/{name}"]
+    _, expand = graph.actions
+    assert "src/test/resources" in expand.child.inputs["classpath"].text
 
 
 needs_jdk = pytest.mark.skipif(

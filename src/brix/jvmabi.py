@@ -38,7 +38,7 @@ This module is also the home of brix's class-file *reader*, so a second
 consumer lives here: `class_refs` extracts the type-reference graph a class
 file induces (which classes it statically binds to, and whether it reaches a
 reflective entry point). That feeds test-impact selection — see
-`testimpact_java.py` and docs/test-impact-selection.md — and deliberately
+docs/test-impact-selection.md — and deliberately
 reuses this parser rather than growing a second one.
 """
 
@@ -501,7 +501,7 @@ class ClassRefs:
     * ``strings`` — every Utf8 constant (annotation string values live there,
       not in CONSTANT_String). Only interesting where a framework lets an
       annotation *name code by string* — JUnit's ``@MethodSource`` — so callers
-      that do not need it should drop it; see `testimpact_java`.
+      that do not need it should drop it.
     """
 
     name: str

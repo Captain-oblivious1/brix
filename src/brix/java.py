@@ -36,7 +36,9 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .actions import Action, ExternalProcessAction
+import sys
+
+from .actions import Action, ExpandAll, ExternalProcessAction
 from .data import DataAtom, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
 from .env import SYSTEM
 
@@ -58,6 +60,7 @@ if TYPE_CHECKING:
     from .workers import WorkerSpec
 
 _WORKER_SOURCE = Path(__file__).parent / "_java" / "JavacWorker.java"
+_CLASSLOAD_RECORDER = Path(__file__).parent / "_java" / "junit_classload.py"
 
 
 # --- dependency resolution: adopt a pom, or resolve inline coordinates ---
@@ -698,26 +701,38 @@ def _classpath_paths(classpath: list[DataExpr]) -> list[str]:
 
 
 class JUnitTestAction(Action):
-    """Compile JUnit 5 test sources and run them with the platform console
-    launcher, so brix runs a suite only when its inputs actually change.
+    """Compile JUnit 5 test sources and run **each test class as its own tracked
+    action**, so brix re-runs a test only when a class it actually loads changes
+    — per-class impact selection, done by the incremental engine (the Java
+    analogue of `cpp.RunTestAction` per binary and `ts.RunTestAction` per file).
 
-    The key move is two lenses on the same ``classpath`` jars: the test
-    *compile* depends on them through ``jvm-abi`` (compilation cares only
-    about the API), while the test *run* depends on them through their
-    **bytes** (execution cares about the implementation). So an
-    implementation-only change to the code under test does not recompile the
-    tests but does re-run them; a change touching nothing on a suite's
-    classpath re-runs nothing.
+    Selection is by **runtime discovery, not static prediction**. Each test class
+    runs under the JVM's class-load logging (``-Xlog:class+load``); a small
+    recorder writes the ``.class``/jar files it loaded as a Makefile **depfile**,
+    which brix folds into that run's fingerprint through the same channel C++
+    ``-MMD`` headers and ``tsc --listFiles`` outputs use. So editing ``Adder``
+    re-runs only the tests that loaded it; the rest replay. Reflection needs no
+    special handling — a reflectively loaded class is just a loaded class, and it
+    lands in the depfile like any other.
 
-    The run declares no file outputs, so it replays purely on its input
-    fingerprint: a passing suite is cached like any result (and restored on a
-    clean checkout), while a failing suite is recorded as failed and re-runs
-    until its inputs change.
+    The compile keeps the two-lens trick: tests compile against ``classpath``
+    through the ``jvm-abi`` lens (an impl-only change upstream does not recompile
+    them), while each run discovers the *bytes* it loaded (an impl change re-runs
+    the affected tests). Fine per-class granularity comes for free from where each
+    class loaded: an exploded ``.class`` under a classpath directory is tracked
+    individually (your own code), a class inside a jar tracks the whole jar
+    (coarse but sound for third-party libs).
 
-    ``classpath`` is the code under test (jars). ``console_jar`` is a
-    ``junit-platform-console-standalone`` jar — the runner and the source of
-    the Jupiter API the tests compile against. Tests compile through the warm
-    javac worker (required, for the classpath join).
+    Lowers to the compile action plus an ``ExpandAll`` over the compiled test
+    classes — one run per top-level class (inner ``$`` classes run with their
+    enclosing class and are excluded). A class carrying no tests (a helper, an
+    abstract base) simply no-ops.
+
+    ``classpath`` is the code under test — pass the compiler's **exploded classes
+    directory** (e.g. ``JarAction``'s ``classes_dir``), not the packaged jar, so
+    per-class selection can see individual ``.class`` changes. ``console_jar`` is
+    a ``junit-platform-console-standalone`` jar — the runner and the Jupiter API
+    the tests compile against. Tests compile through the warm javac worker.
     """
 
     def __init__(
@@ -732,7 +747,6 @@ class JUnitTestAction(Action):
         test_resource_dirs: list[str] | None = None,
         java: ToolData | None = None,
         options: list[str] | DataExpr | None = None,
-        select: str = "--scan-class-path",
     ) -> None:
         self.test_sources = test_sources
         self.classpath = _as_classpath_list(classpath) or []
@@ -741,13 +755,13 @@ class JUnitTestAction(Action):
         self.name = name
         self.test_classes_dir = test_classes_dir
         # Directories of test data the suite reads from the classpath (e.g.
-        # src/test/resources). Added to the run classpath and their files
-        # declared as byte-lens inputs, so editing test data re-runs the
-        # suite — the "declare everything a test reads" soundness rule.
+        # src/test/resources). Added to each run's classpath so a test can read
+        # its fixtures; a data file a test opens is discovered as a loaded
+        # resource only if it is a class — plain data files are not yet tracked
+        # per-test (a known gap, same as the static provider's resource scan).
         self.test_resource_dirs = test_resource_dirs or []
         self.java = java if java is not None else ToolData("java")
         self.options = options
-        self.select = select
         if javac_worker is None:
             raise ValueError("JUnitTestAction requires javac_worker= (classpath join)")
 
@@ -770,33 +784,47 @@ class JUnitTestAction(Action):
             outputs={"out": FileData(self.test_classes_dir), "classes": test_classes},
         )
 
-        # 2. Run the tests: --class-path is the compiled tests + the code under
-        #    test + any test-resource dirs (baked literal paths); those jars
-        #    and resource files are byte-lens inputs, so an implementation or
-        #    test-data change re-runs the suite. No file outputs.
-        cp_flags = " ".join(
-            f"--class-path {p}"
-            for p in [
+        # 2. Run each test class as its own action, expanded over the compiled
+        #    classes. `{name}` binds to a class's path (com/acme/AdderTest);
+        #    inner `$` classes run with their enclosing class and are excluded.
+        #    Ordering flows transitively: each run consumes its own `.class`,
+        #    produced by the compile above, which consumes the code under test —
+        #    so a run never precedes the code it exercises. The run's *declared*
+        #    inputs stay minimal (its class + the tools); the classes it actually
+        #    loads are DISCOVERED into the depfile, which is what narrows
+        #    selection to exactly the code a test touches.
+        run_classes = GlobData(f"{self.test_classes_dir}/{{name}}.class") - "*$*.class"
+        classpath = os.pathsep.join(
+            [
                 self.test_classes_dir,
                 *_classpath_paths(self.classpath),
                 *self.test_resource_dirs,
             ]
         )
-        run_inputs: dict[str, DataExpr] = {
-            "java": self.java,
-            "console": FileData(self.console_jar),  # byte lens (framework)
-            "under_test": _runtime_union(self.classpath),  # byte lens: impl matters
-            "tests": test_classes,  # byte lens
-        }
-        for i, res_dir in enumerate(self.test_resource_dirs):
-            run_inputs[f"data{i}"] = GlobData(f"{res_dir}/{{name}}")  # byte lens: test data
-        run_tests = ExternalProcessAction(
-            name=f"run {self.name}",
+        depfile = f"{self.test_classes_dir}/.brix-classload/{{name}}.d"
+        run_one = ExternalProcessAction(
+            name=f"run {self.name} {{name}}",
             command_line=(
-                "{java} -jar {console} execute --disable-banner --details=none"
-                f" --fail-if-no-tests {self.select} {cp_flags}"
+                "{python} {recorder} --depfile {depfile}"
+                " --test-classes-dir {tcdir} --testclass {testclass}"
+                " --java {java} --console {console} --classpath {classpath}"
             ),
-            inputs=run_inputs,
-            outputs={},  # exit code only — replays on the input fingerprint
+            inputs={
+                "python": ToolData(sys.executable),
+                "recorder": FileData(str(_CLASSLOAD_RECORDER.resolve())),
+                "java": self.java,
+                "console": FileData(self.console_jar),
+                "testclass": FileData(f"{self.test_classes_dir}/{{name}}.class"),
+                "tcdir": ValueData(self.test_classes_dir),
+                "classpath": ValueData(classpath),
+            },
+            # The depfile is the only file output; the test verdict is the exit
+            # code, replayed on the fingerprint (which now includes the depfile's
+            # discovered classes). A failed run drops its depfile and re-runs.
+            outputs={"depfile": FileData(depfile)},
+            depfile=depfile,
         )
-        return [compile_tests, run_tests]
+        return [
+            compile_tests,
+            ExpandAll(element_name="name", collection=run_classes, child=run_one),
+        ]

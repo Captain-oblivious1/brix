@@ -24,10 +24,11 @@ the link graph makes a binary stale when an object it links changes. A
 One `RunTestAction` per binary is therefore already impact selection: the run
 unit (a binary) *is* the selection unit, so the engine selects.
 
-That is the whole difference from Java: there, one JUnit process runs many
-classes, so a separate eval-time selector (`plan_suite`) narrows the class set;
-here, each binary is its own process, so the engine's per-action staleness is the
-selection with nothing added.
+Java reaches the same place a different way: each test class is its own run action
+too, but it discovers the classes it loaded at run time (`-Xlog:class+load` → a
+depfile) since a class's dependencies aren't a build product the way a binary's
+are. Either way the engine's per-action staleness *is* the selection — discover
+what each test used, re-run when that changes.
 
 ## How you declare it
 

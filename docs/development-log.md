@@ -1,5 +1,35 @@
 # Development log
 
+- **Java test selection rebuilt from static prediction to runtime discovery —
+  and it made the "unselectable" monolith selectable.** `JUnitTestAction` now
+  lowers to an `ExpandAll` over the compiled test classes (one run per class,
+  inner `$` classes excluded), and each run records which `.class` files the JVM
+  actually loaded (`-Xlog:class+load` via `src/brix/_java/junit_classload.py`,
+  written as a Makefile depfile) — the same discovery channel C++ `-MMD` headers
+  and TS `--listFiles` use. brix folds the loaded classes into the run's
+  fingerprint, so a test re-runs only when a class it truly used changes. This
+  **retired the entire static-prediction subsystem**: deleted `testimpact_java.py`
+  (`JavaProvider`, `scan_classes`, `plan_suite`, closure walk, reflection
+  detection, name-addressed/uncovered escapes), its two test files, and the two
+  example scripts that characterized static selection (`characterize_databind_selection.py`,
+  `junit5/dogfood_testimpact.py`). The `select=` parameter is gone; build files
+  get simpler (no `plan_suite`/`_select` boilerplate); classpath now points at the
+  compiler's exploded `classes_dir` (per-class `.class` fingerprinting for your
+  own code; third-party jars stay whole-jar, coarse but sound). Discovery handles
+  reflection and `@MethodSource` **for free** — a reflectively loaded class is
+  just a loaded class. Proven by a new discovery equivalence oracle
+  (`tests/test_testimpact_java_discovery_oracle.py`, teeth-checked, no
+  under-selection) and by re-dogfooding jackson-databind: where the *static*
+  provider skipped ~0% (everything is statically reachable through a reflective
+  `ObjectMapper`), **discovery selects ~1.5%** — editing one leaf class re-runs
+  ~11 of ~700 tests in ~7 s (cold ~58 s, 24-wide parallel). `JvmFactory` (a
+  pre-warm single-use JVM pool) was designed, then dropped on the evidence: the
+  parallel scheduler already makes cold/incremental fast, and single-use JVMs get
+  no JIT reuse, so a pool would be speculative complexity. Design:
+  `docs/test-impact-java-per-class-proposal.md`; `tested_lib` and the databind
+  dogfood migrated. Suite green (620; the drop from 659 is the deleted
+  static-provider tests).
+
 - **`cpp.CompileSourceAction` params renamed to singular (`source_file=` /
   `object_file=`).** Duane's call: each expanded invocation compiles one source
   into one object, so the singular reads truer; the glob's `{name}` binding is

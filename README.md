@@ -352,15 +352,17 @@ The remaining work is mainly Rust-engine soak and cleanup, more real-project
 dogfooding, usability improvements, and the future non-Python authoring API.
 See the [roadmap](docs/roadmap.md) for the full prioritized list.
 
-**In flight:** [test-impact selection](docs/test-impact-selection.md) — run only
+**Test-impact selection** ([design](docs/test-impact-selection.md)) — run only
 the tests a change could affect, under the same absolute equivalence guarantee
 brix already makes for incremental vs. clean builds. **Java, C++, and TypeScript
-now all select tests in a real build** (`examples/tested_lib`, `tested_cpp`,
-`tested_ts`), each held to an oracle that edits real code and runs a real JUnit /
-gtest / vitest. Dogfooded on the real jackson-databind suite, which showed
-class-level selection is sound but low-payoff on a tightly-coupled monolith — the
-motivation for the next slice, per-method (runtime-coverage) selection. See the
-[roadmap](docs/roadmap.md) for the full prioritized list.
+all select tests in a real build** (`examples/tested_lib`, `tested_cpp`,
+`tested_ts`), each by **runtime discovery**: a test records what it actually used
+(loaded classes / read headers / imported files) and re-runs only when that
+changes, held to a teeth-checked oracle. On the real jackson-databind suite —
+where static class-level selection would skip ~0% because everything is
+statically reachable through a reflective `ObjectMapper` — discovery selects
+~1.5% (edit one class → ~11 of ~700 tests). See the [roadmap](docs/roadmap.md)
+for what's next.
 
 ## Documentation
 

@@ -21,14 +21,15 @@ Two governing rules, in tension, and the order below resolves them:
 
 ### Tier A — close out the in-flight capability (test-impact)
 
-Increment 1 (coarse selection) is done and shippable in Java/C++/TS; the design
-makes increment 2 *additive* (coarse stays the safe floor), so these finishers
-are never undone by per-method later.
+Java, C++, and TS all select tests in real builds. Java was rebuilt to select by
+**runtime discovery** (record what each test class actually loads, re-run when a
+loaded class changes — like C++ `-MMD`), which *retired* the whole static
+`plan_suite` subsystem and, crucially, made the coupled-monolith case selectable:
+on jackson-databind, where static class-level selection skipped ~0%, discovery
+selects ~1.5% (edit one class → ~11 of ~700 tests). Details in
+[test-impact-selection.md](test-impact-selection.md). What's left here:
 
-1. **Harden Java "something failed last build" from global to per-suite.** Today
-   any failed action anywhere pins *every* suite to a full run (`prior_failed`).
-   Safe but wasteful at 50-service scale; make it per-suite.
-2. **C++ test selection on Windows (#43).** Detect `LoadLibrary`/`GetProcAddress`
+1. **C++ test selection on Windows (#43).** Detect `LoadLibrary`/`GetProcAddress`
    (the Windows analogue of `dlopen`, currently a hole on MinGW+`nm`), and handle
    `.exe` / path normalization. Correctness gap, Linux-only target for now.
 
@@ -70,14 +71,12 @@ are never undone by per-method later.
    real project for a work stretch (days) first. Deletes the execution half, keeps
    the reference math (Python stays the golden-fixture oracle). One subtle ordering
    bug breaks builds → **Fable**, line by line. [rust-port.md](rust-port.md).
-7. **Per-method test selection (test-impact increment 2).** Finer than file/class
-   via runtime coverage (JaCoCo / gcov). Deferred on purpose: a *new* increment
-   (not a finish), its soundness kernel is Fable-reserved and unbuilt (coverage is
-   a past-run record — a change adding a new edge into changed code can
-   under-select unless intersected with static reachability), and its payoff is
-   unproven on integration-heavy suites (a databind test round-trips an
-   `ObjectMapper`, lighting up most methods too). **Validate payoff first** (a
-   cheap databind experiment) before building. [test-impact-selection.md](test-impact-selection.md).
+7. **Per-method test selection (test-impact increment 2) — largely obviated.**
+   The motivation was that class-level selection was useless on coupled monoliths;
+   runtime discovery *dissolved* that (it selects finely on databind — see Tier A),
+   so going sub-class is now low-value. Keep parked unless a real suite shows
+   class-level discovery is still too coarse; only then revisit (and the soundness
+   kernel — coverage is a past-run record — remains Fable-reserved).
 8. **`brix.go` and Protobuf "did the meaningful part change?" skip.** Build Go by
    wrapping the `go` tool; add the interface-change skip — when a project using
    them appears.
@@ -150,15 +149,20 @@ content identities all run in Rust and are cross-checked byte-for-byte against t
 Python reference. `status`/`clean` and custom cache-store / identity plugins cross
 as extension traits — nothing falls back to Python.
 
-**Test-impact selection — wired for Java, C++, and TS in real builds.**
-Language-agnostic core + per-language providers (`jvm-abi` refs, C++ `-MMD`+link
-graph, `tsc`/import graph), each proven against a real runner (JUnit/gtest/vitest)
-with a teeth-checked equivalence oracle, under an absolute "selection == full-run
-verdict" guarantee with dynamic-loading fail-open. Java selects via eval-time
-`plan_suite`; C++/TS are engine-native (run unit = selection unit). **Dogfooded on
-the real jackson-databind suite** (708 files, ~3,400 tests): proved class-level
-selection is sound but low-payoff on a coupled monolith — the motivation for
-increment 2 above. See [test-impact-selection.md](test-impact-selection.md).
+**Test-impact selection — wired for Java, C++, and TS in real builds, all by
+runtime discovery.** Each test is its own action that records what it actually
+used and re-runs only when that changes — C++ per binary (`-MMD` + link graph), TS
+per file (import closure), Java per class (`-Xlog:class+load` → depfile of loaded
+classes). Each proven against a real runner (gtest/vitest/JUnit) with a
+teeth-checked equivalence oracle under an absolute "selection == full-run verdict"
+guarantee. **Java was rebuilt from static prediction to discovery**, retiring the
+`plan_suite`/provider subsystem: on jackson-databind — where static class-level
+selection skipped ~0% (all paths run through a reflective `ObjectMapper`) —
+discovery selects ~1.5% (edit one class → ~11 of ~700 tests, ~7 s; cold ~58 s,
+24-wide parallel). Reflection and `@MethodSource` are caught for free (a loaded
+class is a loaded class). `JvmFactory` (pre-warm pool) was evaluated and dropped —
+the parallel scheduler already makes it fast enough and single-use JVMs get no JIT
+reuse. See [test-impact-selection.md](test-impact-selection.md).
 
 **Lazy monorepo loading ("only build what my change touched").** `brix.affected`
 with `select_affected`/`load_affected`, index v2 (persisted per-package
