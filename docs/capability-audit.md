@@ -82,7 +82,7 @@ hits it only with generated headers and Java essentially never.
 Because the root cause is a single property of the staging mechanism, **one fix
 removes the entire matrix**: make a subprocess's own reads see the merged
 (workspace + staging) view. That is the parked design note *"staged-overlay
-visibility for foreign resolvers"* ([roadmap](roadmap.md#parked-design-staged-overlay-visibility-for-foreign-resolvers)), and it is
+visibility for foreign resolvers"* ([roadmap](roadmap.md#staged-overlay-visibility-for-foreign-resolvers)), and it is
 the **same primitive as the Sandboxing project** (impose a filesystem view on a
 step) — build them once. Until then, two escape hatches already keep builds
 *correct*: the plain incremental stack (outputs written in place), or compiling a

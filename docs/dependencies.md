@@ -130,7 +130,7 @@ classpath), so a pom/`build.gradle` edit re-triggers resolution and downstream
 recompiles through the normal incremental graph, rather than the current
 eager-with-memo pre-step. And **downloading** stays out of scope: brix consumes a
 resolver's output; it does not become a package manager (see the roadmap's
-[blocked and undecided section](roadmap.md#blocked-or-not-yet-decided)).
+[decisions-needed section](roadmap.md#needs-a-decision-from-you)).
 
 ## Build-from-source dependencies
 
