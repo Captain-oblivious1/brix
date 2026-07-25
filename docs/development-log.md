@@ -1,5 +1,25 @@
 # Development log
 
+- **TypeScript test-impact provider, proven against real vitest (increment 1d).**
+  The second half of the real target (a Java+TS monorepo) now has a provider,
+  held to the same discipline as Java/C++: a real runner + an equivalence oracle,
+  not just unit tests. Binding unit is the **module (file)**; the graph is the
+  static `import` graph, parsed straight from source (relative specifiers resolved
+  to workspace files; bare specifiers like `vitest` are external/inert, as the
+  Java provider treats JDK classes). `import(<expr>)`/`require(<expr>)` on a
+  *computed* specifier is the reflection analogue → dynamic → its tests always
+  run; a *literal* dynamic import stays an ordinary edge. An unfollowable relative
+  import (tsconfig alias, unmodeled extension) → `uncovered` → full run. Proven in
+  `tests/test_testimpact_ts_oracle.py` against real vitest (reusing the
+  `examples/tested_ts` install via a symlinked node_modules, so no network):
+  editing `util` selects `adder`'s test (transitive import) and never `greeter`'s;
+  teeth-checked (blinded → UNDER-SELECTION). Toolchain stood up on this machine
+  (node 26 / npm 12 via pacman, typescript + vitest via a local npm install).
+  **Still to wire:** no brix build consumes it yet; the intended shape is C++'s,
+  not Java's — a per-test-file `vitest run <file>` action whose byte-lens inputs
+  are the file's transitive import closure (brix already discovers it via
+  `tsc --listFiles`), so the engine selects per file with no `plan_suite`.
+
 - **C++ test selection wired into a real build — and it's simpler than Java.**
   The key realization: a C++ test binary is itself a build product, so brix's
   existing `-MMD` (header) + link-graph tracking already makes it stale exactly

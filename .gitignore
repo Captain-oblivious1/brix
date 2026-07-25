@@ -10,6 +10,8 @@ examples/incremental_demo/runs.log
 examples/incremental_demo/src/
 examples/typescript/*/dist/
 examples/typescript/node_modules/
+examples/*/node_modules/
+examples/tested_ts/.brix*/
 examples/templates/*/build/
 examples/templates/*/dist/
 examples/templates/*/node_modules/

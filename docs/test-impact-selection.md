@@ -11,6 +11,8 @@ provider all implemented.**
 | Wiring into `JUnitTestAction` (real build selects tests) | **done** | `testimpact_java.plan_suite`, `examples/tested_lib`, cache-equivalence oracle |
 | 1c — C++ provider, proven against a real gtest run | **done** | `src/brix/testimpact_cpp.py`, `tests/test_testimpact_cpp*.py` |
 | C++ selection in a real build (`cpp.RunTestAction`) | **done** | `cpp.RunTestAction`, `examples/tested_cpp`, `tests/test_cpp.py` |
+| 1d — TS provider, proven against a real vitest run | **done** | `src/brix/testimpact_ts.py`, `tests/test_testimpact_ts*.py`, `examples/tested_ts` |
+| TS selection in a real build (per-file run action) | **next** | see "The TypeScript provider" below |
 | 2 — dynamic per-test coverage | later | "Granularity, per provider" |
 
 Both languages select tests in a real build: Java via `examples/tested_lib`
@@ -203,6 +205,38 @@ index, no eval-time analysis, no CMake. Proven in `examples/tested_cpp` and
 per-binary path is the default. The one gap — code loaded at run time (`dlopen`),
 invisible to the link graph — is declared via `RunTestAction(runtime_inputs=…)`,
 and `references_dl` (an `nm -u` scan) is the detector for it.
+
+## The TypeScript provider
+
+`src/brix/testimpact_ts.py`, proven against real vitest in
+`tests/test_testimpact_ts_oracle.py`. Binding unit: the **module (file)**, like
+C++ — and like C++ the graph is file-level, but it comes straight from the static
+`import` graph rather than a compiler depfile.
+
+- **`code_deps` / `test_edges` from parsed imports.** `import … from './x'`,
+  side-effect `import './x'`, and `export … from './x'` are static edges; a
+  relative specifier is resolved to a real workspace file (with the usual
+  extension / `index` fallbacks), a bare specifier (`react`, `vitest`) is an
+  external package and inert — the same treatment the Java provider gives JDK
+  platform classes. A test file's closure is its imports plus everything they
+  transitively import; editing `util.ts` selects the tests whose closure reaches
+  it and no others.
+- **`import(<expr>)` / `require(<expr>)` is the reflection analogue.** A dynamic
+  import on a *computed* specifier loads a module by a run-time name, so the file
+  is marked dynamic and every test reaching it always runs. A dynamic import on a
+  *literal* (`import('./plugin')`) is statically resolvable and stays an ordinary
+  edge.
+- **Fail-open on what it can't follow.** A relative import that resolves to no
+  known workspace file (a tsconfig `paths` alias, an extension not modeled)
+  becomes `uncovered` → full run. It never guesses an edge away.
+
+**Still to wire.** Like C++, no build action consumes the selection yet, and the
+intended shape is the C++ one, not Java's: run `vitest run <file>` per test file
+as a tracked action whose byte-lens inputs are that file's transitive import
+closure (which brix already discovers via `tsc --listFiles`), so the incremental
+engine re-runs only the test files a change reaches — engine-native per-file
+selection, no `plan_suite`. The subsetter (`select_args` → `vitest run <files>`)
+is ready.
 
 ## The equivalence oracle (how we prove it)
 
