@@ -210,6 +210,30 @@ per-binary path is the default. The one gap — code loaded at run time (`dlopen
 invisible to the link graph — is declared via `RunTestAction(runtime_inputs=…)`,
 and `references_dl` (an `nm -u` scan) is the detector for it.
 
+### Windows / toolchain portability (scope)
+
+The C++ selection is engine-native, so the only OS-specific surface is *running*
+the binary and *detecting* runtime loading. Both are now correct **by
+construction** on Windows, though unverified there (no Windows CI):
+
+- **Running the binary.** `RunTestAction` execs argv directly (no shell), so a
+  path with a directory separator — every build output — runs as a path on both
+  POSIX and Windows with no `./` prefix; the prefix is added only for a bare name
+  in the cwd, and never on Windows. The executable path must carry its real
+  extension (`.exe`) — brix does not synthesize it.
+- **Detecting runtime loading.** `references_dl`'s symbol set covers both the
+  POSIX (`dlopen`/`dlsym`/…) and Windows (`LoadLibrary*`/`GetProcAddress`/
+  `LoadPackagedLibrary`) entry points, matched as substrings so import thunks and
+  A/W variants are caught; it fails **safe** when `nm` is absent or odd (MinGW),
+  treating the object as dynamic. Note this detector is a helper, not wired into a
+  build — runtime-loaded code is declared via `runtime_inputs=` regardless.
+
+**Out of scope, and the real "C++ on Windows" blocker:** header tracking. brix
+discovers `#include`s from `-MMD` depfiles, which GCC and Clang (incl. clang-cl)
+emit; **MSVC `cl.exe` uses `/showIncludes`** with a different format, unsupported
+here. A project on GCC/Clang/MinGW is covered; one on MSVC needs a `/showIncludes`
+adapter first — a separate, compile-side item.
+
 ## The TypeScript provider
 
 `src/brix/testimpact_ts.py`, proven against real vitest in

@@ -1,5 +1,23 @@
 # Development log
 
+- **C++ test-impact Windows portability (#43) — closes Tier A.** Two OS-specific
+  surfaces made correct by construction (unverified on Windows — no CI there).
+  `cpp.RunTestAction` no longer hard-codes a Unix `./{binary}` invocation: since
+  brix execs argv directly (no shell), a path with a directory separator — every
+  build output — runs as a path on both OSes with no prefix, and the POSIX `./`
+  is added only for a bare cwd name and never on Windows (`_binary_ref()`).
+  `references_dl`'s symbol set gained the Windows dynamic-loading entry points
+  (`LoadLibrary*`, `GetProcAddress`, `LoadPackagedLibrary`) beside the POSIX
+  `dl*`, matched as substrings (catches `__imp_` thunks / A-W variants) and still
+  failing safe when `nm` is absent/odd. Honest scope note in
+  `docs/test-impact-selection.md`: this detector is a helper, not wired into a
+  build (runtime-loaded code is declared via `runtime_inputs=` regardless); and
+  the real out-of-scope "C++ on Windows" blocker is compile-side — MSVC `cl.exe`
+  header tracking uses `/showIncludes`, not the `-MMD` depfiles brix reads (a
+  GCC/Clang/MinGW project is covered; MSVC needs a `/showIncludes` adapter first).
+  `tested_cpp` still green on Linux (proving the `./` removal is safe);
+  `tests/test_cpp.py` gains a platform-aware `_binary_ref` test.
+
 - **Java test selection rebuilt from static prediction to runtime discovery —
   and it made the "unselectable" monolith selectable.** `JUnitTestAction` now
   lowers to an `ExpandAll` over the compiled test classes (one run per class,

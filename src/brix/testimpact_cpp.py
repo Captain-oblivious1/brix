@@ -43,7 +43,14 @@ from .testimpact import ProviderView, TestUnit, Unit
 # Runtime dynamic-linking entry points. An object with an undefined reference to
 # any of these can load a shared object by a name computed at run time, so its
 # real dependencies are not statically knowable — the reflection analogue.
-_DL_SYMBOLS: tuple[str, ...] = ("dlopen", "dlmopen", "dlsym", "dlvsym")
+# Matched as substrings, so `LoadLibrary` catches `LoadLibraryA/W/Ex*` and the
+# `__imp_`-prefixed dllimport thunk; an over-match is over-selection (safe).
+# POSIX (`dl*`) and Windows (`LoadLibrary`/`GetProcAddress`/`LoadPackagedLibrary`)
+# both listed so the detector is correct whichever toolchain built the object.
+_DL_SYMBOLS: tuple[str, ...] = (
+    "dlopen", "dlmopen", "dlsym", "dlvsym",
+    "LoadLibrary", "GetProcAddress", "LoadPackagedLibrary",
+)
 
 
 def parse_depfile(text: str) -> tuple[str | None, frozenset[str]]:

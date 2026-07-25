@@ -272,6 +272,32 @@ def test_run_test_lowers_to_a_tracked_run():
     assert action.name == "run build/test/foo_test"
     assert action.outputs == {}  # exit code only
     assert action.inputs["binary"].path == "build/test/foo_test"  # byte lens
+    # A path with a directory separator execs directly on every OS — no "./"
+    # (which would break on Windows). Commands are exec'd, not shell'd.
+    assert action.command_line.startswith("{binary}")
+
+
+def test_run_test_binary_reference_is_platform_correct(monkeypatch):
+    """Only a *bare* name in the cwd needs the POSIX `./`; a path with a
+    separator never does, and Windows never gets `./` at all."""
+    import brix.cpp as cppmod
+
+    # Path with a separator: no prefix, either OS.
+    graph = Graph()
+    graph.add(cpp.RunTestAction(test_binary="build/test/foo_test"))
+    assert graph.actions[0].command_line.startswith("{binary}")
+
+    # Bare name on POSIX: needs "./" so exec finds it in cwd (no PATH lookup).
+    monkeypatch.setattr(cppmod.os, "name", "posix")
+    graph = Graph()
+    graph.add(cpp.RunTestAction(test_binary="foo_test"))
+    assert graph.actions[0].command_line.startswith("./{binary}")
+
+    # Bare name on Windows: no "./" convention.
+    monkeypatch.setattr(cppmod.os, "name", "nt")
+    graph = Graph()
+    graph.add(cpp.RunTestAction(test_binary="foo_test.exe"))
+    assert graph.actions[0].command_line.startswith("{binary}")
 
 
 def test_runtime_inputs_are_tracked():

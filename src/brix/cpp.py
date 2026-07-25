@@ -21,6 +21,7 @@ added to a graph. Raw and typed forms compose freely.
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 from .actions import Action, ExpandAll, ExternalProcessAction
@@ -297,9 +298,23 @@ class RunTestAction(Action):
         self.args = args
         self.runtime_inputs = list(runtime_inputs or [])
         # An optional wrapper (e.g. a sandbox or `valgrind`); by default the
-        # binary is executed directly. A leading "./" is added at render so a
-        # repo-relative path is found without a PATH lookup.
+        # binary is executed directly by its path.
         self.runner = runner
+
+    def _binary_ref(self) -> str:
+        """How to name the executable in the (exec'd, not shell'd) command.
+
+        brix runs commands by splitting them and exec-ing argv directly, so the
+        binary reference is just argv[0]. A path with a directory separator is
+        run as a path on every OS (no PATH lookup), so build outputs — which are
+        always under a directory — need no prefix. Only a *bare* name in the cwd
+        needs the POSIX ``./`` disambiguation, and never on Windows (which has no
+        ``./`` convention). On Windows the executable path must carry its ``.exe``
+        (the linker's real output name); brix does not synthesize it."""
+        path = self.test_binary.path
+        if "/" in path or "\\" in path or os.name == "nt":
+            return "{binary}"
+        return "./{binary}"
 
     def lower(self) -> list[Action]:
         inputs: dict[str, DataExpr] = {"binary": self.test_binary}
@@ -312,9 +327,7 @@ class RunTestAction(Action):
             inputs["runner"] = self.runner
             command = "{runner} {binary} {args}"
         else:
-            # Execute the binary by path (it has a path separator, so no PATH
-            # lookup); "./"-relative works under the workspace root.
-            command = "./{binary} {args}"
+            command = f"{self._binary_ref()} {{args}}"
         return [
             ExternalProcessAction(
                 name=self.name,
