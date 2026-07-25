@@ -32,7 +32,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from .testimpact import ProviderView, TestUnit, Unit
+from .testimpact import ProviderView, TestUnit, Unit, _reachable
 
 # Static imports that create a real edge: `import ... from 'x'`, a side-effect
 # `import 'x'`, and `export ... from 'x'`. The specifier is always a literal.
@@ -147,6 +147,26 @@ class TsProvider:
         """`vitest run <files>` arguments running exactly ``tests``."""
         names = sorted(tests)
         return ["run", *names] if names else []
+
+    def test_input_sets(self) -> dict[TestUnit, frozenset[Unit]]:
+        """For each test file, the workspace files that make up its byte-lens
+        footprint — the test plus its transitive import closure.
+
+        This is what wires per-file selection into a real build with **no**
+        eval-time selector: declare each test's `RunTestAction` over exactly
+        these files, and the incremental engine re-runs a test only when a file
+        in its closure changes. A test whose closure reaches a computed
+        `import()`/`require()` or an unresolved import gets the **whole** source
+        set instead — the run-on-any-change fail-open, the footprint form of the
+        core's dynamic/uncovered triggers."""
+        view = self.view()
+        all_sources = frozenset(view.code_deps)
+        fail_open = view.dynamic_units | view.uncovered
+        out: dict[TestUnit, frozenset[Unit]] = {}
+        for test, edges in view.test_edges.items():
+            closure = _reachable(edges, view.code_deps) | {test}
+            out[test] = all_sources if (closure & fail_open) else frozenset(closure)
+        return out
 
 
 def _posix(path: str | Path) -> str:

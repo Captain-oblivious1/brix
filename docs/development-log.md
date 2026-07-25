@@ -1,5 +1,22 @@
 # Development log
 
+- **TS test selection wired into a real build — C++-style, so all three targets
+  now select.** `ts.RunTestAction` runs `vitest run <file>` per test file as a
+  tracked, exit-code-only action that replays on its input fingerprint. Its
+  byte-lens inputs are the test file plus its transitive import closure, so the
+  incremental engine re-runs a test only when a file in its closure changes —
+  per-file selection with no `plan_suite`, because the run unit (a test file) is
+  the selection unit. The one TS-specific piece vs C++: a test file is not a build
+  product whose staleness the engine already tracks, so each action is handed its
+  closure explicitly via `TsProvider.test_input_sets()` (which widens to every
+  source for a test reaching a computed `import()`/`require()` or an unresolved
+  import — the footprint form of fail-open). Proven in `examples/tested_ts`: edit
+  `util.ts`, only `adder`'s test re-runs, `greeter`'s replays, and the next no-op
+  build replays both. Unlike C++/Java there is no compiler folding to trip over —
+  brix tracks source bytes directly, so any edit in a closure re-runs (the safe
+  direction). Java (`plan_suite`), C++ (`cpp.RunTestAction`), and TS
+  (`ts.RunTestAction`) now all select tests in a real build.
+
 - **TypeScript test-impact provider, proven against real vitest (increment 1d).**
   The second half of the real target (a Java+TS monorepo) now has a provider,
   held to the same discipline as Java/C++: a real runner + an equivalence oracle,

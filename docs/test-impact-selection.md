@@ -12,8 +12,10 @@ provider all implemented.**
 | 1c — C++ provider, proven against a real gtest run | **done** | `src/brix/testimpact_cpp.py`, `tests/test_testimpact_cpp*.py` |
 | C++ selection in a real build (`cpp.RunTestAction`) | **done** | `cpp.RunTestAction`, `examples/tested_cpp`, `tests/test_cpp.py` |
 | 1d — TS provider, proven against a real vitest run | **done** | `src/brix/testimpact_ts.py`, `tests/test_testimpact_ts*.py`, `examples/tested_ts` |
-| TS selection in a real build (per-file run action) | **next** | see "The TypeScript provider" below |
+| TS selection in a real build (`ts.RunTestAction`) | **done** | `ts.RunTestAction`, `TsProvider.test_input_sets`, `examples/tested_ts` |
 | 2 — dynamic per-test coverage | later | "Granularity, per provider" |
+
+All three targets — Java, C++, TypeScript — now select tests in a real build.
 
 Both languages select tests in a real build: Java via `examples/tested_lib`
 (eval-time `plan_suite` narrowing one JUnit process), C++ via `examples/tested_cpp`
@@ -230,13 +232,15 @@ C++ — and like C++ the graph is file-level, but it comes straight from the sta
   known workspace file (a tsconfig `paths` alias, an extension not modeled)
   becomes `uncovered` → full run. It never guesses an edge away.
 
-**Still to wire.** Like C++, no build action consumes the selection yet, and the
-intended shape is the C++ one, not Java's: run `vitest run <file>` per test file
-as a tracked action whose byte-lens inputs are that file's transitive import
-closure (which brix already discovers via `tsc --listFiles`), so the incremental
-engine re-runs only the test files a change reaches — engine-native per-file
-selection, no `plan_suite`. The subsetter (`select_args` → `vitest run <files>`)
-is ready.
+**Wired, C++-style.** `ts.RunTestAction` runs `vitest run <file>` per test file
+as a tracked, exit-code-only action whose byte-lens inputs are the file's
+transitive import closure — so the incremental engine re-runs only the test files
+a change reaches, no `plan_suite`. The one TS-specific piece: a test file is not a
+build product whose staleness the engine already tracks (as a C++ binary is), so
+each action is handed its closure explicitly via `TsProvider.test_input_sets()`,
+which widens to the whole source set for a test reaching a computed
+`import()`/`require()` or an unresolved import (fail-open). Proven in
+`examples/tested_ts`: edit `util.ts`, only `adder`'s test re-runs.
 
 ## The equivalence oracle (how we prove it)
 

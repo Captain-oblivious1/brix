@@ -189,3 +189,20 @@ def test_single_module_ts_is_fine_under_atomic():
     from brix.atomic import staging_hazards
 
     assert staging_hazards(g) == []
+
+
+def test_run_test_lowers_to_a_tracked_vitest_run():
+    from brix import ExternalProcessAction
+    graph = Graph()
+    graph.add(ts.RunTestAction(
+        test_file="test/adder.test.ts",
+        sources=["src/adder.ts", "src/util.ts"],
+    ))
+    (action,) = graph.actions
+    assert isinstance(action, ExternalProcessAction)
+    assert action.name == "vitest test/adder.test.ts"
+    assert action.outputs == {}  # exit code only
+    assert action.inputs["test"].path == "test/adder.test.ts"
+    # the import closure is declared as byte-lens inputs
+    paths = {v.path for k, v in action.inputs.items() if k.startswith("src")}
+    assert paths == {"src/adder.ts", "src/util.ts"}

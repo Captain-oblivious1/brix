@@ -129,3 +129,35 @@ def test_an_unfollowable_relative_import_fails_open(tmp_path):
     assert "src/a.ts" in view.uncovered  # unresolved relative -> incomplete graph
     sel = _select(provider, {"src/a.ts"})
     assert sel.run_all  # forces a full run
+
+
+# --- per-test byte-lens footprints (the wiring) ------------------------------
+
+def test_test_input_sets_are_the_transitive_closures(tmp_path):
+    files = _write(tmp_path, {
+        "src/util.ts": "export const b = 1;\n",
+        "src/adder.ts": "import { b } from './util';\nexport const a = b;\n",
+        "src/greeter.ts": "export const g = 'hi';\n",
+        "test/adder.test.ts": "import { a } from '../src/adder';\ntest('x',()=>a);\n",
+        "test/greeter.test.ts": "import { g } from '../src/greeter';\ntest('x',()=>g);\n",
+    })
+    sets = TsProvider(files=files, root=tmp_path).test_input_sets()
+    # adder's test footprint reaches util transitively; greeter's does not.
+    assert sets["test/adder.test.ts"] == frozenset(
+        {"test/adder.test.ts", "src/adder.ts", "src/util.ts"})
+    assert sets["test/greeter.test.ts"] == frozenset(
+        {"test/greeter.test.ts", "src/greeter.ts"})
+
+
+def test_a_dynamic_test_footprint_is_every_source(tmp_path):
+    files = _write(tmp_path, {
+        "src/loader.ts": "export const load = (n:string) => import(n);\n",
+        "src/plain.ts": "export const x = 1;\n",
+        "test/loader.test.ts": "import { load } from '../src/loader';\ntest('x',()=>load('a'));\n",
+        "test/plain.test.ts": "import { x } from '../src/plain';\ntest('x',()=>x);\n",
+    })
+    sets = TsProvider(files=files, root=tmp_path).test_input_sets()
+    # loader reaches a computed import() -> its test must re-run on ANY change.
+    assert sets["test/loader.test.ts"] == frozenset(files)
+    # plain is unaffected and keeps a tight footprint.
+    assert sets["test/plain.test.ts"] == frozenset({"test/plain.test.ts", "src/plain.ts"})

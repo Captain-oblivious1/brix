@@ -40,12 +40,30 @@ npm test           # vitest run — both pass
 The oracle reuses this install (its `node_modules` is symlinked into a throwaway
 workspace), so once you've run `npm install` here the oracle needs no network.
 
-## Not yet wired into a brix build
+## Selection in a real brix build
 
-Unlike `tested_lib` (Java) and `tested_cpp` (C++), this example does not yet
-select *inside a brix build* — there is no `brix_build.py` here. The provider and
-its equivalence guarantee are done; the remaining slice is a brix TS test-run
-action. The intended shape mirrors C++: run `vitest run <file>` per test file as
-a tracked action whose byte-lens inputs are that file's transitive import
-closure, so the incremental engine re-runs only the test files a change reaches —
-per-file selection for free, exactly as `tested_cpp` gets per-binary selection.
+`brix_build.py` wires it in, mirroring C++'s engine-native approach:
+
+```
+python brix_build.py build      # cold — both test files run
+python brix_build.py build      # CACHED — nothing runs
+# edit src/util.ts   (adder imports it; greeter does not)
+python brix_build.py build      # re-runs adder's test only; greeter's replays
+```
+
+Each test file is one `ts.RunTestAction` — `vitest run <file>`, no outputs, so it
+replays on its input fingerprint. Its byte-lens inputs are the test file plus its
+transitive import closure, computed by `TsProvider.test_input_sets()`. So the
+incremental engine re-runs a test only when a file in its closure changes:
+**per-file selection, done by the engine**, because the run unit (a test file) is
+the selection unit — exactly how `tested_cpp` gets per-binary selection.
+
+The one TS-specific piece: unlike a C++ binary, a test file is not a build product
+whose staleness the engine already tracks, so each `RunTestAction` is handed its
+import closure explicitly. A test reaching a computed `import()`/`require()` or an
+unresolved import is given the whole source set instead (run on any change) — the
+footprint form of fail-open.
+
+Note: because brix tracks the *source* bytes directly (no compile step folds
+anything away), any edit to a file in a test's closure re-runs it — even a change
+a compiler would optimize out. That's the safe direction.

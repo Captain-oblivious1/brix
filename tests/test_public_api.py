@@ -65,7 +65,7 @@ MODULE_EXPORTS = {
              "abi", "AbiFile", "AbiGlob", "pom", "maven", "gradle"},
     "kotlin": {"JarAction", "kotlinc_worker", "abi", "KotlinAbiFile", "KotlinAbiGlob"},
     "rust": {"CargoBuildAction", "cargo"},
-    "ts": {"CompileAction", "TypedocAction", "npm", "dts", "DtsFile", "DtsGlob"},
+    "ts": {"CompileAction", "RunTestAction", "TypedocAction", "npm", "dts", "DtsFile", "DtsGlob"},
     "springboot": {"SpringBootJar", "boot_repackager", "RepackagerSpec"},
     "cli": {"main", "Alias"},
     "data": {"DataExpr", "DataAtom", "FileData", "GlobData", "RegexData",

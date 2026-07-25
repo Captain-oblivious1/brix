@@ -66,7 +66,7 @@ _LISTFILES_WRAPPER = Path(__file__).parent / "_ts" / "tsc_listfiles.py"
 
 
 # Public API surface (curated for documentation and as a contract).
-__all__ = ['CompileAction', 'TypedocAction', 'npm', 'dts', 'DtsFile', 'DtsGlob']
+__all__ = ['CompileAction', 'RunTestAction', 'TypedocAction', 'npm', 'dts', 'DtsFile', 'DtsGlob']
 
 
 def _resolve_npm_types(base: Path, node_modules: str, name: str) -> list[str]:
@@ -171,6 +171,64 @@ def _options_expr(options: list[str] | DataExpr | None) -> DataExpr:
     if isinstance(options, DataExpr):
         return options
     return ValueData(" ".join(options or []))
+
+
+class RunTestAction(Action):
+    """Run one vitest test file as a tracked action.
+
+    No file outputs, so it replays on its input fingerprint: a passing run is
+    cached, a failing one re-runs until its inputs change (the same contract as
+    ``cpp.RunTestAction`` and ``java.JUnitTestAction``'s run step).
+
+    The byte-lens inputs are the test file plus ``sources`` — the workspace files
+    it transitively imports. Editing any of them re-runs the test; editing a file
+    outside its import closure does not. **Running one ``RunTestAction`` per test
+    file is per-file impact selection**, done by the incremental engine, because
+    the run unit (a test file) is the selection unit — the TS analogue of C++'s
+    per-binary selection.
+
+    Compute ``sources`` with ``brix.testimpact_ts`` — ``TsProvider.test_input_sets()``
+    returns exactly this footprint per test, widening to the whole source set for
+    a test that reaches a computed ``import()``/``require()`` or an unresolved
+    import (the run-on-any-change fail-open).
+
+    ``runner`` is the vitest executable (default ``ToolData("vitest")``; point it
+    at ``node_modules/.bin/vitest`` for a local install).
+    """
+
+    def __init__(
+        self,
+        *,
+        test_file: str | FileData,
+        sources: "list[str | DataExpr] | None" = None,
+        runner: ToolData | None = None,
+        name: str | None = None,
+        args: list[str] | DataExpr | None = None,
+    ) -> None:
+        self.test_file = (
+            test_file if isinstance(test_file, FileData) else FileData(test_file)
+        )
+        self.sources = list(sources or [])
+        self.runner = runner if runner is not None else ToolData("vitest")
+        self.name = name or f"vitest {self.test_file.path}"
+        self.args = args
+
+    def lower(self) -> list[Action]:
+        inputs: dict[str, DataExpr] = {
+            "vitest": self.runner,
+            "test": self.test_file,  # both the command arg and a byte-lens input
+        }
+        for i, src in enumerate(self.sources):
+            inputs[f"src{i}"] = src if isinstance(src, DataExpr) else FileData(src)
+        inputs["args"] = _options_expr(self.args)
+        return [
+            ExternalProcessAction(
+                name=self.name,
+                command_line="{vitest} run {test} {args}",
+                inputs=inputs,
+                outputs={},  # exit code only — replays on the input fingerprint
+            )
+        ]
 
 
 class CompileAction(Action):
