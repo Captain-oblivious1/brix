@@ -67,3 +67,4 @@ export { Alias } from "./cli";
 
 // Language skins (Stage 2) — each lowers to the core actions above.
 export * as python from "./python";
+export * as ts from "./ts";
