@@ -201,18 +201,26 @@ def action_fingerprint(
 
 
 def scan_depfile(path: Path) -> list[str]:
-    """Parse a Makefile-format dependency file (as emitted by ``cc -MMD -MF``)
-    into the list of prerequisite paths. ``target: prereq1 prereq2 \\`` with
-    line continuations and backslash-escaped spaces. Missing/unreadable → ``[]``.
+    """Parse a dependency file into the list of workspace-relative input paths a
+    tool reported it read. Two formats, chosen by extension:
 
-    Assumes a single rule with no phony ``-MP`` targets (brix uses ``-MMD``, not
-    ``-MP``). Only relative paths are kept: absolute prerequisites are system /
-    toolchain files, already covered by the tool's own fingerprint, and would
-    not resolve through the workspace overlay."""
+    * ``.json`` — **brix's native dependency manifest**, the format any tool can
+      emit to declare its discovered inputs: ``{"version": 1, "inputs": [path,
+      …]}``. Preferred going forward, and not tied to Make.
+    * anything else — a **Makefile** depfile (as emitted by ``cc -MMD -MF`` and
+      the ``tsc --listFiles`` wrapper): ``target: prereq1 prereq2 \\`` with line
+      continuations and backslash-escaped spaces, a single rule, no ``-MP``.
+
+    Missing/unreadable/malformed → ``[]`` (safe: no extra deps folded in). Only
+    **relative** paths are kept in either format — an absolute prerequisite is a
+    system/toolchain file already covered by the tool's own fingerprint, and
+    would not resolve through the workspace overlay."""
     try:
         text = path.read_text()
     except OSError:
         return []
+    if str(path).endswith(".json"):
+        return _scan_json_depfile(text)
     text = text.replace("\\\n", " ")  # join line continuations
     _, sep, rhs = text.partition(":")  # drop the "target:" head
     if not sep:
@@ -223,6 +231,19 @@ def scan_depfile(path: Path) -> list[str]:
         if dep and not dep.startswith("/"):
             deps.append(dep)
     return deps
+
+
+def _scan_json_depfile(text: str) -> list[str]:
+    """brix's native JSON dependency manifest: ``{"inputs": [path, …]}``. Keeps
+    only relative string paths, mirroring the Makefile scanner's filtering."""
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return []
+    inputs = doc.get("inputs") if isinstance(doc, dict) else None
+    if not isinstance(inputs, list):
+        return []
+    return [p for p in inputs if isinstance(p, str) and p and not p.startswith("/")]
 
 
 def outputs_intact(

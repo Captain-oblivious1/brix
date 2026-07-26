@@ -35,17 +35,12 @@ Windows item is compile-side: MSVC `cl.exe` header tracking (`/showIncludes` vs
 `-MMD`), needed only for an MSVC (not GCC/Clang/MinGW) toolchain — not a
 test-impact task.
 
-### Tier B — finish + mature the authoring API (by use, before track 3)
+### Tier B — mature the authoring API (by use, before track 3)
 
-1. **Environment isolation (env recording, phase 3).** Fully spec'd: one `env`
-   dict with a four-way vocabulary (pin / inherit+fingerprint / inherit-only /
-   withhold) that scrubs each step's environment to an allowlist, so an undeclared
-   variable is *absent* instead of a silent wrong build. Each `brix.<language>`
-   ships a default map naming the latent traps. Reshapes the `env` surface
-   (collapses `env=`/`env_used=`), so it lands **before** track 3. Crosses the
-   fingerprint path → **Fable review** after build. Spec:
-   [environment-recording.md](environment-recording.md).
-2. **Mature the authoring API by real-project dogfooding.** A deliberate pass
+*(Env isolation, phase 3 — the four-way `env` vocabulary + scrub-to-allowlist —
+is **done**; see Completed.)*
+
+1. **Mature the authoring API by real-project dogfooding.** A deliberate pass
    where every manual workaround in a real build file becomes an API-gap *fix*
    (add the missing simple feature), not a workaround. Start with the animation
    project (`~/Projects/animation`), whose build file was written with manual
@@ -58,7 +53,7 @@ test-impact task.
 
 ### Tier C — the big new capability, now rewrite-safe
 
-3. **A JavaScript/TypeScript way to write build files (big track 3).** Same
+2. **A JavaScript/TypeScript way to write build files (big track 3).** Same
    features as the Python API, authored in TS. Unblocked (the Rust engine is the
    default and carries build/status/clean + extension traits); the binding is
    `rust/brix-py` transliterated over the same JSON boundary, the TS API layer
@@ -68,33 +63,33 @@ test-impact task.
 
 ### Tier D — gated, deliberately not "do now"
 
-4. **Delete the old Python engine internals (track 4c).** Finishes the Rust port,
+3. **Delete the old Python engine internals (track 4c).** Finishes the Rust port,
    but **gated on real-world soak** (Duane's call) — the Rust default must run on a
    real project for a work stretch (days) first. Deletes the execution half, keeps
    the reference math (Python stays the golden-fixture oracle). One subtle ordering
    bug breaks builds → **Fable**, line by line. [rust-port.md](rust-port.md).
-5. **Per-method test selection (test-impact increment 2) — largely obviated.**
+4. **Per-method test selection (test-impact increment 2) — largely obviated.**
    The motivation was that class-level selection was useless on coupled monoliths;
    runtime discovery *dissolved* that (it selects finely on databind — see Tier A),
    so going sub-class is now low-value. Keep parked unless a real suite shows
    class-level discovery is still too coarse; only then revisit (and the soundness
    kernel — coverage is a past-run record — remains Fable-reserved).
-6. **`brix.go` and Protobuf "did the meaningful part change?" skip.** Build Go by
+5. **`brix.go` and Protobuf "did the meaningful part change?" skip.** Build Go by
    wrapping the `go` tool; add the interface-change skip — when a project using
    them appears.
 
 ### Tier E — small, safe, opportunistic
 
-7. **Draw the build graph + more machine-readable output.** A visual graph
+6. **Draw the build graph + more machine-readable output.** A visual graph
    (boxes/arrows) consuming the `status --json` document; plus `errors --json`.
-8. **Document the three official extension points** (cache store, `content_key`,
+7. **Document the three official extension points** (cache store, `content_key`,
     change detection) so others can build on brix.
-9. **Smaller follow-ups.** A `build --verify-contents` CLI flag; C++ and Kotlin
+8. **Smaller follow-ups.** A `build --verify-contents` CLI flag; C++ and Kotlin
     starter templates; a `pydoc`/`pdoc` doc-gen action + warm-daemon doc path; more
     "trick brix into a bad skip" oracles (generator-driven membership changes,
     multi-hop ABI chains); default git-detection on for git workspaces (only after
     the air-gapped trial).
-10. **Formal Python API v1 label (near the very end).** Once the surface is mature
+9. **Formal Python API v1 label (near the very end).** Once the surface is mature
     by use: cut `1.0.0` (semver on the distribution), lean on the
     `tests/test_public_api.py` contract, a `DeprecationWarning` cycle for breaks —
     and *don't* put the version in the import path. A labeling non-event, never a
@@ -180,7 +175,10 @@ refactor + glob `-` exclusion.
 
 **Correctness hardening.** Git-based change detection on both engines;
 `verify_contents` re-hash mode; symlink-repoint detection; the delete-cleanup
-corner case; environment recording phases 1–2 (`env`/`env_used`).
+corner case; environment recording phases 1–3 — `env`/`env_used`, and the
+scrub-to-allowlist isolation (`SYSTEM`/`PASS`/`UNSET` sentinels, per-language
+default env maps, `scrub=True` on both engines), all in
+[environment-recording.md](environment-recording.md).
 
 **Usability & docs.** `status --json` (stable schema); `help` showing live config;
 Java/TS starter templates; an offline MkDocs API site; user-project doc-gen actions

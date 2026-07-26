@@ -391,6 +391,25 @@ def test_scan_depfile_parses_make_format(tmp_path):
     assert scan_depfile(tmp_path / "missing.d") == []  # unreadable -> empty
 
 
+def test_scan_depfile_parses_brix_json_manifest(tmp_path):
+    """brix's native JSON dependency format — the same scanner, chosen by the
+    `.json` extension. Any tool can emit this to declare its discovered inputs."""
+    from brix.incremental import scan_depfile
+
+    j = tmp_path / "scene.json"
+    j.write_text(
+        '{"version": 1, "inputs": ["src/a.png", "animation/core.py",'
+        ' "/abs/system.so", "src/with space.png"]}'
+    )
+    # Relative paths kept (in order); the absolute one dropped, like Make format.
+    assert scan_depfile(j) == ["src/a.png", "animation/core.py", "src/with space.png"]
+    # Malformed / wrong-shape JSON -> empty (safe: no extra deps folded in).
+    (tmp_path / "bad.json").write_text("{not json")
+    assert scan_depfile(tmp_path / "bad.json") == []
+    (tmp_path / "noinputs.json").write_text('{"version": 1}')
+    assert scan_depfile(tmp_path / "noinputs.json") == []
+
+
 def test_command_line_change_refingerprints(tmp_path):
     """The command template is fingerprint material: changing it re-stales the
     action even when every declared input is byte-identical."""

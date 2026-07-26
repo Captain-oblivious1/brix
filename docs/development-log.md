@@ -1,5 +1,23 @@
 # Development log
 
+- **A brix-native JSON dependency manifest — any tool can declare its discovered
+  inputs without pretending to be Make.** brix already scanned Makefile depfiles
+  (`cc -MMD`, the `tsc --listFiles` wrapper); `scan_depfile` now also accepts
+  brix's own format, chosen by the `.json` extension:
+  `{"version": 1, "inputs": [path, …]}`. Same fingerprint-folding channel and the
+  same "relative paths only" filter, so a tool that writes this file and points an
+  action's `depfile=` at it gets discovered-dependency tracking for free. Added to
+  **both engines** in lockstep (`incremental.py` `_scan_json_depfile`,
+  `incremental.rs` `scan_json_depfile`) since discovered deps are fingerprint
+  material and the Rust engine parses depfiles natively; cross-engine parity
+  proven by `tests/test_json_depfile.py` (an action whose input is declared *only*
+  through a JSON manifest re-runs on that input's change and replays otherwise,
+  identically on Python and Rust) plus a `scan_depfile` unit case. Fingerprint-
+  adjacent but low-risk (both parsers just produce a path list; the folding is
+  unchanged). Motivated by the animation-project dogfood (Tier B): its `render`
+  tool already emits a Makefile `.d`; it can now also emit this JSON so brix reads
+  it directly. No golden regen (existing depfiles are Makefile format, untouched).
+
 - **C++ test-impact Windows portability (#43) — closes Tier A.** Two OS-specific
   surfaces made correct by construction (unverified on Windows — no CI there).
   `cpp.RunTestAction` no longer hard-codes a Unix `./{binary}` invocation: since

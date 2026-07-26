@@ -29,17 +29,22 @@ use crate::patterns::PathPattern;
 use crate::plan::Node;
 use crate::process::ProcessResult;
 
-/// Parse a Makefile-format dependency file (as emitted by `cc -MMD -MF`)
-/// into the list of prerequisite paths. `target: prereq1 prereq2 \` with line
-/// continuations and backslash-escaped spaces. Missing/unreadable -> `[]`.
+/// Parse a dependency file into the workspace-relative input paths a tool
+/// reported. Two formats, chosen by extension: `.json` is brix's native
+/// dependency manifest (`{"inputs": [path, ...]}`, the format any tool can
+/// emit); anything else is a Makefile depfile (`cc -MMD -MF`, `tsc --listFiles`
+/// wrapper): `target: prereq1 prereq2 \` with continuations and escaped spaces.
 ///
-/// Only relative paths are kept: absolute prerequisites are system /
-/// toolchain files, already covered by the tool's own fingerprint, and would
-/// not resolve through the workspace overlay. Mirrors `scan_depfile`.
+/// Missing/unreadable/malformed -> `[]`. Only relative paths are kept in either
+/// format: an absolute prerequisite is a system/toolchain file already covered
+/// by the tool's own fingerprint. Mirrors `scan_depfile`.
 pub fn scan_depfile(path: &Path) -> Vec<String> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
+    if path.extension().is_some_and(|e| e == "json") {
+        return scan_json_depfile(&text);
+    }
     let text = text.replace("\\\n", " "); // join line continuations
     let Some((_, rhs)) = text.split_once(':') else {
         return Vec::new(); // no "target:" head
@@ -48,6 +53,24 @@ pub fn scan_depfile(path: &Path) -> Vec<String> {
         .split_whitespace()
         .map(|token| token.replace('\0', " "))
         .filter(|dep| !dep.is_empty() && !dep.starts_with('/'))
+        .collect()
+}
+
+/// brix's native JSON dependency manifest: `{"inputs": [path, ...]}`. Keeps only
+/// relative string paths, mirroring the Makefile scanner. Mirrors
+/// `_scan_json_depfile`.
+fn scan_json_depfile(text: &str) -> Vec<String> {
+    let Ok(doc) = serde_json::from_str::<Value>(text) else {
+        return Vec::new();
+    };
+    let Some(inputs) = doc.get("inputs").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    inputs
+        .iter()
+        .filter_map(|v| v.as_str())
+        .filter(|p| !p.is_empty() && !p.starts_with('/'))
+        .map(str::to_string)
         .collect()
 }
 
