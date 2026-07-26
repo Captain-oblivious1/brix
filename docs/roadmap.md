@@ -74,10 +74,11 @@ one engine).
    lowering to the same core actions Stage 1 proved, with a deep-equal skin
    oracle (author the same usage in Python + TS, lower, compare). Same guardrails
    as Tier B: **every API change proposed first**, generic classes kept generic.
-   - **Done, oracle-proven:** `python` (PytestAction), `ts` (Compile/RunTest/
-     Typedoc + the `ts-dts` content lens), `java` **core** (JarAction, Javadoc,
-     the `jvm-abi` lens). Env sentinels (`SYSTEM`/`UNSET`/`PASS` + the
-     `_brix_env_used` snapshot) were added to the TS core to support them.
+   - **Done, oracle-proven:** `python` (PytestAction); `ts` (Compile/RunTest/
+     Typedoc + the `ts-dts` content lens); `java` **core** (JarAction, Javadoc,
+     the `jvm-abi` lens); `cpp` (Compile/Link/Archive/RunTest/Doxygen). Env
+     sentinels (`SYSTEM`/`UNSET`/`PASS` + the `_brix_env_used` snapshot) were
+     added to the TS core to support them.
    - **Gated on a decision — shipped-helper addressing:** `java.javac_worker` +
      `JUnitTestAction` (per-class test-impact) and the `ts` import-tracking
      wrapper reference brix-shipped helpers (`JavacWorker.java` — a Java source,

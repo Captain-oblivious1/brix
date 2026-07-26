@@ -72,3 +72,4 @@ export type { EnvSentinel } from "./env";
 export * as python from "./python";
 export * as ts from "./ts";
 export * as java from "./java";
+export * as cpp from "./cpp";
