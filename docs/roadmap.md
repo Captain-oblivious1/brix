@@ -35,25 +35,28 @@ Windows item is compile-side: MSVC `cl.exe` header tracking (`/showIncludes` vs
 `-MMD`), needed only for an MSVC (not GCC/Clang/MinGW) toolchain — not a
 test-impact task.
 
-### Tier B — mature the authoring API (by use, before track 3)
+### Tier B — mature the authoring API (by use, before track 3) — **DONE**
 
-*(Env isolation, phase 3 — the four-way `env` vocabulary + scrub-to-allowlist —
-is **done**; see Completed.)*
-
-1. **Mature the authoring API by real-project dogfooding.** A deliberate pass
-   where every manual workaround in a real build file becomes an API-gap *fix*
-   (add the missing simple feature), not a workaround. Start with the animation
-   project (`~/Projects/animation`), whose build file was written with manual
-   logic around a missing feature. This *is* finishing the authoring-API
-   capability, and it's the honest gate before mirroring it in TS. **Not a
-   freeze** — stable by exhaustion of real gaps. Two guardrails: **every API
-   change is proposed to Duane first**, and a fix must **keep generic classes
-   generic** — never leak a layer-specific or engine-internal detail onto a
-   generic `Action`/`Graph`/`Data` to make an implementation easier.
+The authoring API matures by exhaustion of real gaps, not by decree. The one
+named gap that drove this tier — animation's build fell back to a coarse
+whole-engine dependency because there was no channel for *discovered* per-item
+deps — is fixed and generalized: the JSON dependency manifest + `depfile=` now
+gives per-item discovered deps, the mechanism that became brix's native manifest
+format and `python.PytestAction`, proven across real builds (animation renders,
+logicEngine's pytest suite, the TS wiring). A closing audit of the animation and
+logicEngine build files found only cosmetic/ergonomic residue — no forced
+workarounds; the two ergonomic candidates it surfaced are parked in Tier E. What
+remains unbuilt in animation (test target, `.mp4` conversion) is deferred
+migration *completion*, not an API gap. Env isolation phase 3 (the four-way `env`
+vocabulary + scrub-to-allowlist) is also done; see Completed. This unblocks Tier
+C, which mirrors this now-settled surface into TS. Guardrails stand for any future
+change: **every API change proposed to Duane first**, and **keep generic classes
+generic** (never leak a layer-specific or engine-internal detail onto a generic
+`Action`/`Graph`/`Data`).
 
 ### Tier C — the big new capability, now rewrite-safe
 
-2. **A JavaScript/TypeScript way to write build files (big track 3).** Same
+1. **A JavaScript/TypeScript way to write build files (big track 3).** Same
    features as the Python API, authored in TS. Unblocked (the Rust engine is the
    default and carries build/status/clean + extension traits); the binding is
    `rust/brix-py` transliterated over the same JSON boundary, the TS API layer
@@ -63,33 +66,40 @@ is **done**; see Completed.)*
 
 ### Tier D — gated, deliberately not "do now"
 
-3. **Delete the old Python engine internals (track 4c).** Finishes the Rust port,
+2. **Delete the old Python engine internals (track 4c).** Finishes the Rust port,
    but **gated on real-world soak** (Duane's call) — the Rust default must run on a
    real project for a work stretch (days) first. Deletes the execution half, keeps
    the reference math (Python stays the golden-fixture oracle). One subtle ordering
    bug breaks builds → **Fable**, line by line. [rust-port.md](rust-port.md).
-4. **Per-method test selection (test-impact increment 2) — largely obviated.**
+3. **Per-method test selection (test-impact increment 2) — largely obviated.**
    The motivation was that class-level selection was useless on coupled monoliths;
    runtime discovery *dissolved* that (it selects finely on databind — see Tier A),
    so going sub-class is now low-value. Keep parked unless a real suite shows
    class-level discovery is still too coarse; only then revisit (and the soundness
    kernel — coverage is a past-run record — remains Fable-reserved).
-5. **`brix.go` and Protobuf "did the meaningful part change?" skip.** Build Go by
+4. **`brix.go` and Protobuf "did the meaningful part change?" skip.** Build Go by
    wrapping the `go` tool; add the interface-change skip — when a project using
    them appears.
 
 ### Tier E — small, safe, opportunistic
 
-6. **Draw the build graph + more machine-readable output.** A visual graph
+5. **Draw the build graph + more machine-readable output.** A visual graph
    (boxes/arrows) consuming the `status --json` document; plus `errors --json`.
-7. **Document the three official extension points** (cache store, `content_key`,
+6. **Document the three official extension points** (cache store, `content_key`,
     change detection) so others can build on brix.
-8. **Smaller follow-ups.** A `build --verify-contents` CLI flag; C++ and Kotlin
+7. **Smaller follow-ups.** A `build --verify-contents` CLI flag; C++ and Kotlin
     starter templates; a `pydoc`/`pdoc` doc-gen action + warm-daemon doc path; more
     "trick brix into a bad skip" oracles (generator-driven membership changes,
     multi-hop ABI chains); default git-detection on for git workspaces (only after
-    the air-gapped trial).
-9. **Formal Python API v1 label (near the very end).** Once the surface is mature
+    the air-gapped trial). Plus two **parked authoring-API ergonomics** from the
+    Tier B close (both real but optional — neither forces a workaround today, and
+    adding surface right before Tier C mirrors it isn't worth the churn; build
+    either only if a real project trips over it): (a) a `cli.main` **project-flags
+    hook** so a build file declares its own flags (animation's `--lowRes` etc.)
+    instead of hand-splitting argv before `cli.main`; (b) **derive CLI aliases from
+    a graph glob binding** so alias names come from the build's own scan, not a
+    second filesystem glob that can drift (animation's per-video aliases).
+8. **Formal Python API v1 label (near the very end).** Once the surface is mature
     by use: cut `1.0.0` (semver on the distribution), lean on the
     `tests/test_public_api.py` contract, a `DeprecationWarning` cycle for breaks —
     and *don't* put the version in the import path. A labeling non-event, never a
@@ -160,6 +170,16 @@ discovery selects ~1.5% (edit one class → ~11 of ~700 tests, ~7 s; cold ~58 s,
 class is a loaded class). `JvmFactory` (pre-warm pool) was evaluated and dropped —
 the parallel scheduler already makes it fast enough and single-use JVMs get no JIT
 reuse. See [test-impact-selection.md](test-impact-selection.md).
+
+**Authoring API matured by dogfooding (Tier B — done).** Matured by exhaustion of
+real gaps, not by decree. The driving gap — a build with no channel for
+*discovered* per-item dependencies falls back to a coarse whole-engine dependency
+(animation's original build) — is closed and generalized into brix's native JSON
+dependency manifest + `depfile=`, then `python.PytestAction`, proven across real
+builds. A closing audit of the animation and logicEngine build files found only
+cosmetic/ergonomic residue, no forced workarounds; the two ergonomic candidates it
+surfaced are parked (Tier E follow-ups). Guardrails stand for future change: every
+API change proposed first, generic classes kept generic.
 
 **Lazy monorepo loading ("only build what my change touched").** `brix.affected`
 with `select_affected`/`load_affected`, index v2 (persisted per-package
