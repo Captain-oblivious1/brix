@@ -65,6 +65,10 @@ export type { StatusReport } from "./engine";
 export * as cli from "./cli";
 export { Alias } from "./cli";
 
+export { SYSTEM, UNSET, PASS } from "./env";
+export type { EnvSentinel } from "./env";
+
 // Language skins (Stage 2) — each lowers to the core actions above.
 export * as python from "./python";
 export * as ts from "./ts";
+export * as java from "./java";

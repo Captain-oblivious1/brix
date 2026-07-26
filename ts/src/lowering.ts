@@ -74,6 +74,9 @@ export function actionToSpec(action: Action): Spec {
     };
     if (action.name !== undefined) d.name = action.name;
     if (Object.keys(action.env).length) d.env = exprMap(action.env);
+    if (action.envUnset.length) d.env_unset = [...action.envUnset];
+    if (action.envPass.length) d.env_pass = [...action.envPass];
+    if (action.envUsed.length) d.env_used = [...action.envUsed];
     if (action.depfile !== undefined) d.depfile = action.depfile;
     if (action.worker !== undefined) {
       d.worker = {

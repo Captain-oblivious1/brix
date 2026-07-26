@@ -70,11 +70,23 @@ deep-equals `brix_build.py` and runs `graph`/`status`/`help` through the Rust
 engine — even reading metadata a Python build wrote (cross-frontend, one wire,
 one engine).
 
-1. **Stage 2 — the language skins.** Mirror the per-language sugar
-   (`java`/`cpp`/`ts`/`python`/`kotlin`/`springboot`/`rust`) in TS, each lowering
-   to the same core actions Stage 1 proved — added on demand, one language at a
-   time, small and independent. Same guardrails as Tier B: **every API change
-   proposed first**, generic classes kept generic.
+1. **Stage 2 — the language skins.** Mirror the per-language sugar in TS, each
+   lowering to the same core actions Stage 1 proved, with a deep-equal skin
+   oracle (author the same usage in Python + TS, lower, compare). Same guardrails
+   as Tier B: **every API change proposed first**, generic classes kept generic.
+   - **Done, oracle-proven:** `python` (PytestAction), `ts` (Compile/RunTest/
+     Typedoc + the `ts-dts` content lens), `java` **core** (JarAction, Javadoc,
+     the `jvm-abi` lens). Env sentinels (`SYSTEM`/`UNSET`/`PASS` + the
+     `_brix_env_used` snapshot) were added to the TS core to support them.
+   - **Gated on a decision — shipped-helper addressing:** `java.javac_worker` +
+     `JUnitTestAction` (per-class test-impact) and the `ts` import-tracking
+     wrapper reference brix-shipped helpers (`JavacWorker.java` — a Java source,
+     no module form — and `.py` recorders) by absolute path, which is in the
+     fingerprint (machine-specific, no cross-frontend common form). Need a
+     portable, content-addressed reference before these can mirror.
+   - **Deferred (mechanical):** the shared `DepSet` + resolvers (`pom`/`maven`/
+     `gradle`/`npm`/`pkg_config`, `classpath=`/`deps=`); the remaining skins
+     (`cpp`/`kotlin`/`springboot`/`rust`); the atomic staging-hazard guard.
 
 ### Tier D — gated, deliberately not "do now"
 
