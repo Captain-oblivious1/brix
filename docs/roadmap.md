@@ -54,15 +54,27 @@ change: **every API change proposed to Duane first**, and **keep generic classes
 generic** (never leak a layer-specific or engine-internal detail onto a generic
 `Action`/`Graph`/`Data`).
 
-### Tier C — the big new capability, now rewrite-safe
+### Tier C — a JavaScript/TypeScript way to write build files (big track 3)
 
-1. **A JavaScript/TypeScript way to write build files (big track 3).** Same
-   features as the Python API, authored in TS. Unblocked (the Rust engine is the
-   default and carries build/status/clean + extension traits); the binding is
-   `rust/brix-py` transliterated over the same JSON boundary, the TS API layer
-   mechanical against [boundary-schema.md](boundary-schema.md). Sequenced after
-   Tier B so it mirrors a matured surface. Opus-sized, **Fable review** of the FFI
-   callback threading. (Accept minor re-mirror churn over a frozen bad API.)
+**Stage 1 — the generic core — DONE.** TS-brix can author and run any *skinless*
+build (spell the commands out) with the full engine behind it. `rust/brix-node`
+is the napi twin of `rust/brix-py` (async `build` returning a Promise, live
+events via a threadsafe function — the FFI callback threading, **still owed a
+Fable review**; custom cache-store/identity callbacks and the env sentinels are
+deferred). The `ts/` package mirrors the Python core (data, actions, graph,
+lowering, builders, engine, reporters, cli) — three sanctioned deviations only
+(camelCase, async `build`, plain-object reporters), plus method forms for the
+operators TS can't overload (`.plus`, `.excluding`). Proven by a lowering oracle
+(TS spec deep-equals Python's) and a real dogfood: `animation/brix_build.ts`
+deep-equals `brix_build.py` and runs `graph`/`status`/`help` through the Rust
+engine — even reading metadata a Python build wrote (cross-frontend, one wire,
+one engine).
+
+1. **Stage 2 — the language skins.** Mirror the per-language sugar
+   (`java`/`cpp`/`ts`/`python`/`kotlin`/`springboot`/`rust`) in TS, each lowering
+   to the same core actions Stage 1 proved — added on demand, one language at a
+   time, small and independent. Same guardrails as Tier B: **every API change
+   proposed first**, generic classes kept generic.
 
 ### Tier D — gated, deliberately not "do now"
 

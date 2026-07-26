@@ -1,0 +1,19 @@
+[package]
+name = "brix-node"
+version = "0.1.0"
+edition = "2021"
+description = "N-API boundary for the brix Rust engine: JSON spec/config in, JSON events + result out (docs/boundary-schema.md). The Node twin of brix-py."
+
+[lib]
+name = "brix_node"
+crate-type = ["cdylib"]
+
+[dependencies]
+brix-core = { path = "../brix-core" }
+brix-workerd = { path = "../brix-workerd" }
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"

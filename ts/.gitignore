@@ -1,0 +1,4 @@
+node_modules/
+dist/
+native/*.node
+package-lock.json
