@@ -1,5 +1,25 @@
 # Development log
 
+- **Python test-impact — a 4th test-selection language, via a pytest plugin +
+  the JSON manifest.** brix already selects tests by discovery for Java
+  (`-Xlog:class+load`), C++ (`-MMD`), and TS (imports); Python now joins them.
+  `src/brix/_python/pytest_brixdeps.py` is a pytest plugin
+  (`-p brix._python.pytest_brixdeps --brix-manifest <path>`) that, at session
+  end, walks `sys.modules`, keeps the workspace `.py` files (dropping the stdlib
+  and anything under the venv / `sys.prefix`), and writes them as a brix JSON
+  dependency manifest. Run one test file per pytest process and point a brix
+  action's `depfile=` at the manifest, and editing a module re-runs only the test
+  files that imported it. This is the direct payoff of the JSON manifest format
+  (shipped just before): it generalized from the animation render to pytest with
+  no new brix mechanism. Proven on a real project — logicEngine's backend
+  (`~/Projects/logicEngine`, a Python+TS full-stack app): editing
+  `logic_engine/infix.py` re-runs only `test_infix` of the 8 passing files, the
+  rest replay. `tests/test_pytest_brixdeps.py` pins the plugin (subprocess run,
+  manifest lists the imported module + test, not the un-imported one or the
+  stdlib). Optional follow-up (needs API sign-off): a `brix.python.PytestAction`
+  helper to hide the ExpandAll + plugin + depfile wiring, the Python analogue of
+  `ts.RunTestAction`.
+
 - **A brix-native JSON dependency manifest — any tool can declare its discovered
   inputs without pretending to be Make.** brix already scanned Makefile depfiles
   (`cc -MMD`, the `tsc --listFiles` wrapper); `scan_depfile` now also accepts
