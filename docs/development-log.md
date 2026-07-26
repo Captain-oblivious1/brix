@@ -16,9 +16,12 @@
   `logic_engine/infix.py` re-runs only `test_infix` of the 8 passing files, the
   rest replay. `tests/test_pytest_brixdeps.py` pins the plugin (subprocess run,
   manifest lists the imported module + test, not the un-imported one or the
-  stdlib). Optional follow-up (needs API sign-off): a `brix.python.PytestAction`
-  helper to hide the ExpandAll + plugin + depfile wiring, the Python analogue of
-  `ts.RunTestAction`.
+  stdlib). Wrapped as public API by **`brix.python.PytestAction`** (new
+  `brix.python` module) — the Python analogue of `ts.RunTestAction` /
+  `java.JUnitTestAction`: given a test-file glob it lowers to the `ExpandAll` +
+  per-file `pytest` + plugin + manifest `depfile=`, so a build file just declares
+  the glob. `tests/test_python.py` pins the lowering; `tests/test_public_api.py`
+  adds the module's curated surface. Used in the logicEngine backend build.
 
 - **A brix-native JSON dependency manifest — any tool can declare its discovered
   inputs without pretending to be Make.** brix already scanned Makefile depfiles
