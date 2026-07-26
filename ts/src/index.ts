@@ -64,3 +64,6 @@ export type { StatusReport } from "./engine";
 
 export * as cli from "./cli";
 export { Alias } from "./cli";
+
+// Language skins (Stage 2) — each lowers to the core actions above.
+export * as python from "./python";

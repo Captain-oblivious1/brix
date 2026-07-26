@@ -59,6 +59,20 @@ export class GlobData extends DataAtom {
     g.contentKey = this.contentKey;
     return g;
   }
+
+  /**
+   * The `{binding}` names in this template, in order (mirrors Python's
+   * `pattern.binding_names`). A binding is `{name}` or `{name:constraint}`;
+   * skins use it to find the expansion element. Full path matching stays in
+   * the Rust engine — this only reads the template's placeholders.
+   */
+  bindingNames(): string[] {
+    const names: string[] = [];
+    const re = /\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(this.template)) !== null) names.push(m[1]);
+    return names;
+  }
 }
 
 export class RegexData extends DataAtom {
