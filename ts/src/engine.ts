@@ -47,11 +47,26 @@ export async function runBuild(
   if (idle > 0) config.workerd = opts.workerd ?? "brix-workerd";
   const configJson = JSON.stringify(config);
 
-  const onEvent = opts.reporter
-    ? (json: string) => dispatchEvent(opts.reporter!, json)
+  // A reporter that throws must not tear down the build (or crash the process
+  // as an uncaught exception): capture the first error and re-raise it after the
+  // build finishes — the same contract as the Python skin
+  // (docs/boundary-schema.md). Later events are still delivered (the build can't
+  // be stopped mid-flight anyway).
+  let reporterError: { err: unknown } | undefined;
+  const reporter = opts.reporter;
+  const onEvent = reporter
+    ? (json: string) => {
+        try {
+          dispatchEvent(reporter, json);
+        } catch (err) {
+          if (reporterError === undefined) reporterError = { err };
+        }
+      }
     : undefined;
   const result = decodeBuildResult(await native.build(specJson, configJson, onEvent));
-  opts.reporter?.buildEnd?.(result);
+  if (reporterError !== undefined) throw reporterError.err;
+  // buildEnd runs here (after await), so if it throws it propagates normally.
+  reporter?.buildEnd?.(result);
   return result;
 }
 

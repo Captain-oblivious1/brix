@@ -32,6 +32,12 @@ function referenceGraph(): Graph {
     }),
     new cpp.RunTestAction({ test_binary: "build/bin/test_foo", args: ["--gtest_color=no"] }),
     new cpp.RunTestAction({ test_binary: "bare_test", name: "run bare" }),
+    new cpp.RunTestAction({
+      test_binary: "build/bin/plugin_test",
+      runner: d.tool("valgrind"),
+      runtime_inputs: ["assets/data.bin", d.glob("plugins/{name}.so")],
+      args: ["-v"],
+    }),
     new cpp.DoxygenAction({
       config: "Doxyfile",
       source_files: d.glob("src/{name}.h"),

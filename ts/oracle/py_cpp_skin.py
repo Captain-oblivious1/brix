@@ -37,6 +37,14 @@ def reference_graph() -> Graph:
         ),
         cpp.RunTestAction(test_binary="build/bin/test_foo", args=["--gtest_color=no"]),
         cpp.RunTestAction(test_binary="bare_test", name="run bare"),
+        # runner= branch ("{runner} {binary} {args}") + runtime_inputs (a string
+        # and a DataExpr), exercising both otherwise-uncovered code paths.
+        cpp.RunTestAction(
+            test_binary="build/bin/plugin_test",
+            runner=d.tool("valgrind"),
+            runtime_inputs=["assets/data.bin", d.glob("plugins/{name}.so")],
+            args=["-v"],
+        ),
         cpp.DoxygenAction(
             config="Doxyfile",
             source_files=d.glob("src/{name}.h"),

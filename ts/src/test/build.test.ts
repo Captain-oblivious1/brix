@@ -77,3 +77,28 @@ test("end-to-end build, replay, status, clean, and live events", async () => {
 
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("a throwing reporter is re-raised after the build, not crashing the process", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brix-ts-"));
+  const g = helloGraph();
+  const builder = new IncrementalBuilder(() => g, { root, metadataDir: "build/.brix" });
+  const boom: Reporter = {
+    nodeCompleted: () => {
+      throw new Error("reporter boom");
+    },
+  };
+
+  let threw: Error | undefined;
+  await builder.build({ workerIdleTimeout: 0, reporter: boom }).catch((e) => {
+    threw = e as Error;
+  });
+
+  // The build ran to completion; the reporter error surfaced afterward (Python
+  // contract) rather than crashing the process as an uncaught exception.
+  assert.ok(threw && /reporter boom/.test(threw.message), "reporter error re-raised");
+  assert.ok(
+    fs.existsSync(path.join(root, "hello.txt")),
+    "build completed despite the throwing reporter",
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});

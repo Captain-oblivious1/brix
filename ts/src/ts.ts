@@ -21,21 +21,9 @@ import {
   ValueData,
 } from "./data";
 
-// brix's tsc wrapper: runs the compile with --listFiles and records the files
-// tsc actually read as a Makefile depfile (the TS counterpart of `cc -MMD`).
-// Invoked as a module (like the pytest plugin) so it is location-independent.
-const WRAPPER_MODULE = "brix._ts.tsc_listfiles";
-
 function optionsExpr(options: string[] | DataExpr | undefined): DataExpr {
   if (options instanceof DataExpr) return options;
   return new ValueData((options ?? []).join(" "));
-}
-
-/** The deepest directory of a template that is literal (no bindings); '' if none. */
-function literalPrefixDir(template: string): string {
-  const prefix = template.split("{")[0];
-  if (!prefix.includes("/")) return "";
-  return prefix.slice(0, prefix.lastIndexOf("/"));
 }
 
 /**
@@ -174,53 +162,29 @@ export class CompileAction extends Action {
       inputs.types = dts(new DataUnion(...this.dependencies));
     }
 
+    if (this.trackImports) {
+      // Import tracking wraps a brix-shipped `--listFiles` recorder. Referencing
+      // that helper portably (identically to the Python skin, without baking a
+      // machine path into the fingerprint) needs the asset mechanism, whose
+      // engine half is not built yet (docs/boundary-schema.md, roadmap Tier C).
+      // Rather than emit a command that diverges from the Python skin and only
+      // works when brix is importable by the tsc subprocess, refuse it clearly.
+      throw new Error(
+        "ts.CompileAction: import tracking (trackImports) is not available in the " +
+          "TypeScript frontend yet — it needs brix's asset mechanism (pending). " +
+          "Pass trackImports:false for a bare tsc compile — but note that " +
+          "undeclared cross-file imports are then not tracked, so editing such a " +
+          "file will not re-stale this compile until the asset mechanism lands.",
+      );
+    }
+
     const tscCommand = `{tsc} {options} ${declFlag}--outDir {out_dir} {sources}`;
-    if (!this.trackImports) {
-      return [
-        new ExternalProcessAction({
-          name: `tsc -> ${this.outDir}`,
-          commandLine: tscCommand,
-          inputs,
-          outputs,
-        }),
-      ];
-    }
-
-    // Wrap tsc in brix's --listFiles recorder, writing a depfile the incremental
-    // layer scans like a C/C++ one. Exclude this module's own out_dir and each
-    // declared dependency's directory (those .d.ts are tracked by the ts-dts lens
-    // above; byte-tracking them here would defeat the impl-only-change replay).
-    const depfile = `${this.outDir}/.brix-tsdeps.d`;
-    outputs.depfile = new FileData(depfile);
-    inputs.python = this.python;
-    const excludeDirs = new Set<string>([this.outDir.replace(/\/+$/, "")]);
-    for (const dep of this.dependencies) {
-      for (const atom of dep.atoms()) {
-        const tmpl =
-          atom instanceof GlobData
-            ? atom.template
-            : atom instanceof FileData
-              ? atom.path
-              : null;
-        if (tmpl !== null) {
-          const prefix = literalPrefixDir(tmpl);
-          if (prefix) excludeDirs.add(prefix);
-        }
-      }
-    }
-    const excludeFlags = [...excludeDirs]
-      .sort()
-      .map((d) => `--exclude ${d}`)
-      .join(" ");
-    inputs.excludes = new ValueData(excludeFlags);
-
     return [
       new ExternalProcessAction({
         name: `tsc -> ${this.outDir}`,
-        commandLine: `{python} -m ${WRAPPER_MODULE} {depfile} {excludes} -- ${tscCommand}`,
+        commandLine: tscCommand,
         inputs,
         outputs,
-        depfile,
       }),
     ];
   }
