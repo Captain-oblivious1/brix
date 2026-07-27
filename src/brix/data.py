@@ -187,6 +187,22 @@ class ValueData(DataAtom):
         return f"data.value({self.text!r})"
 
 
+class AssetData(DataAtom):
+    """A file brix itself ships (a compiler-worker source, a recorder script),
+    named by a stable logical path (POSIX, brix-relative) rather than a machine
+    path. The engine owns the bytes and resolves the name to a real path at run
+    time; the fingerprint is the name + the file's content, never the resolved
+    path — so it is identical across machines and frontends (docs/boundary-schema.md).
+    Skin-internal: skins reference their own shipped helpers with it; it is not a
+    `data.*` constructor an author calls."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"AssetData({self.name!r})"
+
+
 class DataUnion(DataExpr):
     """A union of data expressions."""
 

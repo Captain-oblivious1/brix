@@ -15,6 +15,7 @@ import {
   ExternalProcessAction,
 } from "./actions";
 import {
+  AssetData,
   DataAtom,
   DataExpr,
   FileData,
@@ -50,6 +51,9 @@ export function atomToSpec(atom: DataAtom): AtomSpec {
   }
   if (atom instanceof ValueData) {
     return { kind: "value", text: atom.text };
+  }
+  if (atom instanceof AssetData) {
+    return { kind: "asset", name: atom.name };
   }
   throw new TypeError(`unknown atom: ${atom}`);
 }

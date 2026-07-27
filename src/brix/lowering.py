@@ -17,7 +17,16 @@ unregistered name raises before the build starts.
 from __future__ import annotations
 
 from .actions import Action, DeleteFilesAction, ExpandAll, ExternalProcessAction
-from .data import DataAtom, DataExpr, FileData, GlobData, RegexData, ToolData, ValueData
+from .data import (
+    AssetData,
+    DataAtom,
+    DataExpr,
+    FileData,
+    GlobData,
+    RegexData,
+    ToolData,
+    ValueData,
+)
 from .graph import Graph
 
 SPEC_VERSION = 1
@@ -42,6 +51,8 @@ def atom_to_spec(atom: DataAtom) -> dict:
         return {"kind": "tool", "name": atom.name}
     if isinstance(atom, ValueData):
         return {"kind": "value", "text": atom.text}
+    if isinstance(atom, AssetData):
+        return {"kind": "asset", "name": atom.name}
     raise TypeError(atom)
 
 

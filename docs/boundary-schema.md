@@ -40,6 +40,7 @@ Atom          = { "kind": "file",  "path": str,     "content_key": str? }
               | { "kind": "regex", "pattern": str }
               | { "kind": "tool",  "name": str }
               | { "kind": "value", "text": str }
+              | { "kind": "asset", "name": str }        // a brix-shipped helper
 ```
 
 Notes: `path`/`template` may contain `{binding}` placeholders; `regex`
@@ -84,6 +85,20 @@ joins fingerprints and identities only when non-empty, so pre-exclude
 graphs hash byte-identically — optional and additive, still version 1
 (`docs/content-key.md` has the design). The typed helpers (`cpp`, `java`)
 lower **before** this boundary and never appear in it.
+
+An `asset` atom names a file **brix itself ships** (a compiler-worker source, a
+`--listFiles`/class-load recorder), addressed by a stable logical `name`
+(POSIX, brix-relative) rather than a machine path. It exists so a skin can
+reference a shipped helper *portably*: the **engine owns the bytes** and
+resolves the name to a real path at run time for command rendering, but the
+**fingerprint is the name plus the file's content digest — never the resolved
+path** — so it is identical across machines and across the Python/TS frontends
+(a shared cache stays valid). This is the language-neutral answer to "how does a
+frontend point at a brix-shipped helper": frontends emit only the logical name;
+neither ships the helper nor knows where it lives. Additive, still version 1
+(a graph that uses no assets hashes byte-identically). Resolution is engine-side
+and out of the neutral fingerprint the same way `content_key` lenses are; a name
+the engine does not ship is a loud error before anything runs.
 
 `forced_orders` is optional and additive (absent means `[]`, so this remains
 version 1). Its integer fields are indices into `actions`. It represents the

@@ -93,6 +93,18 @@ export class ValueData extends DataAtom {
   }
 }
 
+/**
+ * A file brix itself ships (a compiler-worker source, a recorder script), named
+ * by a stable logical path rather than a machine path. The engine owns the bytes
+ * and resolves the name at run time; the fingerprint is the name + content, never
+ * the resolved path — identical across machines and frontends. Skin-internal.
+ */
+export class AssetData extends DataAtom {
+  constructor(public readonly name: string) {
+    super();
+  }
+}
+
 export class DataUnion extends DataExpr {
   readonly parts: readonly DataExpr[];
 
