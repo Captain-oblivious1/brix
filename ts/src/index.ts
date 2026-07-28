@@ -73,3 +73,5 @@ export * as python from "./python";
 export * as ts from "./ts";
 export * as java from "./java";
 export * as cpp from "./cpp";
+export * as rust from "./rust";
+export * as kotlin from "./kotlin";
