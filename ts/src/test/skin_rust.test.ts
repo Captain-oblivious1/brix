@@ -21,6 +21,13 @@ function referenceGraph(): Graph {
       env: { RUSTFLAGS: "-C debuginfo=1", WIDGET_MODE: "oracle" },
       envUsed: ["CI"],
     }),
+    // Bare defaults: release=true (the --release branch), no offline, no
+    // options/env/envUsed, default cargo tool — the otherwise-uncovered path.
+    new rust.CargoBuildAction({
+      manifest: "crates/bare/Cargo.toml",
+      artifact: d.file("target/release/libbare.a"),
+      sources: d.glob("crates/bare/{name}.rs"),
+    }),
   );
   return g;
 }

@@ -7,8 +7,8 @@
   "types": "dist/index.d.ts",
   "files": ["dist/", "native/brix_node.node"],
   "scripts": {
-    "build:native": "cargo build --release -p brix-node && node -e \"require('fs').copyFileSync(require('path').join('..','rust','target','release','libbrix_node.so'),'native/brix_node.node')\"",
-    "build:native:debug": "cargo build -p brix-node && node -e \"require('fs').copyFileSync(require('path').join('..','rust','target','debug','libbrix_node.so'),'native/brix_node.node')\"",
+    "build:native": "cargo build --release --manifest-path ../rust/Cargo.toml -p brix-node && node -e \"require('fs').copyFileSync(require('path').join('..','rust','target','release','libbrix_node.so'),'native/brix_node.node')\"",
+    "build:native:debug": "cargo build --manifest-path ../rust/Cargo.toml -p brix-node && node -e \"require('fs').copyFileSync(require('path').join('..','rust','target','debug','libbrix_node.so'),'native/brix_node.node')\"",
     "build:ts": "tsc -p tsconfig.json",
     "build": "npm run build:native && npm run build:ts",
     "test": "npm run build:native:debug && npm run build:ts && node --test dist/test/*.test.js"

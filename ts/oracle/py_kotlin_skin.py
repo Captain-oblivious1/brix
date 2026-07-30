@@ -37,6 +37,13 @@ def reference_graph() -> Graph:
             },
             outputs={"output": d.file("build/consumed.txt")},
         ),
+        # Bare defaults: no entry_point (the `jar cf` branch), no resource_dir,
+        # no spring_allopen, default kotlinc/jar/classes_dir/jvm_target — the
+        # otherwise-uncovered path.
+        kotlin.JarAction(
+            source_files=d.glob("lib/src/{name}.kt"),
+            output_file=d.file("build/libs/lib.jar"),
+        ),
     )
     return g
 

@@ -39,6 +39,13 @@ function referenceGraph(): Graph {
       },
       outputs: { output: d.file("build/consumed.txt") },
     }),
+    // Bare defaults: no entryPoint (the `jar cf` branch), no resourceDir, no
+    // springAllopen, default kotlinc/jar/classesDir/jvmTarget — the
+    // otherwise-uncovered path.
+    new kotlin.JarAction({
+      sourceFiles: d.glob("lib/src/{name}.kt"),
+      outputFile: d.file("build/libs/lib.jar"),
+    }),
   );
   return g;
 }
