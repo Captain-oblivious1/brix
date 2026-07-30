@@ -88,7 +88,11 @@ one engine).
      exclude, the compile/link flag split) is done and threaded through its two
      non-gated consumers — `cpp` `deps=` and `kotlin` `classpath=` (spawn path) —
      oracle-proven byte-equal. (`java` `classpath=` stays gated: its javac worker
-     requires the asset atom below.)
+     requires the asset atom below.) The **`ts.npm`** resolver (reads
+     `node_modules`, filesystem-only) is done and threaded through
+     `ts.CompileAction({ deps })` — proven against a fixture tree (own types,
+     nested-`node_modules` skip, `@types` fallback, scoped-name mangling, dedup),
+     which also closed the previously-untested `dependencies`→`types` path.
    - **Decided; engine half remaining — the `asset` atom.** `java.javac_worker` +
      `JUnitTestAction` (per-class test-impact), `springboot`, the `kotlin`/`java`
      worker + `classpath=` paths, and the `ts` import-tracking wrapper reference
@@ -103,12 +107,12 @@ one engine).
      resolution + `["asset", name, content-hash]` fingerprint + path render, the
      Python-engine mirror, regen goldens; then migrate the java/ts/kotlin/
      springboot skins onto it. Unblocks the gated skins above.
-   - **Deferred (mechanical):** the resolver *adapters* that produce a `DepSet`
-     (`java.pom`/`maven`/`gradle` and `cpp.pkg_config` shell out to `mvn`/
-     `gradle`/`pkg-config`; `ts.npm` reads `node_modules`) — frontend-only path
-     production, deep-equal-oracle-testable only where the tool is present, so
-     `ts.npm` (filesystem) is the clean next one; the atomic staging-hazard guard.
-     (`springboot` and the java/kotlin *worker* paths are asset-gated, above.)
+   - **Deferred (mechanical):** the *shell-out* resolver adapters —
+     `java.pom`/`maven`/`gradle` (`mvn`/`gradle`) and `cpp.pkg_config`
+     (`pkg-config`) — frontend-only path production, deep-equal-oracle-testable
+     only where the external tool is present, so left until a project needs one;
+     the atomic staging-hazard guard. (`springboot` and the java/kotlin *worker*
+     paths are asset-gated, above.)
 
 ### Tier D — gated, deliberately not "do now"
 

@@ -1,0 +1,6 @@
+# This tree holds committed test fixtures for the oracle, including deliberate
+# node_modules/ layouts the ts.npm resolver walks (own types, @types fallback,
+# nested-node_modules skip). Re-include them: they are checked-in test data, not
+# installed dependencies, so the parent ts/.gitignore `node_modules/` rule must
+# not apply here.
+!node_modules/

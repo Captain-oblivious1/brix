@@ -11,6 +11,9 @@
  * self-resolved imports (build-time validation, not part of the wire spec).
  */
 
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
+
 import { Action, ExternalProcessAction } from "./actions";
 import {
   DataExpr,
@@ -20,6 +23,7 @@ import {
   ToolData,
   ValueData,
 } from "./data";
+import { DepSet } from "./deps";
 
 function optionsExpr(options: string[] | DataExpr | undefined): DataExpr {
   if (options instanceof DataExpr) return options;
@@ -60,6 +64,86 @@ export function dts(expr: DataExpr): DataExpr {
     return atom;
   });
   return lensed.length === 1 ? lensed[0] : new DataUnion(...lensed);
+}
+
+/** Recursively collect `.d.ts` under `dir`, as paths relative to `root` (posix). */
+function walkDts(root: string, dir: string, out: string[]): void {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = nodePath.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkDts(root, full, out);
+    } else if (entry.isFile() && entry.name.endsWith(".d.ts")) {
+      out.push(nodePath.relative(root, full).split(nodePath.sep).join("/"));
+    }
+  }
+}
+
+/** The workspace-relative `.d.ts` a package contributes: its own type tree plus
+ * its DefinitelyTyped `@types/<name>` tree, if present. Nested `node_modules`
+ * are skipped (npm hoists transitive deps; descending would over-track). Scoped
+ * names map to DefinitelyTyped's mangled dir (`@scope/pkg` -> `scope__pkg`).
+ * Mirrors `_resolve_npm_types`. */
+function resolveNpmTypes(base: string, nodeModules: string, name: string): string[] {
+  const atTypes = name.startsWith("@") ? name.slice(1).replace(/\//g, "__") : name;
+  const candidates = [
+    nodePath.join(nodeModules, name),
+    nodePath.join(nodeModules, "@types", atTypes),
+  ];
+  const out: string[] = [];
+  for (const relDir of candidates) {
+    const absDir = nodePath.join(base, relDir);
+    let isDir = false;
+    try {
+      isDir = fs.statSync(absDir).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (!isDir) continue;
+    const rels: string[] = [];
+    walkDts(absDir, absDir, rels);
+    // A nested install; the top-level one is tracked already.
+    const kept = rels.filter((rel) => !rel.split("/").includes("node_modules"));
+    kept.sort();
+    for (const rel of kept) {
+      const abs = nodePath.join(absDir, rel);
+      out.push(nodePath.relative(base, abs).split(nodePath.sep).join("/"));
+    }
+  }
+  return out;
+}
+
+export interface NpmOptions {
+  nodeModules?: string;
+  root?: string;
+}
+
+/**
+ * Resolve npm packages' TypeScript type declarations into a `DepSet` — the TS
+ * mirror of `ts.npm`. brix does not run npm; you `npm install` and this adapter
+ * consumes the result. For each package it collects that package's `.d.ts` under
+ * `node_modules` (and `@types/<name>` for DefinitelyTyped), so upgrading a
+ * dependency whose types changed re-stales the compile. Pass the result as
+ * `ts.CompileAction({ deps })` — the consumer applies the ts-dts lens.
+ *
+ * Reads the real filesystem now (per build, like the Maven adapters). Paths are
+ * relative to `root`. Throws if a named package has no discoverable `.d.ts`.
+ */
+export function npm(names: string[], opts: NpmOptions = {}): DepSet {
+  const nodeModules = opts.nodeModules ?? "node_modules";
+  const base = opts.root ?? ".";
+  const artifacts: string[] = [];
+  for (const name of names) {
+    const found = resolveNpmTypes(base, nodeModules, name);
+    if (found.length === 0) {
+      throw new Error(
+        `ts.npm: no .d.ts type declarations for '${name}' under ${nodeModules}/ — ` +
+          `is it installed, and does it ship types (or need @types/${name})?`,
+      );
+    }
+    artifacts.push(...found);
+  }
+  // Order-preserving de-dup (first occurrence wins), like Python's dict.fromkeys.
+  return new DepSet([...new Set(artifacts)]);
 }
 
 export interface RunTestOptions {
@@ -114,6 +198,11 @@ export interface CompileOptions {
   options?: string[] | DataExpr;
   declaration?: boolean;
   dependencies?: DataExpr[];
+  /** A resolved npm DepSet (`ts.npm`): its `.d.ts` artifacts join `dependencies`
+   * and are tracked exactly like an upstream module's declaration — ts-dts-lensed
+   * and resolved on disk by tsc, so a dependency's type change rebuilds, an
+   * impl-only change replays. */
+  deps?: DepSet;
   trackImports?: boolean;
   python?: ToolData;
 }
@@ -135,7 +224,13 @@ export class CompileAction extends Action {
     this.tsc = opts.tsc ?? new ToolData("tsc");
     this.options = opts.options;
     this.declaration = opts.declaration ?? true;
-    this.dependencies = opts.dependencies ?? [];
+    // A resolved npm DepSet's .d.ts join the declared upstream dependencies and
+    // are tracked identically (ts-dts-lensed); mirrors brix.ts's fold order
+    // (explicit dependencies first, then the npm-resolved artifacts).
+    this.dependencies = [
+      ...(opts.dependencies ?? []),
+      ...(opts.deps ? opts.deps.files() : []),
+    ];
     this.trackImports = opts.trackImports ?? true;
     this.python = opts.python ?? new ToolData("python3");
   }
