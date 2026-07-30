@@ -60,8 +60,9 @@ generic** (never leak a layer-specific or engine-internal detail onto a generic
 build (spell the commands out) with the full engine behind it. `rust/brix-node`
 is the napi twin of `rust/brix-py` (async `build` returning a Promise, live
 events via a threadsafe function — the FFI callback threading, **still owed a
-Fable review**; custom cache-store/identity callbacks and the env sentinels are
-deferred). The `ts/` package mirrors the Python core (data, actions, graph,
+Fable review**; custom cache-store/identity callbacks are deferred, the env
+sentinels are now implemented in the TS core, see Stage 2). The `ts/` package
+mirrors the Python core (data, actions, graph,
 lowering, builders, engine, reporters, cli) — three sanctioned deviations only
 (camelCase, async `build`, plain-object reporters), plus method forms for the
 operators TS can't overload (`.plus`, `.excluding`). Proven by a lowering oracle
@@ -76,18 +77,32 @@ one engine).
    as Tier B: **every API change proposed first**, generic classes kept generic.
    - **Done, oracle-proven:** `python` (PytestAction); `ts` (Compile/RunTest/
      Typedoc + the `ts-dts` content lens); `java` **core** (JarAction, Javadoc,
-     the `jvm-abi` lens); `cpp` (Compile/Link/Archive/RunTest/Doxygen). Env
-     sentinels (`SYSTEM`/`UNSET`/`PASS` + the `_brix_env_used` snapshot) were
-     added to the TS core to support them.
-   - **Gated on a decision — shipped-helper addressing:** `java.javac_worker` +
-     `JUnitTestAction` (per-class test-impact) and the `ts` import-tracking
-     wrapper reference brix-shipped helpers (`JavacWorker.java` — a Java source,
+     the `jvm-abi` lens); `cpp` (Compile/Link/Archive/RunTest/Doxygen); `rust`
+     (CargoBuildAction); `kotlin` **core** (JarAction spawn path + the
+     `kotlin-abi` lens). Env sentinels (`SYSTEM`/`UNSET`/`PASS` + the
+     `_brix_env_used` snapshot) were added to the TS core to support them. Each
+     skin's oracle locks **every** branch (full-options *and* bare-defaults)
+     byte-equal to the Python skin; `rust`/`kotlin` were built from a discrete
+     confined packet by a cheaper model (ChatGPT) and reviewed.
+   - **Decided; engine half remaining — the `asset` atom.** `java.javac_worker` +
+     `JUnitTestAction` (per-class test-impact), `springboot`, the `kotlin`/`java`
+     worker + `classpath=` paths, and the `ts` import-tracking wrapper reference
+     brix-shipped helpers (`JavacWorker.java`/`KotlincWorker.java` — Java sources,
      no module form — and `.py` recorders) by absolute path, which is in the
-     fingerprint (machine-specific, no cross-frontend common form). Need a
-     portable, content-addressed reference before these can mirror.
+     fingerprint (machine-specific, no cross-frontend common form). The fix
+     (chosen: **the engine bundles the helpers**) is the `asset` atom
+     (`{kind:"asset", name}`), fingerprinted by name + content, never the resolved
+     path. **Frontend + wire contract are done** (both frontends' emitters + the
+     boundary-schema grammar, oracle-proven identical). **Remaining (Fable-
+     reserved, post-reset):** the engine half — Rust-core parse + bundled
+     resolution + `["asset", name, content-hash]` fingerprint + path render, the
+     Python-engine mirror, regen goldens; then migrate the java/ts/kotlin/
+     springboot skins onto it. Unblocks the gated skins above.
    - **Deferred (mechanical):** the shared `DepSet` + resolvers (`pom`/`maven`/
-     `gradle`/`npm`/`pkg_config`, `classpath=`/`deps=`); the remaining skins
-     (`cpp`/`kotlin`/`springboot`/`rust`); the atomic staging-hazard guard.
+     `gradle`/`npm`/`pkg_config`, `classpath=`/`deps=`) — a filesystem resolver
+     shared across skins; the atomic staging-hazard guard. (The `springboot` skin
+     and the worker/`classpath=` paths are gated on the asset atom above, not
+     merely mechanical.)
 
 ### Tier D — gated, deliberately not "do now"
 
