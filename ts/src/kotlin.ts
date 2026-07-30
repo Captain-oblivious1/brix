@@ -1,10 +1,15 @@
 /**
  * Typed Kotlin actions — the TS mirror of `src/brix/kotlin.py`. This skin
- * provides the kotlin-abi lens and the spawned-kotlinc path of JarAction.
+ * provides the kotlin-abi lens and the spawned-kotlinc path of JarAction,
+ * including a resolved `classpath=` (a `DepSet` or data expressions): kotlinc
+ * wants one path-separator-joined `-classpath` token, so the resolved jar paths
+ * are baked into a value, while the same jars ride along as a kotlin-abi-lensed
+ * fingerprint input so a dependency change recompiles the module.
  *
- * Deferred: the classpath/DepSet path and warm kotlinc worker, both of which
- * depend on frontend support that is not available yet.
+ * Deferred: the warm kotlinc worker (needs the shipped-helper asset mechanism).
  */
+
+import { delimiter } from "node:path";
 
 import { Action, ExternalProcessAction, WorkerSpec } from "./actions";
 import {
@@ -16,6 +21,7 @@ import {
   ToolData,
   ValueData,
 } from "./data";
+import { DepSet } from "./deps";
 
 const SPRING_PRESET = "plugin:org.jetbrains.kotlin.allopen:preset=spring";
 
@@ -53,13 +59,34 @@ function optionsExpr(options: string[] | DataExpr | undefined): DataExpr {
   return new ValueData((options ?? []).join(" "));
 }
 
+/** Normalize a classpath argument to a list of data expressions: a `DepSet`
+ * becomes its byte-lens file atoms (the consumer re-lenses); a list passes
+ * through; undefined is empty. Mirrors java's `_as_classpath_list`. */
+function asClasspathList(classpath: DepSet | DataExpr[] | undefined): DataExpr[] {
+  if (classpath === undefined) return [];
+  if (classpath instanceof DepSet) return classpath.files();
+  return classpath;
+}
+
+/** The FileData paths across all classpath entries (mirrors `_classpath_paths`):
+ * kotlinc's `-classpath` takes one path-separator-joined token. */
+function classpathPaths(classpath: DataExpr[]): string[] {
+  const paths: string[] = [];
+  for (const expr of classpath) {
+    for (const atom of expr.atoms()) {
+      if (atom instanceof FileData) paths.push(atom.path);
+    }
+  }
+  return paths;
+}
+
 export interface JarOptions {
   sourceFiles: DataExpr;
   outputFile: FileData;
   kotlinc?: ToolData;
   jarTool?: ToolData;
   classesDir?: string;
-  classpath?: DataExpr[];
+  classpath?: DepSet | DataExpr[];
   jvmTarget?: string;
   springAllopen?: string;
   options?: string[] | DataExpr;
@@ -74,6 +101,7 @@ export class JarAction extends Action {
   private readonly kotlinc: ToolData;
   private readonly jarTool: ToolData;
   private readonly classesDir: string;
+  private readonly classpath: DataExpr[];
   private readonly jvmTarget: string;
   private readonly springAllopen?: string;
   private readonly options?: string[] | DataExpr;
@@ -82,10 +110,11 @@ export class JarAction extends Action {
 
   constructor(opts: JarOptions) {
     super();
-    if (opts.classpath || opts.kotlincWorker) {
+    if (opts.kotlincWorker) {
       throw new Error(
-        "JarAction: classpath=/kotlincWorker= are not available in the TypeScript " +
-          "frontend yet — they need the kotlinc worker and the shared DepSet.",
+        "JarAction: kotlincWorker= is not available in the TypeScript frontend " +
+          "yet — the warm kotlinc worker needs brix's shipped-helper asset " +
+          "mechanism (pending). The spawned-kotlinc path (including classpath=) works.",
       );
     }
     this.sourceFiles = opts.sourceFiles;
@@ -93,6 +122,7 @@ export class JarAction extends Action {
     this.kotlinc = opts.kotlinc ?? new ToolData("kotlinc");
     this.jarTool = opts.jarTool ?? new ToolData("jar");
     this.classesDir = opts.classesDir ?? "build/kotlin-classes";
+    this.classpath = asClasspathList(opts.classpath);
     this.jvmTarget = opts.jvmTarget ?? "17";
     this.springAllopen = opts.springAllopen;
     this.options = opts.options;
@@ -108,6 +138,16 @@ export class JarAction extends Action {
       options: optionsExpr(this.options),
     };
     const compileParts = ["{kotlinc}", "-jvm-target {jvm_target}"];
+    if (this.classpath.length) {
+      // kotlinc wants one path-separator-joined -classpath token, so the
+      // resolved jar paths are baked into a value; the same jars ride along as
+      // a kotlin-abi-lensed fingerprint input (hashed and dependency-inferred,
+      // though unreferenced by the template) — kotlin-abi, NOT jvm-abi, because
+      // a Kotlin `inline fun` copies its body into this module at compile time.
+      compileInputs.classpath = new ValueData(classpathPaths(this.classpath).join(delimiter));
+      compileInputs.classpath_track = abi(new DataUnion(...this.classpath));
+      compileParts.push("-classpath {classpath}");
+    }
     if (this.springAllopen !== undefined) {
       compileInputs.allopen = new FileData(this.springAllopen);
       compileInputs.preset = new ValueData(SPRING_PRESET);

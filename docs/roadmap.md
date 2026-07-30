@@ -83,7 +83,12 @@ one engine).
      `_brix_env_used` snapshot) were added to the TS core to support them. Each
      skin's oracle locks **every** branch (full-options *and* bare-defaults)
      byte-equal to the Python skin; `rust`/`kotlin` were built from a discrete
-     confined packet by a cheaper model (ChatGPT) and reviewed.
+     confined packet by a cheaper model (ChatGPT) and reviewed. The shared
+     **`DepSet`** (`.plus`/`.excluding` method forms, first-wins dedup, fnmatch
+     exclude, the compile/link flag split) is done and threaded through its two
+     non-gated consumers — `cpp` `deps=` and `kotlin` `classpath=` (spawn path) —
+     oracle-proven byte-equal. (`java` `classpath=` stays gated: its javac worker
+     requires the asset atom below.)
    - **Decided; engine half remaining — the `asset` atom.** `java.javac_worker` +
      `JUnitTestAction` (per-class test-impact), `springboot`, the `kotlin`/`java`
      worker + `classpath=` paths, and the `ts` import-tracking wrapper reference
@@ -98,11 +103,12 @@ one engine).
      resolution + `["asset", name, content-hash]` fingerprint + path render, the
      Python-engine mirror, regen goldens; then migrate the java/ts/kotlin/
      springboot skins onto it. Unblocks the gated skins above.
-   - **Deferred (mechanical):** the shared `DepSet` + resolvers (`pom`/`maven`/
-     `gradle`/`npm`/`pkg_config`, `classpath=`/`deps=`) — a filesystem resolver
-     shared across skins; the atomic staging-hazard guard. (The `springboot` skin
-     and the worker/`classpath=` paths are gated on the asset atom above, not
-     merely mechanical.)
+   - **Deferred (mechanical):** the resolver *adapters* that produce a `DepSet`
+     (`java.pom`/`maven`/`gradle` and `cpp.pkg_config` shell out to `mvn`/
+     `gradle`/`pkg-config`; `ts.npm` reads `node_modules`) — frontend-only path
+     production, deep-equal-oracle-testable only where the tool is present, so
+     `ts.npm` (filesystem) is the clean next one; the atomic staging-hazard guard.
+     (`springboot` and the java/kotlin *worker* paths are asset-gated, above.)
 
 ### Tier D — gated, deliberately not "do now"
 

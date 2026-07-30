@@ -6,7 +6,10 @@
  * LinkApplicationAction, ArchiveAction, RunTestAction (per-binary impact
  * selection), and DoxygenAction. No content lens, no shipped helper.
  *
- * Deferred (with the shared DepSet): `pkg_config` and the `deps=` parameters.
+ * `deps=` takes a `DepSet`: its `compileFlags` (`-I`/`-D`) join every TU's
+ * compile command, its `linkFlags` (`-L`/`-l`) and artifact files (byte-lens
+ * tracked) go on the link *after* the objects (link order is load-bearing).
+ * Deferred (needs external tools): the `pkg_config` resolver that produces one.
  */
 
 import { Action, ExpandAll, ExternalProcessAction } from "./actions";
@@ -18,6 +21,7 @@ import {
   ToolData,
   ValueData,
 } from "./data";
+import { DepSet } from "./deps";
 import { SYSTEM } from "./env";
 
 // Behaviour-affecting C/C++ toolchain environment, tracked (SYSTEM) so a change
@@ -45,21 +49,12 @@ function singleBinding(collection: GlobData, what: string): string {
   return names[0];
 }
 
-function rejectDeps(deps: unknown, where: string): void {
-  if (deps !== undefined) {
-    throw new Error(
-      `${where}: deps= (cpp.pkg_config / DepSet) is not available in the TypeScript ` +
-        "frontend yet — the shared resolver is a deferred follow-on.",
-    );
-  }
-}
-
 export interface CompileSourceOptions {
   source_file: GlobData;
   object_file: GlobData;
   compiler?: ToolData;
   compile_options?: string[] | DataExpr;
-  deps?: never;
+  deps?: DepSet;
 }
 
 export class CompileSourceAction extends Action {
@@ -67,11 +62,11 @@ export class CompileSourceAction extends Action {
   private readonly objectFile: GlobData;
   private readonly compiler: ToolData;
   private readonly compileOptions?: string[] | DataExpr;
+  private readonly deps?: DepSet;
   private readonly binding: string;
 
   constructor(opts: CompileSourceOptions) {
     super();
-    rejectDeps(opts.deps, "CompileSourceAction");
     const sourceBinding = singleBinding(opts.source_file, "source_file");
     const objectBinding = singleBinding(opts.object_file, "object_file");
     if (sourceBinding !== objectBinding) {
@@ -83,6 +78,10 @@ export class CompileSourceAction extends Action {
     this.objectFile = opts.object_file;
     this.compiler = opts.compiler ?? new ToolData("c++");
     this.compileOptions = opts.compile_options;
+    // A DepSet's compile flags (-I/-D from e.g. cpp.pkg_config) are added to
+    // every translation unit's command as a separate value, so they compose
+    // with any compile_options form and re-stale the compile when they change.
+    this.deps = opts.deps;
     this.binding = sourceBinding;
   }
 
@@ -90,6 +89,7 @@ export class CompileSourceAction extends Action {
     const name = this.binding;
     const objTemplate = this.objectFile.template;
     const depfile = `${objTemplate}.d`;
+    const depCflags = this.deps ? this.deps.compileFlags.join(" ") : "";
     return [
       new ExpandAll({
         elementName: name,
@@ -104,7 +104,7 @@ export class CompileSourceAction extends Action {
           inputs: {
             compiler: this.compiler,
             options: optionsExpr(this.compileOptions),
-            dep_cflags: new ValueData(""),
+            dep_cflags: new ValueData(depCflags),
             source: new FileData(this.sourceFile.template),
           },
           outputs: {
@@ -124,7 +124,7 @@ export interface LinkApplicationOptions {
   output_file: FileData;
   linker?: ToolData;
   link_options?: string[] | DataExpr;
-  deps?: never;
+  deps?: DepSet;
 }
 
 export class LinkApplicationAction extends Action {
@@ -132,17 +132,22 @@ export class LinkApplicationAction extends Action {
   private readonly outputFile: FileData;
   private readonly linker: ToolData;
   private readonly linkOptions?: string[] | DataExpr;
+  private readonly deps?: DepSet;
 
   constructor(opts: LinkApplicationOptions) {
     super();
-    rejectDeps(opts.deps, "LinkApplicationAction");
     this.objectFiles = opts.object_files;
     this.outputFile = opts.output_file;
     this.linker = opts.linker ?? new ToolData("c++");
     this.linkOptions = opts.link_options;
+    // A DepSet's link artifacts (.a/.so, tracked as byte-lens inputs) and link
+    // flags (-L/-l) go *after* the objects — link order is load-bearing.
+    this.deps = opts.deps;
   }
 
   lower(): Action[] {
+    const depLibs = new DataUnion(...(this.deps ? this.deps.files() : []));
+    const depLflags = this.deps ? this.deps.linkFlags.join(" ") : "";
     return [
       new ExternalProcessAction({
         name: `link ${this.outputFile.path}`,
@@ -151,8 +156,8 @@ export class LinkApplicationAction extends Action {
           linker: this.linker,
           options: optionsExpr(this.linkOptions),
           objects: this.objectFiles,
-          dep_libs: new DataUnion(), // tracked artifact files (empty without deps)
-          dep_lflags: new ValueData(""),
+          dep_libs: depLibs, // tracked artifact files (empty for pkg-config)
+          dep_lflags: new ValueData(depLflags),
         },
         outputs: { output: this.outputFile },
         env: TOOLCHAIN_ENV,

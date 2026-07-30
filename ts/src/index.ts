@@ -32,6 +32,8 @@ export type {
 
 export { Graph, EdgeTrigger } from "./graph";
 
+export { DepSet } from "./deps";
+
 export {
   CleanBuilder,
   IncrementalBuilder,
