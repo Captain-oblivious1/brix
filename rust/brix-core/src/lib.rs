@@ -12,6 +12,7 @@
 //! No PyO3 in this crate — the Python and (future) JS/TS bindings wrap it.
 
 pub mod actions;
+pub mod assets;
 pub mod atomic;
 pub mod cache;
 pub mod content;
