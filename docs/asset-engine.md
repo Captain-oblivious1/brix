@@ -181,11 +181,16 @@ time; the **Python** frontend for all four is complete (commits `b3826be`, `2e16
 **TS frontend — deferred.** Each Python migration is meant to be mirrored in the TS
 skin (drop the `throw`, emit the same `AssetData(name)`, prove by deep-equal oracle),
 but that is frontend parity for TS authors and the real driver uses Python build
-files, so it is deferred until TS authoring is needed. The TS `java` skin also hits a
-real API question first: `JUnitTestAction` bakes `ToolData(sys.executable)` (an
-absolute interpreter path) into the recorder invocation, which the TS frontend cannot
-reproduce — resolve that (fix the `sys.executable` portability wart, don't paper over
-it with a `python=` param just to satisfy the oracle) before porting `JUnitTestAction`.
+files, so it is deferred until TS authoring is needed. When TS `JUnitTestAction` is
+wanted, the path is already established (investigated 2026-07-31): its
+`ToolData(sys.executable)` for the recorder is **not** a portability wart — it is
+consistent with how every `ToolData` fingerprints (resolved path + stat signature,
+machine-specific). The `python.PytestAction` and `ts.CompileAction` skins already
+solve the cross-frontend case with an optional `python=` param (default
+`sys.executable`) whose TS mirror makes `python` required and the oracle passes it
+explicitly — a shipped, sanctioned deviation. So: add the same optional `python=` to
+`java.JUnitTestAction` (it is the only one of the three lacking it), then mirror it in
+TS exactly like `PytestAction`. The `python=` param is the proper fix, not a band-aid.
 
 **Cleanup — DONE (2026-07-31, commit `24bac83`).** The dead duplicate helpers under
 `src/brix/_java|_ts` are deleted; `assets/` is the sole source of truth. Wheel

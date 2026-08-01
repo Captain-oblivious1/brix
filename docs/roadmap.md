@@ -109,8 +109,12 @@ one engine).
      wheels resolve helpers from the copy embedded in the `brix_py` extension
      (Option A — the engine owns the bytes), proven by `wheel_smoke.py`.
      **Remaining:** the TS-frontend skin mirrors — *deferred* (frontend parity; the
-     real driver uses Python build files), and TS `JUnitTestAction` first needs the
-     `sys.executable` portability wart fixed properly rather than papered over.
+     real driver uses Python build files). A future TS `JUnitTestAction` port is
+     unblocked: its `ToolData(sys.executable)` is *not* a wart (consistent with all
+     tool fingerprinting); the fix is the established `python=`-param pattern already
+     shipped in `python.PytestAction`/`ts.CompileAction` (add the same optional param
+     to `java.JUnitTestAction`, the only one missing it; TS mirror passes it
+     explicitly like PytestAction).
    - **Deferred (mechanical):** the *shell-out* resolver adapters —
      `java.pom`/`maven`/`gradle` (`mvn`/`gradle`) and `cpp.pkg_config`
      (`pkg-config`) — frontend-only path production, deep-equal-oracle-testable
