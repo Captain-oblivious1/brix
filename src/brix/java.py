@@ -39,7 +39,16 @@ from typing import TYPE_CHECKING
 import sys
 
 from .actions import Action, ExpandAll, ExternalProcessAction
-from .data import DataAtom, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .data import (
+    AssetData,
+    DataAtom,
+    DataExpr,
+    DataUnion,
+    FileData,
+    GlobData,
+    ToolData,
+    ValueData,
+)
 from .env import SYSTEM
 
 # Behaviour-affecting JVM environment, tracked (SYSTEM) so a change re-stales the
@@ -59,8 +68,12 @@ if TYPE_CHECKING:
     from .graph import Graph
     from .workers import WorkerSpec
 
-_WORKER_SOURCE = Path(__file__).parent / "_java" / "JavacWorker.java"
-_CLASSLOAD_RECORDER = Path(__file__).parent / "_java" / "junit_classload.py"
+# The javac worker source and the JUnit class-load recorder are brix-shipped
+# helpers, referenced portably by logical asset name (assets/java/...) and
+# resolved engine-side — never by a machine path, so the fingerprint is
+# identical across machines and frontends (docs/asset-engine.md).
+_WORKER_ASSET = "java/JavacWorker.java"
+_CLASSLOAD_ASSET = "java/junit_classload.py"
 
 
 # --- dependency resolution: adopt a pom, or resolve inline coordinates ---
@@ -457,7 +470,7 @@ def javac_worker(
         ExternalProcessAction(
             name="javac-worker: compile",
             command_line="{javac} -d {classes_dir} {source}",
-            inputs={"javac": javac, "source": FileData(str(_WORKER_SOURCE.resolve()))},
+            inputs={"javac": javac, "source": AssetData(_WORKER_ASSET)},
             outputs={"classes_dir": FileData(classes_dir), "classes": classes},
         ),
         ExternalProcessAction(
@@ -811,7 +824,7 @@ class JUnitTestAction(Action):
             ),
             inputs={
                 "python": ToolData(sys.executable),
-                "recorder": FileData(str(_CLASSLOAD_RECORDER.resolve())),
+                "recorder": AssetData(_CLASSLOAD_ASSET),
                 "java": self.java,
                 "console": FileData(self.console_jar),
                 "testclass": FileData(f"{self.test_classes_dir}/{{name}}.class"),
