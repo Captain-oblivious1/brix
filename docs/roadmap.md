@@ -59,8 +59,9 @@ generic** (never leak a layer-specific or engine-internal detail onto a generic
 **Stage 1 — the generic core — DONE.** TS-brix can author and run any *skinless*
 build (spell the commands out) with the full engine behind it. `rust/brix-node`
 is the napi twin of `rust/brix-py` (async `build` returning a Promise, live
-events via a threadsafe function — the FFI callback threading, **still owed a
-Fable review**; custom cache-store/identity callbacks are deferred, the env
+events via a threadsafe function — the FFI callback threading has been
+**reviewed** for event completeness/ordering/lifecycle; custom
+cache-store/identity callbacks are deferred, the env
 sentinels are now implemented in the TS core, see Stage 2). The `ts/` package
 mirrors the Python core (data, actions, graph,
 lowering, builders, engine, reporters, cli) — three sanctioned deviations only
@@ -87,8 +88,9 @@ one engine).
      **`DepSet`** (`.plus`/`.excluding` method forms, first-wins dedup, fnmatch
      exclude, the compile/link flag split) is done and threaded through its two
      non-gated consumers — `cpp` `deps=` and `kotlin` `classpath=` (spawn path) —
-     oracle-proven byte-equal. (`java` `classpath=` stays gated: its javac worker
-     requires the asset atom below.) The **`ts.npm`** resolver (reads
+     oracle-proven byte-equal. (TS `java` `classpath=` rides the javac worker, so
+     it lands with the deferred TS `java`-skin mirror — the asset atom it needed is
+     now built; see below.) The **`ts.npm`** resolver (reads
      `node_modules`, filesystem-only) is done and threaded through
      `ts.CompileAction({ deps })` — proven against a fixture tree (own types,
      nested-`node_modules` skip, `@types` fallback, scoped-name mangling, dedup),
@@ -128,13 +130,15 @@ one engine).
    but **gated on real-world soak** (Duane's call) — the Rust default must run on a
    real project for a work stretch (days) first. Deletes the execution half, keeps
    the reference math (Python stays the golden-fixture oracle). One subtle ordering
-   bug breaks builds → **Fable**, line by line. [rust-port.md](rust-port.md).
+   bug breaks builds → verification-heavy, line by line (differential oracle vs the
+   Python reference + `ultrareview` audit). [rust-port.md](rust-port.md).
 3. **Per-method test selection (test-impact increment 2) — largely obviated.**
    The motivation was that class-level selection was useless on coupled monoliths;
    runtime discovery *dissolved* that (it selects finely on databind — see Tier A),
    so going sub-class is now low-value. Keep parked unless a real suite shows
    class-level discovery is still too coarse; only then revisit (and the soundness
-   kernel — coverage is a past-run record — remains Fable-reserved).
+   kernel — coverage is a past-run record — is correctness-critical:
+   verification-heavy, differential oracle + `ultrareview` audit).
 4. **`brix.go` and Protobuf "did the meaningful part change?" skip.** Build Go by
    wrapping the `go` tool; add the interface-change skip — when a project using
    them appears.
@@ -180,7 +184,8 @@ one engine).
   A mild annoyance, not urgent.
 - **Filesystem-watcher change detection.** A pluggable `ChangeSource` so a no-op
   is O(changed) not O(all files). Correctness-critical invalidation path
-  (Fable-territory); only pays off with the resident daemon; build the seam and
+  (verification-heavy: differential oracle + `ultrareview` audit); only pays off
+  with the resident daemon; build the seam and
   the first real backend together, never seam-first. Design in the appendix.
 - **Sandboxing + staged-overlay visibility (one mechanism).** Give each step a
   filesystem view of exactly its declared inputs (+ staged outputs): simultaneously
@@ -294,7 +299,8 @@ by the same technique git uses.
   real-monorepo-onboarding win, not a today-problem. It is the **correctness-
   critical invalidation path** — a missed event silently ships a stale build, the
   exact failure the incremental-≡-clean oracles guard — so the *skipping* logic is
-  Fable-territory. And it only pays off with a **resident** watcher (a persistent
+  correctness-critical (verification-heavy: differential oracle + `ultrareview`
+  audit). And it only pays off with a **resident** watcher (a persistent
   daemon holding the watch + token), so it is coupled to the daemon lever.
 - *How to build it (when it bites).* Introduce the `ChangeSource` seam **and the
   first real watcher backend together, in one increment** — not seam-first (the
@@ -364,7 +370,8 @@ included} *simultaneously* enforces declared-dependency hygiene (the sandbox) an
 exposes staged outputs (the overlay). Do not ship two mechanisms.
 
 **Why parked / when it bites.** Correctness-critical foundation under *every* atomic
-build (Fable-territory: a wrong merged view is a silent wrong build); platform-specific
+build (verification-heavy: a wrong merged view is a silent wrong build — differential
+oracle + `ultrareview` audit); platform-specific
 plumbing for the airtight version; and no real driver yet to pin the semantics — real
 TS services, not the `examples/typescript` toy, reveal the `node_modules`/symlink/
 `realpath` requirements the view must satisfy. The plain incremental stack builds
