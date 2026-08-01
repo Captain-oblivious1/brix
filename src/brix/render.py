@@ -13,8 +13,9 @@ import re
 import shutil
 from pathlib import Path
 
+from . import assets
 from .actions import ExternalProcessAction
-from .data import DataExpr, FileData, GlobData, RegexData, ToolData, ValueData
+from .data import AssetData, DataExpr, FileData, GlobData, RegexData, ToolData, ValueData
 from .layers import NodeContext
 
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
@@ -61,6 +62,9 @@ def _render_expr(name: str, expr: DataExpr, ctx: NodeContext, is_output: bool) -
         return expr.text
     if isinstance(expr, ToolData):
         return resolve_tool(expr)
+    if isinstance(expr, AssetData):
+        # engine-owned bytes -> a real path for the command; not fingerprint material
+        return assets.resolve_path(expr.name)
     if isinstance(expr, FileData):
         if not expr.pattern.is_concrete:
             raise RenderError(f"{name}: unresolved bindings in path {expr.path!r}")

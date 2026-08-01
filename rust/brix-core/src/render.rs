@@ -106,6 +106,11 @@ fn render_atom(name: &str, atom: &DataAtom, ctx: &NodeContext, is_output: bool) 
     match atom {
         DataAtom::Value { text } => Ok(text.clone()),
         DataAtom::Tool { name } => resolve_tool(name),
+        // Materialize the engine-owned bytes to a real path (crate::assets owns
+        // the location policy); not fingerprint material.
+        DataAtom::Asset { name: asset } => Ok(crate::assets::resolve(asset)?
+            .to_string_lossy()
+            .into_owned()),
         DataAtom::File { path, .. } => {
             let pattern = crate::patterns::PathPattern::new(path)
                 .map_err(|e| format!("{name}: {e}"))?;

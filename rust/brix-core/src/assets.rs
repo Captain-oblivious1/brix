@@ -46,6 +46,22 @@ pub fn digest(name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("asset not shipped: {name}"))
 }
 
+/// The engine-internal root under which assets materialize for rendering. Kept
+/// **outside** any workspace so a materialized helper (e.g. a `.java` file)
+/// can never be swept into a source glob, and content-addressed so it is shared
+/// and stable across builds. The rendered path is not fingerprint material
+/// (docs/asset-engine.md §3-B), so this location is a free, engine-private
+/// choice — a later change to co-locate it under the build cache root would need
+/// no fingerprint regen.
+pub fn default_cache_root() -> PathBuf {
+    std::env::temp_dir().join("brix-assets")
+}
+
+/// [`resolve_path`] using [`default_cache_root`] — the form render uses.
+pub fn resolve(name: &str) -> Result<PathBuf, String> {
+    resolve_path(name, &default_cache_root())
+}
+
 /// The absolute filesystem path a command line names for this asset. The bytes
 /// are materialized into a content-addressed location under `cache_root`
 /// (`<cache_root>/assets/<digest>/<name>`) on first use — idempotent, and the

@@ -159,6 +159,7 @@ fn atom_repr(atom: &DataAtom) -> String {
         DataAtom::File { path, .. } => format!("data.file('{path}')"),
         DataAtom::Tool { name } => format!("data.tool('{name}')"),
         DataAtom::Value { text } => format!("data.value('{text}')"),
+        DataAtom::Asset { name } => format!("AssetData('{name}')"),
     }
 }
 

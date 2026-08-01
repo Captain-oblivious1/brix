@@ -18,8 +18,18 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path
 
+from . import assets
 from .actions import DeleteFilesAction, ExpandAll, ExternalProcessAction
-from .data import DataAtom, DataExpr, FileData, GlobData, RegexData, ToolData, ValueData
+from .data import (
+    AssetData,
+    DataAtom,
+    DataExpr,
+    FileData,
+    GlobData,
+    RegexData,
+    ToolData,
+    ValueData,
+)
 from .layers import BuildLayer, NodeContext, NodeProposal
 from .metadata import BuildMetadata, TimeAndHashChangeDetector
 from .process import ProcessResult
@@ -44,6 +54,8 @@ def _atom_identity(atom: DataAtom) -> list:
         return ["tool", atom.name]
     if isinstance(atom, ValueData):
         return ["value"]  # the text is fingerprint material, not identity
+    if isinstance(atom, AssetData):
+        return ["asset", atom.name]  # digest is fingerprint material, not identity
     return ["other", repr(atom)]
 
 
@@ -158,6 +170,10 @@ def action_fingerprint(
             return ["tool", atom.name, resolved, detector.stat_signature(ctx.workspace_root / resolved)]
         if isinstance(atom, ValueData):
             return ["value", atom.text]
+        if isinstance(atom, AssetData):
+            # name + content digest, never the resolved path — identical across
+            # machines and the Rust engine (assets.digest mirrors crate::assets).
+            return ["asset", atom.name, assets.digest(atom.name)]
         return ["other", repr(atom)]
 
     payload = {

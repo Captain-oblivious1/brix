@@ -116,6 +116,13 @@ fn atom_fp(
             ]))
         }
         DataAtom::Value { text } => Ok(Value::List(vec![Value::str("value"), Value::str(text)])),
+        // name + content digest, never the resolved path — identical across
+        // machines and the Python engine (crate::assets mirrors src/brix/assets.py).
+        DataAtom::Asset { name } => Ok(Value::List(vec![
+            Value::str("asset"),
+            Value::str(name),
+            Value::str(crate::assets::digest(name)?),
+        ])),
         DataAtom::Tool { name } => {
             // Python: `atom.name if "/" in atom.name else shutil.which(...)`;
             // missing -> ["tool", name, None, None]. Workspace-relative paths

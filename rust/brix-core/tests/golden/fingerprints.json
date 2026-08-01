@@ -48,6 +48,10 @@
     "fingerprint": "58ec081e05b9b50587d938f47da5ac0d236b50204a35bfa70d7d94708b6d58d2"
   },
   {
+    "spec": "{\"kind\": \"process\", \"command_line\": \"{java} -cp {cp} JavacWorker\", \"inputs\": {\"cp\": [{\"kind\": \"asset\", \"name\": \"java/JavacWorker.java\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/App.class\"}]}, \"name\": \"asset shipped helper\"}",
+    "fingerprint": "bfaa9c5fd88d8cdf74769337bb424a5769281d38aacce76306ee40b5ea7f52c3"
+  },
+  {
     "spec": "{\"kind\": \"process\", \"command_line\": \"cc {src} {out}\", \"inputs\": {\"src\": [{\"kind\": \"file\", \"path\": \"src/a.txt\"}]}, \"outputs\": {\"out\": [{\"kind\": \"file\", \"path\": \"build/a.o\"}]}, \"name\": \"env_unset forced absent\", \"env_unset\": [\"ALSO_FORBIDDEN\", \"FORBIDDEN_VAR\"]}",
     "fingerprint": "22152d854d09b981c000611d6b4d98873a135ae531b150e8ff12ff0de67b3718"
   }

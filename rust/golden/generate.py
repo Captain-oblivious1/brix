@@ -590,7 +590,7 @@ def gen_fs():
 
 def gen_fingerprints():
     from brix import ExternalProcessAction, Graph, UNSET, WorkerSpec
-    from brix.data import FileData
+    from brix.data import AssetData, FileData
     from brix.incremental import action_fingerprint
     from brix.java import AbiFile, AbiGlob
     from brix.kotlin import KotlinAbiFile
@@ -697,6 +697,16 @@ def gen_fingerprints():
             inputs={"src": d.file("src/a.txt")},
             outputs={"out": d.file("build/a.o")},
             env_used=["BRIX_GOLDEN_ENV"],
+        ),
+        # asset: a brix-shipped helper named by a logical path. Its fingerprint
+        # tail is ["asset", name, content-digest] — engine-owned bytes, never the
+        # resolved path — so Rust (embedded assets/) and Python (on-disk assets/)
+        # must agree to the byte. This is the asset engine's cross-engine proof.
+        ExternalProcessAction(
+            name="asset shipped helper",
+            command_line="{java} -cp {cp} JavacWorker",
+            inputs={"cp": AssetData("java/JavacWorker.java")},
+            outputs={"out": d.file("build/App.class")},
         ),
         # UNSET (phase 3): forced-absent names are fingerprint material — they
         # change what the process sees, so a fingerprint-keyed cache must never

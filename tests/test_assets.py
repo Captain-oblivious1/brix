@@ -52,3 +52,38 @@ def test_unknown_name_is_a_loud_error() -> None:
 def test_path_traversal_is_rejected(bad: str) -> None:
     with pytest.raises(assets.UnknownAssetError):
         assets.resolve_path(bad)
+
+
+def test_asset_edit_restales_the_action_fingerprint(tmp_path, monkeypatch) -> None:
+    """incremental == clean for assets: an action consuming a shipped helper
+    must rebuild when the helper's bytes change and skip when they don't. The
+    fingerprint is the cache key, so this asserts the key tracks the content
+    (never the resolved path), which is exactly what makes the skip sound."""
+    from brix import ExternalProcessAction
+    from brix.data import AssetData, FileData
+    from brix.incremental import action_fingerprint
+    from brix.layers import NodeContext
+    from brix.metadata import TimeAndHashChangeDetector
+
+    store = tmp_path / "assets" / "java"
+    store.mkdir(parents=True)
+    helper = store / "Helper.java"
+    monkeypatch.setattr(assets, "_ASSETS_DIR", tmp_path / "assets")
+
+    ctx = NodeContext.for_root(tmp_path)
+    det = TimeAndHashChangeDetector(tmp_path)
+    action = ExternalProcessAction(
+        name="uses helper",
+        command_line="{java} {h}",
+        inputs={"h": AssetData("java/Helper.java")},
+        outputs={"out": FileData("build/o")},
+    )
+
+    helper.write_bytes(b"class Helper {}\n")
+    fp1 = action_fingerprint(action, ctx, det)
+    fp1_again = action_fingerprint(action, ctx, det)  # clean re-run
+    helper.write_bytes(b"class Helper { int x; }\n")  # edit the shipped bytes
+    fp2 = action_fingerprint(action, ctx, det)
+
+    assert fp1 == fp1_again, "unchanged asset must give a stable (skip) fingerprint"
+    assert fp1 != fp2, "an edited asset must re-stale the action"

@@ -41,6 +41,14 @@ pub enum DataAtom {
     Value {
         text: String,
     },
+    /// A file brix itself ships, named by a stable logical `name` (POSIX,
+    /// brix-relative). The engine owns the bytes ([`crate::assets`]); its
+    /// fingerprint is `["asset", name, content-digest]` — never the resolved
+    /// path — so it is identical across machines and frontends. Not a path atom
+    /// (it drives no workspace dependency inference).
+    Asset {
+        name: String,
+    },
 }
 
 impl DataAtom {
@@ -61,6 +69,9 @@ impl DataAtom {
             DataAtom::Regex { pattern } => tag("regex", pattern),
             DataAtom::Tool { name } => tag("tool", name),
             DataAtom::Value { .. } => Value::List(vec![Value::str("value")]),
+            // The name is identity; the content digest is fingerprint material
+            // (mirrors File: identity ["file", path], fingerprint adds the hash).
+            DataAtom::Asset { name } => tag("asset", name),
         }
     }
 
@@ -94,6 +105,7 @@ impl DataAtom {
             DataAtom::Regex { pattern } => pattern,
             DataAtom::Tool { name } => name,
             DataAtom::Value { text } => text,
+            DataAtom::Asset { name } => name,
         }
     }
 
@@ -110,6 +122,7 @@ impl DataAtom {
             DataAtom::Regex { pattern } => format!("regex:{pattern}"),
             DataAtom::Tool { name } => format!("tool:{name}"),
             DataAtom::Value { text } => format!("value:{text}"),
+            DataAtom::Asset { name } => format!("asset:{name}"),
         }
     }
 
