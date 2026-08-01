@@ -23,6 +23,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::SystemTime;
 
 use serde_json::{json, Map, Value};
 
@@ -38,6 +39,13 @@ use crate::process::ProcessResult;
 
 const ENTRY: &str = "entry.json";
 const FILES: &str = "files";
+
+/// A cache hit refreshes its entry's recency (mtime) so eviction is LRU by
+/// *use*, not by creation. Coarsened to this many seconds so repeated hits in
+/// one window don't each rewrite the inode. Mirrors `_TOUCH_COARSENING_SECONDS`
+/// in `cache.py`; pruning itself lives in Python (engine-agnostic directory
+/// maintenance over the shared dir), so this side only keeps the mtimes fresh.
+const TOUCH_COARSENING_SECONDS: u64 = 3600;
 
 /// An entry is an opaque JSON value a store returns from `load` and receives
 /// back in `restore`; the layer only reads `entry["result"]` from it.
@@ -127,6 +135,24 @@ impl CacheStore {
     fn entry_dir(&self, fingerprint: &str) -> PathBuf {
         self.directory.join(&fingerprint[..2]).join(fingerprint)
     }
+
+    /// Refresh an entry's recency after a hit (best-effort, coarsened). Keeps
+    /// the mtime Python's `prune` sorts on current for entries served by this
+    /// engine; a stat/utime failure never fails the hit.
+    fn touch(&self, fingerprint: &str) {
+        let entry = self.entry_dir(fingerprint).join(ENTRY);
+        let now = SystemTime::now();
+        if let Ok(mtime) = std::fs::metadata(&entry).and_then(|m| m.modified()) {
+            if now.duration_since(mtime).map(|d| d.as_secs()).unwrap_or(u64::MAX)
+                < TOUCH_COARSENING_SECONDS
+            {
+                return;
+            }
+        }
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&entry) {
+            let _ = file.set_modified(now);
+        }
+    }
 }
 
 impl CacheStoreProtocol for CacheStore {
@@ -151,7 +177,10 @@ impl CacheStoreProtocol for CacheStore {
     ) -> Result<bool, String> {
         let files_dir = self.entry_dir(fingerprint).join(FILES);
         let outputs = match entry.get("outputs") {
-            None => return Ok(true), // nothing to restore
+            None => {
+                self.touch(fingerprint); // a hit with no output files still counts as used
+                return Ok(true);
+            }
             Some(Value::Object(map)) => map,
             Some(_) => return Err("corrupt cache entry: outputs not a map".to_string()),
         };
@@ -176,6 +205,7 @@ impl CacheStoreProtocol for CacheStore {
             std::fs::copy(&source, &dest)
                 .map_err(|e| format!("cannot restore {}: {e}", dest.display()))?;
         }
+        self.touch(fingerprint);
         Ok(true)
     }
 
@@ -412,5 +442,78 @@ pub fn resolve_cache_dir(root: &Path, cache_dir: &str) -> PathBuf {
         dir
     } else {
         root.join(dir)
+    }
+}
+
+#[cfg(test)]
+mod touch_tests {
+    //! The default (Rust) engine must refresh an entry's mtime on a cache hit,
+    //! because Python's `prune` sorts on that mtime to pick eviction victims —
+    //! a hit that didn't touch would let a hot entry be evicted as "old".
+
+    use super::*;
+    use crate::context::NodeContext;
+    use std::time::{Duration, SystemTime};
+
+    fn tmpdir(tag: &str) -> PathBuf {
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "brix-cache-touch-{}-{}-{}",
+            std::process::id(),
+            tag,
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Hand-build an entry on disk (restore never reads "result") and return
+    /// its dir. `fp` must be a valid sharding key (>= 2 chars).
+    fn seed(store: &CacheStore, fp: &str, payload: &[u8]) -> PathBuf {
+        let entry_dir = store.entry_dir(fp);
+        std::fs::create_dir_all(entry_dir.join(FILES)).unwrap();
+        std::fs::write(entry_dir.join(FILES).join("0"), payload).unwrap();
+        std::fs::write(entry_dir.join(ENTRY), r#"{"outputs":{"out.txt":"0"}}"#).unwrap();
+        entry_dir
+    }
+
+    fn backdate(entry: &Path, secs: u64) {
+        let when = SystemTime::now() - Duration::from_secs(secs);
+        let f = std::fs::OpenOptions::new().write(true).open(entry.join(ENTRY)).unwrap();
+        f.set_modified(when).unwrap();
+    }
+
+    fn mtime(entry: &Path) -> SystemTime {
+        std::fs::metadata(entry.join(ENTRY)).unwrap().modified().unwrap()
+    }
+
+    #[test]
+    fn hit_refreshes_recency_and_restores_bytes() {
+        let store = CacheStore::new(tmpdir("cache").join("c"));
+        let fp = format!("ab{}", "c".repeat(62));
+        let entry = seed(&store, &fp, b"payload");
+        backdate(&entry, TOUCH_COARSENING_SECONDS + 10_000);
+        let before = mtime(&entry);
+
+        let out = tmpdir("out");
+        let value: Value = serde_json::from_str(r#"{"outputs":{"out.txt":"0"}}"#).unwrap();
+        assert!(store.restore(&fp, &value, &NodeContext::for_root(out.clone())).unwrap());
+
+        assert!(mtime(&entry) > before, "a hit must refresh recency");
+        assert_eq!(std::fs::read(out.join("out.txt")).unwrap(), b"payload");
+    }
+
+    #[test]
+    fn hit_within_coarsening_window_does_not_churn() {
+        let store = CacheStore::new(tmpdir("cache").join("c"));
+        let fp = format!("de{}", "f".repeat(62));
+        let entry = seed(&store, &fp, b"p");
+        let before = mtime(&entry); // just written, well inside the window
+
+        let out = tmpdir("out");
+        let value: Value = serde_json::from_str(r#"{"outputs":{"out.txt":"0"}}"#).unwrap();
+        store.restore(&fp, &value, &NodeContext::for_root(out)).unwrap();
+
+        assert_eq!(mtime(&entry), before, "a fresh entry is not re-touched");
     }
 }

@@ -222,6 +222,18 @@ class CacheBuilder(NestableBuilder):
       layer), never a failed build.
 
     Passing both is an error.
+
+    Eviction (built-in ``cache_dir`` store only) is **off by default** — a
+    cache never discards without being asked. Set a bound to cap growth:
+
+    - ``max_bytes`` — after each build, evict least-recently-*used* entries
+      (a hit refreshes recency) until the store is under this size.
+    - ``max_age`` — evict entries not used within this many seconds.
+
+    Both may be set (TTL applies first, then the size cap). Eviction is safe
+    by construction: every entry is reproducible, so a pruned entry becomes a
+    recompute on its next build, never a wrong result. A custom ``store``
+    manages its own retention, so bounds may not be combined with one.
     """
 
     def __init__(
@@ -229,15 +241,24 @@ class CacheBuilder(NestableBuilder):
         inner: NestableBuilder,
         cache_dir: str | Path | None = None,
         store: CacheStoreProtocol | None = None,
+        max_bytes: int | None = None,
+        max_age: float | None = None,
     ) -> None:
         if store is not None and cache_dir is not None:
             raise ValueError("CacheBuilder takes cache_dir or store, not both")
+        if store is not None and (max_bytes is not None or max_age is not None):
+            raise ValueError(
+                "max_bytes/max_age apply to the built-in cache_dir store; a "
+                "custom store manages its own retention"
+            )
         _reject_wrapped_atomic(inner)
         self.inner = inner
         self._store = store
         self.cache_dir = (
             "build/.brix-cache" if (store is None and cache_dir is None) else cache_dir
         )
+        self.max_bytes = max_bytes
+        self.max_age = max_age
         self.root: Path = inner.root
 
     def plan(self, targets: list[str] | None = None) -> ExecutionPlan:
@@ -286,9 +307,29 @@ class CacheBuilder(NestableBuilder):
 
         rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets,
                                   worker_idle_timeout=worker_idle_timeout)
-        if rust is not None:
-            return rust
-        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
+        result = rust if rust is not None else self.plan(targets).run(
+            jobs=jobs, layers=self.layers(), reporter=reporter
+        )
+        self._prune_if_bounded()
+        return result
+
+    def _prune_if_bounded(self) -> None:
+        """After a build, cap the built-in store if a bound was set. Runs in
+        Python whichever engine built — pruning is engine-agnostic directory
+        maintenance over the shared cache dir (recency comes from the mtimes
+        both engines refresh on a hit). Best-effort: a prune failure never
+        fails the build."""
+        if self._store is not None or (self.max_bytes is None and self.max_age is None):
+            return
+        from .cache import CacheStore
+
+        directory = Path(self.cache_dir)
+        if not directory.is_absolute():
+            directory = self.root / directory
+        try:
+            CacheStore(directory).prune(max_bytes=self.max_bytes, max_age=self.max_age)
+        except OSError:
+            pass
 
 
 class AtomicBuilder:

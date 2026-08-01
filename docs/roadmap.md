@@ -194,6 +194,37 @@ one engine).
   only work correctly on the plain incremental stack. Correctness foundation,
   platform-specific plumbing; design in the appendix (with a cheap interim "loudly
   refuse the unsafe combo" guard).
+- **Cache layers: eviction + remote/shared (Nexus) backends.** brix has two
+  content-keyed layers today — the **artifact cache** (`.brix-cache/`, a directory
+  CAS: `<prefix>/<fingerprint>` → output bytes) and the **metadata ledger**
+  (`.brix/metadata.json`, the incremental decision layer). Both grow without bound
+  because they *remember history* — a fingerprint not in today's graph isn't dead,
+  it's the cached result of a prior tree state, and that's exactly what makes
+  revert / branch-switch / `git bisect` hit the cache instead of rebuilding. So the
+  growth is the cache working, not waste, and you must **never** GC by
+  "reachable from the current graph" (unanswerable — the reachable set is every
+  source state × brix version × toolchain).
+  - *Eviction is safe by reproducibility.* Every entry is reproducible, so eviction
+    can only ever *remove* a hit, never *fabricate* one (the one-directional
+    soundness rule — a hit must equal a clean build). That sidesteps reachability
+    entirely: bound the cache by **age (TTL)** or **size (max-size, LRU-evict-oldest)**,
+    user-configured, on the *local* directory cache. Recommend max-size as the
+    default (self-bounding regardless of build cadence); TTL when staleness, not
+    disk, is the worry. Either needs each blob stamped with last-*access* time
+    (touch-on-hit) so "oldest" means least-recently-*used*, not least-recently-written.
+  - *Remote / shared cache (Nexus, or a Bazel-style remote CAS)* is the **same
+    artifact cache with a remote backend** — the fingerprint is the GET/PUT key.
+    Pluggable backend; retention is the org's Nexus policy, not ours. **Precondition:
+    machine-portable fingerprints** — a shared cache only hits when two developers
+    compute the *same* key for the same logical step, so a fingerprint that encodes
+    a local path never hits cross-developer. This is why the `asset` atom /
+    `content_key` / `tool` fingerprint work is on the critical path to the Nexus
+    story, not just the air-gapped transfer.
+  - *Metadata ledger* takes the same eviction logic, but it's one JSON blob today,
+    so incremental eviction needs a per-record on-disk layout (sqlite or a
+    dir-of-records) rather than rewriting the whole file each build. It's a
+    load/save-*time* cost (paid every build, even 0-rerun ones), not a correctness
+    or shared-cache concern — lower priority than the artifact-cache work above.
 - **Remote execution.** Spread compilation across many machines. Large.
 - **Lower-priority spec ideas.** Loading only part of a huge build at a time (only
   at hundreds of services), build inputs from memory/a database instead of files,

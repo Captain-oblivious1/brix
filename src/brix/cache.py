@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -50,6 +51,12 @@ from .process import ProcessResult
 
 _ENTRY = "entry.json"
 _FILES = "files"
+
+# A cache hit refreshes its entry's recency (mtime) so eviction is LRU by
+# *use*, not by creation — a hot dependency compiled long ago but restored
+# every build must outlive a cold one. Refreshing is coarsened to this many
+# seconds so repeated hits inside one window don't each write the inode.
+_TOUCH_COARSENING_SECONDS = 3600
 
 
 class CacheStoreProtocol(Protocol):
@@ -91,6 +98,31 @@ def _output_files(action: ExternalProcessAction, ctx: NodeContext) -> dict[str, 
     return files
 
 
+def _dir_size(path: Path) -> int:
+    """Total size of the files under an entry dir (entry.json + blobs)."""
+    total = 0
+    for child in path.rglob("*"):
+        try:
+            if child.is_file():
+                total += child.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _evict(entry_dir: Path, size: int) -> int:
+    """Delete one entry dir; return the bytes reclaimed (0 on failure).
+    Rename-then-remove so a concurrent `load` sees it vanish atomically
+    rather than reading a half-deleted entry."""
+    victim = entry_dir.with_name(f".tmp-evict-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    try:
+        entry_dir.rename(victim)
+    except OSError:
+        return 0  # another build already evicted or is writing it
+    shutil.rmtree(victim, ignore_errors=True)
+    return size
+
+
 class CacheStore:
     """Content-addressed result store under one directory."""
 
@@ -120,7 +152,67 @@ class CacheStore:
         for source, dest in copies:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)  # copy2: linked binaries keep their mode
+        self._touch(fingerprint)
         return True
+
+    def _touch(self, fingerprint: str) -> None:
+        """Refresh the entry's recency so `prune` sees it as recently used.
+        Best-effort and coarsened: skip the write if it was touched within
+        `_TOUCH_COARSENING_SECONDS` (and never fail a hit over a stat/utime
+        error)."""
+        entry = self._entry_dir(fingerprint) / _ENTRY
+        try:
+            now = time.time()
+            if now - entry.stat().st_mtime < _TOUCH_COARSENING_SECONDS:
+                return
+            os.utime(entry, (now, now))
+        except OSError:
+            pass
+
+    def prune(self, *, max_bytes: int | None = None, max_age: float | None = None) -> int:
+        """Bound the store: delete entries by TTL then by size, oldest (least
+        recently *used*) first. Returns the number of bytes reclaimed.
+
+        Eviction is always safe — every entry is reproducible, so removing one
+        only ever turns a future hit into a recompute, never a wrong answer.
+        A victim a concurrent build is mid-restore of degrades that build to a
+        cache miss (handled in `CacheLayer`), never a failure. Half-written
+        ``.tmp-*`` staging dirs are ignored (another build owns them).
+        """
+        entries: list[tuple[float, int, Path]] = []  # (mtime, size, dir)
+        for prefix in self.directory.iterdir() if self.directory.is_dir() else []:
+            if not prefix.is_dir() or prefix.name.startswith(".tmp-"):
+                continue
+            for entry_dir in prefix.iterdir():
+                if not entry_dir.is_dir():
+                    continue
+                try:
+                    mtime = (entry_dir / _ENTRY).stat().st_mtime
+                except OSError:
+                    continue  # no entry.json → mid-write or corrupt; leave it
+                entries.append((mtime, _dir_size(entry_dir), entry_dir))
+        entries.sort()  # oldest first
+
+        now = time.time()
+        reclaimed = 0
+        # TTL pass: anything older than max_age goes regardless of size.
+        if max_age is not None:
+            survivors: list[tuple[float, int, Path]] = []
+            for mtime, size, entry_dir in entries:
+                if now - mtime > max_age:
+                    reclaimed += _evict(entry_dir, size)
+                else:
+                    survivors.append((mtime, size, entry_dir))
+            entries = survivors
+        # Size pass: evict oldest survivors until the total is under max_bytes.
+        if max_bytes is not None:
+            total = sum(size for _, size, _ in entries)
+            for mtime, size, entry_dir in entries:
+                if total <= max_bytes:
+                    break
+                total -= size
+                reclaimed += _evict(entry_dir, size)
+        return reclaimed
 
     def store(self, fingerprint: str, result: ProcessResult, outputs: dict[str, Path]) -> None:
         final = self._entry_dir(fingerprint)
