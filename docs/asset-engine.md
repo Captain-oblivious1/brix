@@ -168,22 +168,31 @@ Nothing lands without a proof. In severity order:
 
 ## 5. Skin migration (after the engine half is green)
 
-Each currently-gated skin swaps its machine-path helper reference for an `AssetData`
-and drops its `raise`. Do these one at a time, each re-proving its own oracle:
+Each skin swaps its machine-path helper reference for an `AssetData`. Done one at a
+time; the **Python** frontend for all four is complete (commits `b3826be`, `2e16b4d`):
 
-1. **java `javac_worker=`** — `_WORKER_SOURCE`/`_CLASSLOAD_RECORDER`
-   (`src/brix/java.py:62-63`) → `assets/java/JavacWorker.java`,
-   `assets/java/junit_classload.py`. Unblocks **`JUnitTestAction` (per-class Java
-   test-impact)** — the headline capability for the real monorepo.
-2. **kotlin `kotlincWorker`** — `_WORKER_SOURCE` (`src/brix/kotlin.py:61`) →
-   `assets/java/KotlincWorker.java`. Unblocks the warm-worker + `classpath=` spawn's
-   worker path.
-3. **springboot** — `BootRepackager.java` → `assets/java/BootRepackager.java`.
-4. **ts import-tracking wrapper** — `_LISTFILES_WRAPPER` (`src/brix/ts.py:65`) →
-   `assets/ts/tsc_listfiles.py`.
+1. **java `javac_worker=`** — worker source + JUnit class-load recorder →
+   `assets/java/JavacWorker.java`, `assets/java/junit_classload.py`. **DONE (3a).**
+   Per-class Java test-impact now carries a machine-portable fingerprint.
+2. **kotlin `kotlincWorker`** → `assets/java/KotlincWorker.java`. **DONE.**
+3. **springboot** → `assets/java/BootRepackager.java`. **DONE.**
+4. **ts import-tracking wrapper** → `assets/ts/tsc_listfiles.py`. **DONE.**
 
-Each migration is mirrored in the TS skin (`ts/src/*.ts`): remove the `throw`, emit the
-same `AssetData(name)`, prove with the deep-equal skin oracle.
+**TS frontend — deferred.** Each Python migration is meant to be mirrored in the TS
+skin (drop the `throw`, emit the same `AssetData(name)`, prove by deep-equal oracle),
+but that is frontend parity for TS authors and the real driver uses Python build
+files, so it is deferred until TS authoring is needed. The TS `java` skin also hits a
+real API question first: `JUnitTestAction` bakes `ToolData(sys.executable)` (an
+absolute interpreter path) into the recorder invocation, which the TS frontend cannot
+reproduce — resolve that (fix the `sys.executable` portability wart, don't paper over
+it with a `python=` param just to satisfy the oracle) before porting `JUnitTestAction`.
+
+**Remaining cleanup (separate step — needs the wheel-packaging design):** retire the
+now-dead duplicate helpers under `src/brix/_java|_ts` and package the top-level
+`assets/` tree into the wheel. This needs a wheel-robust resolution in
+`src/brix/assets.py` — `parents[2]/assets` resolves only from a source checkout, not
+from an installed `site-packages/brix/`. `src/brix/_python/pytest_brixdeps.py` stays
+(referenced by module name, not a path).
 
 ## 6. Implementation order (each step individually proven)
 

@@ -93,20 +93,24 @@ one engine).
      `ts.CompileAction({ deps })` — proven against a fixture tree (own types,
      nested-`node_modules` skip, `@types` fallback, scoped-name mangling, dedup),
      which also closed the previously-untested `dependencies`→`types` path.
-   - **Decided; engine half remaining — the `asset` atom.** `java.javac_worker` +
-     `JUnitTestAction` (per-class test-impact), `springboot`, the `kotlin`/`java`
-     worker + `classpath=` paths, and the `ts` import-tracking wrapper reference
-     brix-shipped helpers (`JavacWorker.java`/`KotlincWorker.java` — Java sources,
-     no module form — and `.py` recorders) by absolute path, which is in the
-     fingerprint (machine-specific, no cross-frontend common form). The fix
-     (chosen: **the engine bundles the helpers**) is the `asset` atom
-     (`{kind:"asset", name}`), fingerprinted by name + content, never the resolved
-     path. **Frontend + wire contract are done** (both frontends' emitters + the
-     boundary-schema grammar, oracle-proven identical). **Remaining (Fable-
-     reserved, post-reset):** the engine half — Rust-core parse + bundled
-     resolution + `["asset", name, content-hash]` fingerprint + path render, the
-     Python-engine mirror, regen goldens; then migrate the java/ts/kotlin/
-     springboot skins onto it. Unblocks the gated skins above.
+   - **The `asset` atom — BUILT (2026-07-31).** brix-shipped helpers
+     (`JavacWorker.java`/`KotlincWorker.java`/`BootRepackager.java`, the `.py`
+     recorders/wrappers) were referenced by absolute path — machine-specific, in
+     the fingerprint, no cross-frontend form. Fixed with the `asset` atom
+     (`{kind:"asset", name}`): **the engine owns the bytes**, fingerprinted by
+     name + content, never the resolved path. Both engines route it (Rust
+     `DataAtom::Asset` + fingerprint/render; Python mirror), proven by a
+     differential golden oracle (byte-identical across engines) + incremental==clean
+     (edit helper → re-stale) + a three-way digest match (sha256sum/Rust/Python).
+     **All four Python skins migrated** off machine paths (java worker + JUnit
+     recorder, kotlin/springboot/ts). Per-class Java test-impact now carries a
+     machine-portable fingerprint from the Python frontend. Full design + status:
+     [asset-engine.md](asset-engine.md). **Remaining:** (a) the TS-frontend skin
+     mirrors — *deferred* (frontend parity; the real driver uses Python build
+     files), and TS `JUnitTestAction` first needs the `sys.executable` portability
+     wart fixed properly rather than papered over; (b) a cleanup step — retire the
+     dead duplicate helpers under `src/brix/_java|_ts` + package `assets/` into the
+     wheel with a wheel-robust resolution in `assets.py`.
    - **Deferred (mechanical):** the *shell-out* resolver adapters —
      `java.pom`/`maven`/`gradle` (`mvn`/`gradle`) and `cpp.pkg_config`
      (`pkg-config`) — frontend-only path production, deep-equal-oracle-testable
