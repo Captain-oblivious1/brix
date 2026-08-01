@@ -16,6 +16,7 @@ use std::sync::Mutex;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use serde_json::{json, Map, Value};
 
 use brix_core::atomic::AtomicLayer;
@@ -601,12 +602,32 @@ fn workerd_main(py: Python<'_>) -> PyResult<()> {
     Ok(())
 }
 
+/// The content digest (sha256 hex of the bytes) of a brix-shipped asset,
+/// resolved from the copy embedded in this extension. Lets the Python asset
+/// store serve helpers from the engine when no on-disk `assets/` tree is present
+/// (an installed wheel) — the engine owns the bytes (docs/asset-engine.md).
+#[pyfunction]
+fn asset_digest(name: &str) -> PyResult<String> {
+    brix_core::assets::digest(name).map_err(PyValueError::new_err)
+}
+
+/// The bytes of a brix-shipped asset, from the copy embedded in this extension.
+#[pyfunction]
+fn asset_bytes<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyBytes>> {
+    match brix_core::assets::bytes(name) {
+        Some(b) => Ok(PyBytes::new(py, b)),
+        None => Err(PyValueError::new_err(format!("asset not shipped: {name}"))),
+    }
+}
+
 #[pymodule]
 fn brix_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(status, m)?)?;
     m.add_function(wrap_pyfunction!(clean, m)?)?;
     m.add_function(wrap_pyfunction!(workerd_main, m)?)?;
+    m.add_function(wrap_pyfunction!(asset_digest, m)?)?;
+    m.add_function(wrap_pyfunction!(asset_bytes, m)?)?;
     m.add("__engine__", "rust")?;
     Ok(())
 }

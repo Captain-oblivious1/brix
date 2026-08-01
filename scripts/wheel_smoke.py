@@ -42,9 +42,13 @@ assert (root / "out.txt").read_text() == "wheel ok"
 assert engine._extension().__engine__ == "rust"
 daemon = Path(engine._worker_daemon_config(None)["workerd"])
 assert daemon.is_file(), daemon
-package = Path(brix.__file__).parent
-assert (package / "_java" / "JavacWorker.java").is_file()
-assert (package / "_java" / "BootRepackager.java").is_file()
+# The shipped helpers ride embedded in the brix_py extension (no on-disk
+# assets/ tree in a wheel); the asset store must resolve them from there.
+from brix import assets
+
+for _name in ("java/JavacWorker.java", "java/BootRepackager.java", "ts/tsc_listfiles.py"):
+    assert len(assets.digest(_name)) == 64, _name
+    assert Path(assets.resolve_path(_name)).is_file(), _name
 """
 
 

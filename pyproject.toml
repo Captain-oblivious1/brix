@@ -24,10 +24,10 @@ python-packages = ["brix"]
 module-name = "brix.brix_py"
 bindings = "pyo3"
 strip = true
-include = [
-  { path = "src/brix/_java/*.java", format = ["sdist", "wheel"] },
-  { path = "src/brix/_ts/*.py", format = ["sdist", "wheel"] },
-]
+# brix-shipped helpers (assets/) are embedded in the brix_py extension at build
+# time (rust/brix-core/build.rs) and served to the Python store from there when
+# no on-disk assets/ tree is present (an installed wheel) — see src/brix/assets.py
+# and docs/asset-engine.md. The wheel therefore ships no separate helper files.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
