@@ -57,12 +57,15 @@ import sys
 from pathlib import Path
 
 from .actions import Action, ExternalProcessAction
-from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .data import AssetData, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
 from .deps import DepSet
 
 # brix's tsc wrapper: runs the compile with --listFiles and records the files
 # tsc actually read as a Makefile depfile (the TS counterpart of `cc -MMD`).
-_LISTFILES_WRAPPER = Path(__file__).parent / "_ts" / "tsc_listfiles.py"
+# A brix-shipped helper, referenced portably by logical asset name and resolved
+# engine-side — never by a machine path, so the fingerprint is identical across
+# machines and frontends (docs/asset-engine.md).
+_LISTFILES_ASSET = "ts/tsc_listfiles.py"
 
 
 # Public API surface (curated for documentation and as a contract).
@@ -328,7 +331,7 @@ class CompileAction(Action):
         depfile = f"{self.out_dir}/.brix-tsdeps.d"
         outputs["depfile"] = FileData(depfile)
         inputs["python"] = self.python
-        inputs["wrapper"] = FileData(str(_LISTFILES_WRAPPER.resolve()))
+        inputs["wrapper"] = AssetData(_LISTFILES_ASSET)
         exclude_dirs = {self.out_dir.rstrip("/")}
         for dep in self.dependencies:
             for atom in dep.atoms():

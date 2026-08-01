@@ -38,13 +38,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .actions import Action, ExternalProcessAction
-from .data import DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .data import AssetData, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
 from .java import _runtime_union
 
 if TYPE_CHECKING:
     from .graph import Graph
 
-_REPACKAGER_SOURCE = Path(__file__).parent / "_java" / "BootRepackager.java"
+# A brix-shipped helper, referenced portably by logical asset name and resolved
+# engine-side — never by a machine path, so the fingerprint is identical across
+# machines and frontends (docs/asset-engine.md).
+_REPACKAGER_ASSET = "java/BootRepackager.java"
 
 
 # Public API surface (curated for documentation and as a contract).
@@ -98,7 +101,7 @@ def boot_repackager(
             command_line="{javac} -d {classes_dir} {source}",
             inputs={
                 "javac": javac,
-                "source": FileData(str(_REPACKAGER_SOURCE.resolve())),
+                "source": AssetData(_REPACKAGER_ASSET),
             },
             outputs={"classes_dir": FileData(classes_dir), "classes": classes},
         ),

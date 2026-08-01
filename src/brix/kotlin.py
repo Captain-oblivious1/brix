@@ -43,7 +43,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .actions import Action, ExternalProcessAction
-from .data import DataAtom, DataExpr, DataUnion, FileData, GlobData, ToolData, ValueData
+from .data import (
+    AssetData,
+    DataAtom,
+    DataExpr,
+    DataUnion,
+    FileData,
+    GlobData,
+    ToolData,
+    ValueData,
+)
 from .java import (
     _as_classpath_list,
     _classpath_paths,
@@ -57,8 +66,10 @@ if TYPE_CHECKING:
 
 # The kotlinc worker bootstrap source (a small in-process K2JVMCompiler
 # wrapper, reflection-only so it compiles with plain javac); see
-# `kotlinc_worker` and src/brix/workers.py.
-_WORKER_SOURCE = Path(__file__).parent / "_java" / "KotlincWorker.java"
+# `kotlinc_worker` and src/brix/workers.py. A brix-shipped helper, referenced
+# portably by logical asset name and resolved engine-side — never by a machine
+# path, so the fingerprint is identical across machines (docs/asset-engine.md).
+_WORKER_ASSET = "java/KotlincWorker.java"
 
 # The all-open plugin's built-in preset that mirrors Gradle's
 # kotlin("plugin.spring"): open every class annotated (directly or through a
@@ -159,7 +170,7 @@ def kotlinc_worker(
             # --release 17 decouples the compile JDK from the (Kotlin-compatible)
             # launch JDK: the worker class then runs on any java >= 17.
             command_line="{javac} --release 17 -d {classes_dir} {source}",
-            inputs={"javac": javac, "source": FileData(str(_WORKER_SOURCE.resolve()))},
+            inputs={"javac": javac, "source": AssetData(_WORKER_ASSET)},
             outputs={"classes_dir": FileData(classes_dir), "classes": classes},
         ),
         ExternalProcessAction(
