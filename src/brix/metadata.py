@@ -195,6 +195,117 @@ class BuildMetadata:
             self._data["memberships"][key] = sorted(members)
 
 
+def _live_keys(graph, memberships: dict) -> tuple[set[str], set[str]]:
+    """(action_keys, membership_keys) for every record the current graph would
+    write, expanding each ``ExpandAll`` through ``memberships`` — the member
+    lists this build just recorded — exactly as the executor did. Nested
+    expansions recurse on the substituted child, whose ``membership_key`` matches
+    what was recorded for it (same derivation as `IncrementalLayer._reap_vanished`)."""
+    from .actions import ExpandAll, ExternalProcessAction
+    from .incremental import action_key, membership_key
+
+    actions: set[str] = set()
+    member_keys: set[str] = set()
+
+    def walk(action) -> None:
+        if isinstance(action, ExternalProcessAction):
+            actions.add(action_key(action))
+        elif isinstance(action, ExpandAll):
+            key = membership_key(action)
+            member_keys.add(key)
+            for member in memberships.get(key, []):
+                walk(action.child.substitute({action.element_name: member}))
+
+    for action in graph.actions:
+        walk(action)
+    return actions, member_keys
+
+
+def compact_metadata(
+    path: Path,
+    *,
+    keep_builds: int,
+    graph=None,
+    current_actions: set[str] | None = None,
+    current_memberships: set[str] | None = None,
+) -> int:
+    """Bound the ledger: drop records for actions/collections not seen in the
+    last ``keep_builds`` builds, then GC their discovered deps and any dead
+    file-hash entries. Returns the number of records reclaimed.
+
+    Pass ``graph`` (the current build's graph) to derive the live keys from it
+    plus the just-recorded memberships; or pass ``current_actions`` /
+    ``current_memberships`` directly (used by tests).
+
+    Recency is by *build*: each build stamps the keys in its fully expanded
+    graph with a monotonic epoch (kept in a ``_seen`` side map, so records and
+    membership lists are never reshaped), and a key unstamped for
+    ``keep_builds`` builds is evicted. **Safe by construction** — a dropped
+    record only forces a recompute on that action's next build, never a wrong
+    result: the freshness check re-reads inputs, and a dropped membership just
+    replays deleted-source cleanup as if clean.
+
+    Runs post-build in Python over the on-disk file whichever engine wrote it.
+    The ledger is a shared, semantically round-tripped JSON, so the extra
+    ``epoch``/``_seen`` keys ride through the Rust engine unread — no core or
+    boundary change. A ledger from another version, or an unreadable one, is
+    left untouched (returns 0).
+    """
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(data, dict) or data.get("version") != _VERSION:
+        return 0
+
+    if graph is not None:
+        current_actions, current_memberships = _live_keys(
+            graph, data.get("memberships", {})
+        )
+    current_actions = current_actions or set()
+    current_memberships = current_memberships or set()
+
+    epoch = int(data.get("epoch", 0)) + 1
+    data["epoch"] = epoch
+    actions = data.setdefault("actions", {})
+    memberships = data.setdefault("memberships", {})
+    deps = data.setdefault("deps", {})
+    files = data.setdefault("files", {})
+    seen = data.setdefault("_seen", {})
+
+    for key in current_actions:
+        if key in actions:
+            seen[key] = epoch
+    for key in current_memberships:
+        if key in memberships:
+            seen[key] = epoch
+
+    cutoff = epoch - keep_builds  # evict a key last seen at or before this epoch
+    reclaimed = 0
+    for key in [k for k in actions if seen.get(k, 0) <= cutoff]:
+        actions.pop(key, None)
+        deps.pop(key, None)
+        seen.pop(key, None)
+        reclaimed += 1
+    for key in [k for k in memberships if seen.get(k, 0) <= cutoff]:
+        memberships.pop(key, None)
+        seen.pop(key, None)
+        reclaimed += 1
+    # A file-hash entry whose path is gone from disk is dead weight — it would be
+    # re-hashed if the path ever returned. Live paths keep their cache.
+    for path_key in [p for p in files if not Path(p).exists()]:
+        files.pop(path_key, None)
+        reclaimed += 1
+    # Keep the seen index tight: forget keys that no longer name any record.
+    for key in [k for k in seen if k not in actions and k not in memberships]:
+        seen.pop(key, None)
+
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, sort_keys=True, indent=1))
+    tmp.replace(path)
+    return reclaimed
+
+
 def _symlink_target_sig(path: Path) -> int:
     """A stable 64-bit int derived from a symlink's target path, appended to the
     stat signature so repointing the link busts the hash cache even when the new

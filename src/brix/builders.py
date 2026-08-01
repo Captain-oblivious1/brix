@@ -58,6 +58,16 @@ class NestableBuilder:
     wire spec — is validated in the Rust core, so every future frontend
     inherits it (see docs/boundary-schema.md)."""
 
+    def _post_build(self) -> None:
+        """Post-build maintenance, run once by the outermost `build()` and
+        chained inward (cache eviction, ledger compaction). Only the outermost
+        builder's `build()` executes — the engine runs the whole wrapped stack —
+        so a wrapper must forward this to its `inner`. Default: forward if
+        wrapping, else nothing."""
+        inner = getattr(self, "inner", None)
+        if inner is not None:
+            inner._post_build()
+
 
 def _reject_wrapped_atomic(inner: object) -> None:
     """Guard for a wrapping builder's ``inner``: an ``AtomicBuilder`` may never
@@ -102,9 +112,11 @@ class CleanBuilder(NestableBuilder):
 
         rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets,
                                   worker_idle_timeout=worker_idle_timeout)
-        if rust is not None:
-            return rust
-        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
+        result = rust if rust is not None else self.plan(targets).run(
+            jobs=jobs, layers=self.layers(), reporter=reporter
+        )
+        self._post_build()
+        return result
 
 
 class IncrementalBuilder(NestableBuilder):
@@ -124,10 +136,19 @@ class IncrementalBuilder(NestableBuilder):
         detector=None,
         verify_contents: bool = False,
         scrub: bool = False,
+        keep_builds: int | None = None,
     ) -> None:
         self._supplier = graph_supplier if callable(graph_supplier) else lambda: graph_supplier
         self.root = Path(root).resolve()
         self.metadata_dir = metadata_dir
+        # Bound the metadata ledger (off by default — like the artifact cache,
+        # it never discards unasked). When set, after each build a record for an
+        # action/collection not present in the last ``keep_builds`` builds' graphs
+        # is evicted (LRU by build). Safe: a dropped record only forces a
+        # recompute next time. See `metadata.compact_metadata`.
+        if keep_builds is not None and keep_builds < 1:
+            raise ValueError("keep_builds must be >= 1 (or None to disable)")
+        self._keep_builds = keep_builds
         # Scrub mode (opt-in): run each process with an *authoritative* environment
         # — only the plumbing base (brix.env.BASE_ENV) plus each action's declared
         # allowlist (SYSTEM/PASS names) and literal env=, minus UNSET — so an
@@ -199,9 +220,38 @@ class IncrementalBuilder(NestableBuilder):
 
         rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets,
                                   worker_idle_timeout=worker_idle_timeout)
-        if rust is not None:
-            return rust
-        return self.plan(targets).run(jobs=jobs, layers=self.layers(), reporter=reporter)
+        result = rust if rust is not None else self.plan(targets).run(
+            jobs=jobs, layers=self.layers(), reporter=reporter
+        )
+        self._post_build()
+        return result
+
+    def _post_build(self) -> None:
+        self._compact_if_bounded()
+
+    def _compact_if_bounded(self) -> None:
+        """After a build, bound the ledger if ``keep_builds`` was set. Stamps
+        every action/collection the current graph realizes as seen this build
+        (expanding ``ExpandAll`` through the memberships just recorded), then
+        evicts records unseen for ``keep_builds`` builds. Runs in Python
+        whichever engine built — the ledger is a shared JSON on disk.
+        Best-effort: a graph-load or prune failure never fails the build."""
+        if self._keep_builds is None:
+            return
+        from .metadata import compact_metadata
+
+        try:
+            graph = self._supplier()
+        except Exception:
+            return  # a graph that will not re-load post-build just skips compaction
+        try:
+            compact_metadata(
+                self.root / self.metadata_dir / "metadata.json",
+                keep_builds=self._keep_builds,
+                graph=graph,
+            )
+        except OSError:
+            pass
 
 
 class CacheBuilder(NestableBuilder):
@@ -310,8 +360,12 @@ class CacheBuilder(NestableBuilder):
         result = rust if rust is not None else self.plan(targets).run(
             jobs=jobs, layers=self.layers(), reporter=reporter
         )
-        self._prune_if_bounded()
+        self._post_build()
         return result
+
+    def _post_build(self) -> None:
+        self._prune_if_bounded()
+        self.inner._post_build()  # chain inward: e.g. ledger compaction
 
     def _prune_if_bounded(self) -> None:
         """After a build, cap the built-in store if a bound was set. Runs in
@@ -390,9 +444,14 @@ class AtomicBuilder:
 
         rust = engine.maybe_build(self, jobs=jobs, reporter=reporter, targets=targets, hold=hold,
                                   worker_idle_timeout=worker_idle_timeout)
-        if rust is not None:
-            return rust
-        return self.plan(targets).run(jobs=jobs, layers=self.layers(hold=hold), reporter=reporter)
+        result = rust if rust is not None else self.plan(targets).run(
+            jobs=jobs, layers=self.layers(hold=hold), reporter=reporter
+        )
+        self._post_build()
+        return result
+
+    def _post_build(self) -> None:
+        self.inner._post_build()  # atomic adds no maintenance of its own; chain inward
 
     def commit(self) -> tuple[int, int] | None:
         """Apply held staging to the workspace. None if nothing is staged;

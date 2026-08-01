@@ -194,37 +194,19 @@ one engine).
   only work correctly on the plain incremental stack. Correctness foundation,
   platform-specific plumbing; design in the appendix (with a cheap interim "loudly
   refuse the unsafe combo" guard).
-- **Cache layers: eviction + remote/shared (Nexus) backends.** brix has two
-  content-keyed layers today — the **artifact cache** (`.brix-cache/`, a directory
-  CAS: `<prefix>/<fingerprint>` → output bytes) and the **metadata ledger**
-  (`.brix/metadata.json`, the incremental decision layer). Both grow without bound
-  because they *remember history* — a fingerprint not in today's graph isn't dead,
-  it's the cached result of a prior tree state, and that's exactly what makes
-  revert / branch-switch / `git bisect` hit the cache instead of rebuilding. So the
-  growth is the cache working, not waste, and you must **never** GC by
-  "reachable from the current graph" (unanswerable — the reachable set is every
-  source state × brix version × toolchain).
-  - *Eviction is safe by reproducibility.* Every entry is reproducible, so eviction
-    can only ever *remove* a hit, never *fabricate* one (the one-directional
-    soundness rule — a hit must equal a clean build). That sidesteps reachability
-    entirely: bound the cache by **age (TTL)** or **size (max-size, LRU-evict-oldest)**,
-    user-configured, on the *local* directory cache. Recommend max-size as the
-    default (self-bounding regardless of build cadence); TTL when staleness, not
-    disk, is the worry. Either needs each blob stamped with last-*access* time
-    (touch-on-hit) so "oldest" means least-recently-*used*, not least-recently-written.
-  - *Remote / shared cache (Nexus, or a Bazel-style remote CAS)* is the **same
-    artifact cache with a remote backend** — the fingerprint is the GET/PUT key.
-    Pluggable backend; retention is the org's Nexus policy, not ours. **Precondition:
-    machine-portable fingerprints** — a shared cache only hits when two developers
-    compute the *same* key for the same logical step, so a fingerprint that encodes
-    a local path never hits cross-developer. This is why the `asset` atom /
-    `content_key` / `tool` fingerprint work is on the critical path to the Nexus
-    story, not just the air-gapped transfer.
-  - *Metadata ledger* takes the same eviction logic, but it's one JSON blob today,
-    so incremental eviction needs a per-record on-disk layout (sqlite or a
-    dir-of-records) rather than rewriting the whole file each build. It's a
-    load/save-*time* cost (paid every build, even 0-rerun ones), not a correctness
-    or shared-cache concern — lower priority than the artifact-cache work above.
+- **Remote/shared (Nexus) cache backend — the remaining cache-layer piece.**
+  Local eviction of *both* content-keyed layers is **DONE** (see Completed): the
+  artifact cache and the metadata ledger no longer grow without bound. What's left
+  is making the artifact cache *shared*: a remote/team backend (Nexus, or a
+  Bazel-style remote CAS) is the **same cache with a remote store** — the
+  fingerprint is the GET/PUT key. The seam already exists (`TwoTierCacheStore`
+  front/back + a `cache_http.py`); retention is the org's Nexus policy, not ours.
+  **Precondition — already met:** machine-portable fingerprints. A shared cache
+  only hits when two developers compute the *same* key for the same logical step,
+  so a fingerprint that encoded a local path could never hit cross-developer; the
+  `asset` atom / `content_key` / `tool` fingerprint work put this on the critical
+  path (not just the air-gapped transfer). A real project, not a quick follow-on —
+  parked until it has a driver.
 - **Remote execution.** Spread compilation across many machines. Large.
 - **Lower-priority spec ideas.** Loading only part of a huge build at a time (only
   at hundreds of services), build inputs from memory/a database instead of files,
@@ -279,6 +261,23 @@ API change proposed first, generic classes kept generic.
 with `select_affected`/`load_affected`, index v2 (persisted per-package
 patterns/footprints), gated by a full-edit-alphabet oracle. Opt-in; full load
 stays the default. Design: [monorepo-scaling.md](monorepo-scaling.md).
+
+**Bounded caches (both content-keyed layers).** The artifact cache and the
+metadata ledger no longer grow without bound — **off by default** (a cache never
+discards unasked), **safe by construction** (every entry is reproducible, so
+eviction only ever forces a recompute, never a wrong result — the one-directional
+soundness rule). *Artifact cache:* `CacheBuilder(max_bytes=, max_age=)` — TTL
+then size cap, LRU by *use* (a hit refreshes the entry's mtime, coarsened; both
+engines touch on restore, pruning is engine-agnostic directory maintenance).
+*Metadata ledger:* `IncrementalBuilder(keep_builds=N)` — post-build compaction
+stamps every key the current graph realizes (expanding `ExpandAll` through the
+recorded memberships) with a build epoch in a `_seen` side map, then evicts
+records unseen for `keep_builds` builds together with their discovered deps, plus
+dead file-hash entries; no on-disk-format change and no Rust core/boundary change
+(the extra keys ride the shared JSON's semantic round-trip). Proven on real
+jackson-databind: the ledger halved (62→32 MB, 728 pre-migration orphans evicted)
+with a subsequent cached rebuild running zero actions (nothing current evicted).
+The remaining cache-layer work is the remote/shared (Nexus) backend, above.
 
 **Languages & ecosystems.** Kotlin (single + multi-module, all-open plugin, warm
 kotlinc worker); Spring Boot executable fat jars (`brix.springboot`); Rust via
