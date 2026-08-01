@@ -105,12 +105,12 @@ one engine).
      **All four Python skins migrated** off machine paths (java worker + JUnit
      recorder, kotlin/springboot/ts). Per-class Java test-impact now carries a
      machine-portable fingerprint from the Python frontend. Full design + status:
-     [asset-engine.md](asset-engine.md). **Remaining:** (a) the TS-frontend skin
-     mirrors — *deferred* (frontend parity; the real driver uses Python build
-     files), and TS `JUnitTestAction` first needs the `sys.executable` portability
-     wart fixed properly rather than papered over; (b) a cleanup step — retire the
-     dead duplicate helpers under `src/brix/_java|_ts` + package `assets/` into the
-     wheel with a wheel-robust resolution in `assets.py`.
+     [asset-engine.md](asset-engine.md). Dead duplicate helpers retired; installed
+     wheels resolve helpers from the copy embedded in the `brix_py` extension
+     (Option A — the engine owns the bytes), proven by `wheel_smoke.py`.
+     **Remaining:** the TS-frontend skin mirrors — *deferred* (frontend parity; the
+     real driver uses Python build files), and TS `JUnitTestAction` first needs the
+     `sys.executable` portability wart fixed properly rather than papered over.
    - **Deferred (mechanical):** the *shell-out* resolver adapters —
      `java.pom`/`maven`/`gradle` (`mvn`/`gradle`) and `cpp.pkg_config`
      (`pkg-config`) — frontend-only path production, deep-equal-oracle-testable

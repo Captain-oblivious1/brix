@@ -187,12 +187,15 @@ absolute interpreter path) into the recorder invocation, which the TS frontend c
 reproduce — resolve that (fix the `sys.executable` portability wart, don't paper over
 it with a `python=` param just to satisfy the oracle) before porting `JUnitTestAction`.
 
-**Remaining cleanup (separate step — needs the wheel-packaging design):** retire the
-now-dead duplicate helpers under `src/brix/_java|_ts` and package the top-level
-`assets/` tree into the wheel. This needs a wheel-robust resolution in
-`src/brix/assets.py` — `parents[2]/assets` resolves only from a source checkout, not
-from an installed `site-packages/brix/`. `src/brix/_python/pytest_brixdeps.py` stays
-(referenced by module name, not a path).
+**Cleanup — DONE (2026-07-31, commit `24bac83`).** The dead duplicate helpers under
+`src/brix/_java|_ts` are deleted; `assets/` is the sole source of truth. Wheel
+resolution uses **Option A — the engine serves the bytes**: `brix_py` exposes
+`asset_digest`/`asset_bytes` over the copy embedded by `build.rs`, and
+`src/brix/assets.py` resolves disk-first (source checkout) then falls back to the
+embedded extension copy (installed wheel), materializing to a content-addressed temp
+dir. No helper files ship in the wheel; the `.so` carries them. Proven by
+`scripts/wheel_smoke.py` (an installed wheel resolves the helpers from the embedded
+copy). `src/brix/_python/pytest_brixdeps.py` stays (module-name ref, not a path).
 
 ## 6. Implementation order (each step individually proven)
 
