@@ -1,0 +1,200 @@
+// brix Gradle dumper — the Gradle *frontend* of the onboarder.
+//
+// Applied via `gradle --init-script dump.gradle brixDumpModel`, this walks
+// Gradle's already-*resolved* project/task model and writes the tool-neutral
+// onboarding IR as JSON. We never parse build.gradle text: all the multi-level
+// indirection (subprojects {}, convention plugins in buildSrc/, variants) has
+// already collapsed into concrete configured projects by the time the task runs,
+// so we just transcribe what Gradle computed.
+//
+// Why a task (not projectsEvaluated): dependency resolution is only legal at
+// *execution time*. Resolving a configuration during the configuration phase
+// throws "attempted without an exclusive lock", so the model walk lives in a
+// task's doLast, where resolving `compileClasspath` et al. is permitted.
+//
+// The IR is shaped by *brix's* needs, not Gradle's: a list of modules
+// (source sets + resolved dependency classpaths + project-to-project edges) and
+// a list of nodes (one per task: declared inputs/outputs, task-graph edges, a
+// per-node fidelity flag, and a tool-neutral bridge descriptor). Other dumpers
+// (Maven, CMake, Make) are meant to emit this same schema — see docs.
+//
+// Output path: -Dbrix.dump.out=<path> (defaults to <rootDir>/brix-ir.json).
+
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.ProjectDependency
+
+// The onboarder's IR version. Bump when the schema changes shape.
+def IR_VERSION = 1
+
+// Task types the emitter is expected to map to a *native* brix atom rather than
+// bridge. Membership drives `recognized`; it never affects correctness (an
+// unrecognized task is still emitted, just flagged for bridging).
+def RECOGNIZED_TYPES = [
+    'org.gradle.api.tasks.compile.JavaCompile',
+    'org.gradle.api.tasks.compile.GroovyCompile',
+    'org.gradle.api.tasks.scala.ScalaCompile',
+    'org.jetbrains.kotlin.gradle.tasks.KotlinCompile',
+    'org.jetbrains.kotlin.gradle.tasks.KotlinCompileCommon',
+    'org.gradle.api.tasks.testing.Test',
+    'org.gradle.api.tasks.bundling.Jar',
+    'org.gradle.jvm.tasks.Jar',
+    'org.gradle.api.tasks.bundling.War',
+    'org.gradle.language.jvm.tasks.ProcessResources',
+    'org.gradle.api.tasks.Copy',
+] as Set
+
+// Configurations we resolve for the dependency classpath model. Only resolvable
+// ones are touched; resolution is lenient so an unresolved artifact degrades to
+// a missing entry instead of failing the whole dump.
+def CLASSPATH_CONFIGS = [
+    'compileClasspath',
+    'runtimeClasspath',
+    'testCompileClasspath',
+    'testRuntimeClasspath',
+    'annotationProcessor',
+    'testAnnotationProcessor',
+]
+
+// Strip Gradle's runtime-decorated class suffixes so the emitter sees the real
+// task type (e.g. `JavaCompile_Decorated` / `...$$Lambda$..` -> `JavaCompile`).
+// Single-quoted (non-GString) patterns: a slashy string would try to interpolate
+// `$Decorated` at construction time and blow up every call.
+def cleanType = { String name ->
+    name.replaceAll('_Decorated$', '').replaceAll('\\$\\$.*$', '').replaceAll('\\$Decorated$', '')
+}
+
+def absList = { Collection files ->
+    files.findAll { it != null }.collect { it.absolutePath }
+}
+
+// -- resolve one configuration's artifacts, tolerant of partial failures ------
+// Uses the lenient artifact view so genuinely-unresolvable dependencies are
+// skipped rather than aborting the whole classpath. Runs at execution time.
+def resolveConfig = { p, String cfgName ->
+    def cfg = p.configurations.findByName(cfgName)
+    if (cfg == null || !cfg.canBeResolved) return null
+    try {
+        def artifacts = cfg.incoming.artifactView { it.lenient(true) }.artifacts
+        return absList.call(artifacts.artifactFiles.files)
+    } catch (Throwable e) {
+        return null
+    }
+}
+
+// Register the dump task on the root project. Invoking it forces the whole build
+// to configure, then the doLast walks the fully-configured model at exec time.
+gradle.rootProject { root ->
+    root.tasks.register('brixDumpModel') {
+        group = 'brix'
+        description = 'Dump the resolved build model as the brix onboarding IR (JSON).'
+        notCompatibleWithConfigurationCache('captures live Project/Task model')
+        doLast {
+            def modules = []
+            def nodes = []
+
+            root.allprojects { p ->
+                // -- module model: source sets ------------------------------
+                def sourceSets = []
+                def ssContainer = p.extensions.findByName('sourceSets')
+                if (ssContainer != null) {
+                    ssContainer.each { ss ->
+                        def javaDirs = []
+                        def resourceDirs = []
+                        def outputDirs = []
+                        try { javaDirs = absList.call(ss.java.srcDirs) } catch (ignored) {}
+                        try { resourceDirs = absList.call(ss.resources.srcDirs) } catch (ignored) {}
+                        try { outputDirs = absList.call(ss.output.classesDirs.files) } catch (ignored) {}
+                        sourceSets << [
+                            name         : ss.name,
+                            java_dirs    : javaDirs,
+                            resource_dirs: resourceDirs,
+                            output_dirs  : outputDirs,
+                        ]
+                    }
+                }
+
+                // -- module model: resolved classpaths + project edges ------
+                def deps = [:]
+                def projectDeps = [] as Set
+                CLASSPATH_CONFIGS.each { cfgName ->
+                    def files = resolveConfig.call(p, cfgName)
+                    if (files != null) deps[cfgName] = files
+                    def cfg = p.configurations.findByName(cfgName)
+                    if (cfg == null) return
+                    try {
+                        cfg.allDependencies.each { d ->
+                            if (d instanceof ProjectDependency) {
+                                try { projectDeps << d.path }
+                                catch (ignored2) { projectDeps << d.dependencyProject.path }
+                            }
+                        }
+                    } catch (ignored) {}
+                }
+
+                modules << [
+                    path        : p.path,
+                    name        : p.name,
+                    project_dir : p.projectDir.absolutePath,
+                    build_file  : p.buildFile.exists() ? p.buildFile.absolutePath : null,
+                    source_sets : sourceSets,
+                    dependencies: deps,
+                    project_deps: (projectDeps as List).sort(),
+                ]
+
+                // -- nodes: one per task ------------------------------------
+                p.tasks.each { t ->
+                    try {
+                        def type = cleanType.call(t.getClass().name)
+                        def inputs = []
+                        def outputs = []
+                        def taskDeps = [] as Set
+                        try { inputs = absList.call(t.inputs.files.files) } catch (ignored) {}
+                        try { outputs = absList.call(t.outputs.files.files) } catch (ignored) {}
+                        try {
+                            t.taskDependencies.getDependencies(t).each { dep -> taskDeps << dep.path }
+                        } catch (ignored) {}
+
+                        def recognized = RECOGNIZED_TYPES.contains(type)
+                        // Fidelity: a recognized type, or any task that declares
+                        // outputs, is authoritative; everything else is flagged
+                        // for the emitter's verify pass (double-build-and-diff).
+                        def fidelity = (recognized || !outputs.isEmpty()) ? 'authoritative' : 'verify'
+
+                        nodes << [
+                            id        : t.path,
+                            module    : p.path,
+                            task_name : t.name,
+                            type      : type,
+                            inputs    : inputs.sort(),
+                            outputs   : outputs.sort(),
+                            depends_on: (taskDeps as List).sort(),
+                            recognized: recognized,
+                            fidelity  : fidelity,
+                            // Tool-neutral bridge descriptor: how to reproduce
+                            // this node by invoking the source tool for it.
+                            bridge    : [tool: 'gradle', target: t.path],
+                        ]
+                    } catch (ignored) {
+                        // A single pathological task must not abort the dump.
+                    }
+                }
+            }
+
+            def model = [
+                ir_version    : IR_VERSION,
+                source_tool   : 'gradle',
+                gradle_version: gradle.gradleVersion,
+                root          : root.projectDir.absolutePath,
+                modules       : modules.sort { it.path },
+                nodes         : nodes.sort { it.id },
+            ]
+
+            def outPath = System.getProperty('brix.dump.out') ?: "${root.projectDir}/brix-ir.json"
+            def outFile = new File(outPath)
+            outFile.parentFile?.mkdirs()
+            outFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(model))
+            println "brix: wrote onboarding IR -> ${outFile.absolutePath} " +
+                    "(${modules.size()} modules, ${nodes.size()} nodes)"
+        }
+    }
+}
