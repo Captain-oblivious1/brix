@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from brix.onboard.emit import emit_build_file
 from brix.onboard.gradle import run_dumper
 
 FIXTURE = Path(__file__).parent / "fixtures" / "petclinic-kotlin.ir.json"
@@ -44,7 +45,7 @@ def _validate_ir(ir: dict) -> None:
             assert key in m, f"module missing {key}"
         assert isinstance(m["source_sets"], list)
         for ss in m["source_sets"]:
-            assert {"name", "java_dirs", "resource_dirs", "output_dirs"} <= ss.keys()
+            assert {"name", "java_dirs", "kotlin_dirs", "resource_dirs", "output_dirs"} <= ss.keys()
         assert isinstance(m["dependencies"], dict)
         for files in m["dependencies"].values():
             assert isinstance(files, list)
@@ -117,3 +118,47 @@ def test_live_multimodule_dump(tmp_path):
     gen = [n for n in ir["nodes"] if "generate" in n["task_name"].lower()]
     assert gen, "expected code-generation tasks to be captured"
     assert all(n["bridge"]["tool"] == "gradle" for n in gen)
+
+
+# -- emitter: IR -> brix_build.py ---------------------------------------------
+
+
+def test_emit_from_fixture_maps_native_spine():
+    ir = json.loads(FIXTURE.read_text())
+    result = emit_build_file(ir)
+    # Valid Python.
+    compile(result.source, "<generated>", "exec")
+    src = result.source
+    # The native spine: classpath delegated to Gradle, a Kotlin compile+jar with
+    # the *kotlin* source glob (the dumper fix), resources, and a jar alias.
+    assert "java.gradle(" in src
+    assert "kotlin.JarAction(" in src
+    assert "data.glob('src/main/kotlin/{name}.kt')" in src
+    assert "resource_dir='src/main/resources'" in src
+    assert "build/brix/spring-petclinic-kotlin.jar" in src
+    assert result.emitted_modules == [":"]
+    # The two undecidable facts are TODOs, never guessed values.
+    assert "entry_point=" not in src.replace("# entry_point", "")  # only in a comment
+    assert "spring_allopen=" not in src.replace("# spring_allopen", "")
+
+
+def test_emit_notes_flag_semantic_gaps():
+    ir = json.loads(FIXTURE.read_text())
+    result = emit_build_file(ir)
+    joined = " | ".join(result.notes)
+    assert "main class" in joined
+    assert "spring" in joined.lower() or "compiler plugin" in joined.lower()
+    # Bridge candidates (non-spine tasks with outputs) are inventoried, not dropped.
+    assert any("not mapped" in n.lower() for n in result.notes)
+
+
+@pytest.mark.skipif(
+    not (_LIVE_PROJECT / "gradlew").exists() or not _java_installations(),
+    reason="needs a local Gradle project with a wrapper and a JDK install",
+)
+def test_live_emit_multimodule_compiles(tmp_path):
+    ir = run_dumper(_LIVE_PROJECT, out_path=tmp_path / "ir.json", java_installations=_java_installations())
+    result = emit_build_file(ir)
+    compile(result.source, "<generated>", "exec")
+    # A real multi-module build yields several native-spine modules.
+    assert len(result.emitted_modules) > 3

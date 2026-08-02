@@ -650,6 +650,10 @@
      "java_dirs": [
       "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/java"
      ],
+     "kotlin_dirs": [
+      "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/kotlin",
+      "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/java"
+     ],
      "name": "main",
      "output_dirs": [
       "{HOME}/Projects/brix_test/spring-petclinic-kotlin/build/classes/java/main",
@@ -661,6 +665,10 @@
     },
     {
      "java_dirs": [
+      "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/java"
+     ],
+     "kotlin_dirs": [
+      "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/kotlin",
       "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/java"
      ],
      "name": "test",

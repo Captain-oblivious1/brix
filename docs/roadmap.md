@@ -167,6 +167,43 @@ one engine).
     and *don't* put the version in the import path. A labeling non-event, never a
     reason to work around a gap.
 
+### Tier F — the onboarder (migrate an existing build onto brix)
+
+The concrete migration path, and the highest-leverage remaining capability: the
+real monorepo has **no AI on its network**, so the mechanical substitute for
+AI-authoring build files is a tool that reads an existing build's *already-resolved*
+model and emits a starting `brix_build.py`. Structured as a compiler-style split so
+one backend serves every source tool: **dumpers** (frontends, one per build system)
+→ a tool-neutral **IR** (brix's own graph shape + a per-node `fidelity` flag + a
+tool-neutral `bridge` descriptor) → one **emitter** (backend). Because the IR is
+shaped by brix's needs, not any one tool's, the expensive emitter is written once
+and amortized across Gradle/Maven/CMake/Make.
+
+- **Gradle dumper — DONE.** An injected init script (`brixDumpModel`, run at
+  execution phase so classpath resolution is legal) transcribes Gradle's resolved
+  project/task model to the IR. No build-file parsing — the multi-level indirection
+  (subprojects, `buildSrc` conventions, variants) has already collapsed. Proven on
+  spring-petclinic-kotlin (single-module, full classpaths) and junit5 (25 modules,
+  2271 nodes, 109 cross-module edges); bespoke code-generation tasks are captured as
+  bridge nodes carrying their declared I/O (`recognized:false`), with un-declared-output
+  ones flagged `fidelity:verify`. `src/brix/onboard/gradle/` (`python -m brix.onboard.gradle`).
+- **Emitter increment 1 (native JVM spine) — DONE.** Per module with a compile task,
+  a native `java`/`kotlin` `JarAction` with classpaths **delegated to `java.gradle()`**
+  (the sanctioned migration path — declarations stay in the build files). The
+  generated petclinic build is structurally identical to the hand-authored
+  `examples/spring-petclinic-kotlin/` bar exactly the two facts the IR cannot carry
+  (`entry_point`, `spring_allopen`), which are emitted as explicit `# TODO`s + notes —
+  the onboarder-surfaces-gaps loop (it already forced one dumper fix: Kotlin source
+  dirs). `src/brix/onboard/emit.py` (`python -m brix.onboard.emit`).
+9. **Onboarder — remaining increments.** Emit **bridge actions** for the non-spine
+   tasks now only inventoried (custom generators → `ExternalProcessAction` invoking
+   the source tool, with the `verify`-fidelity double-build-and-diff pass); close the
+   **semantic gaps** (main class, compiler plugins, `jvm_target`) with detection or a
+   prompt; **cross-module native wiring** (chain brix-built sibling jars instead of
+   riding Gradle's per-module resolved classpath); a **live-run proof** of a generated
+   build; a **one-shot dump+emit** CLI; and, when a project needs it, **more frontends**
+   (Maven/CMake/Make) emitting the same IR. A design doc is still to be written.
+
 ---
 
 ## Needs a decision from you
@@ -174,6 +211,11 @@ one engine).
 - **Replacing your Java/TS build tools with brix:** (a) wrap the existing builds
   and replace piece by piece, or replace all at once; and (b) does brix also
   *download* third-party dependencies, or leave that to an existing tool.
+  *Current lean (discussed, not yet confirmed):* (a) **wrap-and-replace** — the
+  onboarder + bridge let you migrate module-by-module with the incumbent build as a
+  live differential oracle; (b) **delegate** — the emitter resolves classpaths via
+  `java.gradle()` rather than brix downloading deps. Tier F is built around these;
+  confirm or redirect.
 
 ---
 

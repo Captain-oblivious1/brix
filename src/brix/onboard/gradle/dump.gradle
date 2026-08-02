@@ -99,14 +99,25 @@ gradle.rootProject { root ->
                 if (ssContainer != null) {
                     ssContainer.each { ss ->
                         def javaDirs = []
+                        def kotlinDirs = []
                         def resourceDirs = []
                         def outputDirs = []
                         try { javaDirs = absList.call(ss.java.srcDirs) } catch (ignored) {}
+                        // The Kotlin plugin adds a separate `kotlin` SourceDirectorySet
+                        // (src/main/kotlin) that ss.java.srcDirs does not include; the
+                        // emitter needs it to glob .kt sources.
+                        try { kotlinDirs = absList.call(ss.kotlin.srcDirs) } catch (ignored) {
+                            try {
+                                def ke = ss.extensions.findByName('kotlin')
+                                if (ke != null) kotlinDirs = absList.call(ke.srcDirs)
+                            } catch (ignored2) {}
+                        }
                         try { resourceDirs = absList.call(ss.resources.srcDirs) } catch (ignored) {}
                         try { outputDirs = absList.call(ss.output.classesDirs.files) } catch (ignored) {}
                         sourceSets << [
                             name         : ss.name,
                             java_dirs    : javaDirs,
+                            kotlin_dirs  : kotlinDirs,
                             resource_dirs: resourceDirs,
                             output_dirs  : outputDirs,
                         ]
