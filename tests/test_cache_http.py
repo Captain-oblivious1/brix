@@ -6,6 +6,7 @@ exercised over the wire (sockets, status codes, headers) rather than mocked.
 
 import os
 import stat
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +14,8 @@ from pathlib import Path
 from brix import (
     CacheBuilder,
     CacheStore,
+    ExternalProcessAction,
+    Graph,
     HttpCacheStore,
     IncrementalBuilder,
     NodeContext,
@@ -22,6 +25,33 @@ from brix import (
 from brix.process import ProcessResult
 
 from test_incremental import make_graph, runs, write_workspace
+
+
+def _wide_graph(n: int):
+    """A supplier for `n` independent actions, each writing a distinct file —
+    a stand-in for a many-target monorepo build."""
+
+    def supplier() -> Graph:
+        graph = Graph()
+        d = graph.data
+        for i in range(n):
+            graph.add(
+                ExternalProcessAction(
+                    name=f"gen{i}",
+                    command_line="{python} -c {code} {out}",
+                    inputs={
+                        "python": d.tool(sys.executable),
+                        "code": d.value(
+                            "'import sys,pathlib; "
+                            f'pathlib.Path(sys.argv[1]).write_text("item {i}")\'',
+                        ),
+                    },
+                    outputs={"out": d.file(f"out/{i}.txt")},
+                )
+            )
+        return graph
+
+    return supplier
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -187,3 +217,40 @@ def test_remote_as_back_tier_promotes_to_local_front(tmp_path):
         assert spawns.labels == []  # served from the remote back
         assert (work / "build/all.txt").read_text() == "XY"
         assert any(front_dir.rglob("entry.json"))  # promoted into the local front
+
+
+def test_remote_two_tier_reconstructs_a_clean_machine_at_scale(tmp_path):
+    """The shared-cache payoff at monorepo scale: machine A builds many targets
+    cold and populates the remote; machine B — a *clean* workspace with an empty
+    local front — reconstructs the whole build from the remote back tier with
+    zero recomputation, and warms its own front. Exercises the Rust-engine
+    store-callback path per node, not just a toy graph."""
+    n = 60
+    supplier = _wide_graph(n)
+    with _Server(tmp_path / "remote") as server:
+        machine_a, machine_b = tmp_path / "a", tmp_path / "b"
+        front_a, front_b = tmp_path / "front_a", tmp_path / "front_b"
+        machine_a.mkdir()
+        machine_b.mkdir()
+
+        # Machine A: cold, populates the remote (and its own front).
+        result_a = CacheBuilder(
+            IncrementalBuilder(supplier, root=machine_a),
+            store=TwoTierCacheStore(CacheStore(front_a), HttpCacheStore(server.base_url)),
+        ).build()
+        assert result_a.success
+        assert any((tmp_path / "remote").rglob("entry.json"))  # remote populated
+
+        # Machine B: clean workspace + empty front → everything from the remote.
+        spawns = Spawns()
+        result_b = CacheBuilder(
+            IncrementalBuilder(supplier, root=machine_b),
+            store=TwoTierCacheStore(CacheStore(front_b), HttpCacheStore(server.base_url)),
+        ).build(reporter=spawns)
+        assert result_b.success
+        assert spawns.labels == []  # nothing recomputed on the clean machine
+        assert len(result_b.process_results) == n
+        assert all(r.source == "cache" for r in result_b.process_results)
+        for i in range(n):
+            assert (machine_b / f"out/{i}.txt").read_text() == f"item {i}"  # correct
+        assert len(list(front_b.rglob("entry.json"))) == n  # front warmed by promotion

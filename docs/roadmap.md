@@ -194,19 +194,6 @@ one engine).
   only work correctly on the plain incremental stack. Correctness foundation,
   platform-specific plumbing; design in the appendix (with a cheap interim "loudly
   refuse the unsafe combo" guard).
-- **Remote/shared (Nexus) cache backend — the remaining cache-layer piece.**
-  Local eviction of *both* content-keyed layers is **DONE** (see Completed): the
-  artifact cache and the metadata ledger no longer grow without bound. What's left
-  is making the artifact cache *shared*: a remote/team backend (Nexus, or a
-  Bazel-style remote CAS) is the **same cache with a remote store** — the
-  fingerprint is the GET/PUT key. The seam already exists (`TwoTierCacheStore`
-  front/back + a `cache_http.py`); retention is the org's Nexus policy, not ours.
-  **Precondition — already met:** machine-portable fingerprints. A shared cache
-  only hits when two developers compute the *same* key for the same logical step,
-  so a fingerprint that encoded a local path could never hit cross-developer; the
-  `asset` atom / `content_key` / `tool` fingerprint work put this on the critical
-  path (not just the air-gapped transfer). A real project, not a quick follow-on —
-  parked until it has a driver.
 - **Remote execution.** Spread compilation across many machines. Large.
 - **Lower-priority spec ideas.** Loading only part of a huge build at a time (only
   at hundreds of services), build inputs from memory/a database instead of files,
@@ -277,7 +264,18 @@ dead file-hash entries; no on-disk-format change and no Rust core/boundary chang
 (the extra keys ride the shared JSON's semantic round-trip). Proven on real
 jackson-databind: the ledger halved (62→32 MB, 728 pre-migration orphans evicted)
 with a subsequent cached rebuild running zero actions (nothing current evicted).
-The remaining cache-layer work is the remote/shared (Nexus) backend, above.
+
+**Shared / remote cache (Nexus, Artifactory, S3, …).** `HttpCacheStore` — a
+content-addressed `GET`/`PUT` backend (stdlib-only, pluggable auth hook), keyed by
+the same machine-portable fingerprint, so one machine's compile is everyone's
+cache hit. Production wiring is `TwoTierCacheStore(local front, remote back)`:
+local hits skip the network; a remote hit is promoted into the local front; a down
+remote degrades to a miss, never a failed build. Works identically through the
+default Rust engine (the store crosses as the `cache_store` extension trait) and
+the Python engine. Proven cross-machine at scale — a clean workspace with an empty
+front reconstructs a many-target build entirely from the remote with zero
+recomputation. Guide: [remote-cache.md](remote-cache.md). Remote *retention* is the
+server's own cleanup policy; the local front is bounded by the eviction above.
 
 **Languages & ecosystems.** Kotlin (single + multi-module, all-open plugin, warm
 kotlinc worker); Spring Boot executable fat jars (`brix.springboot`); Rust via
