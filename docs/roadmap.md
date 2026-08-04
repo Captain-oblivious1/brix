@@ -195,14 +195,26 @@ and amortized across Gradle/Maven/CMake/Make.
   (`entry_point`, `spring_allopen`), which are emitted as explicit `# TODO`s + notes —
   the onboarder-surfaces-gaps loop (it already forced one dumper fix: Kotlin source
   dirs). `src/brix/onboard/emit.py` (`python -m brix.onboard.emit`).
-9. **Onboarder — remaining increments.** Emit **bridge actions** for the non-spine
-   tasks now only inventoried (custom generators → `ExternalProcessAction` invoking
-   the source tool, with the `verify`-fidelity double-build-and-diff pass); close the
-   **semantic gaps** (main class, compiler plugins, `jvm_target`) with detection or a
-   prompt; **cross-module native wiring** (chain brix-built sibling jars instead of
-   riding Gradle's per-module resolved classpath); a **live-run proof** of a generated
-   build; a **one-shot dump+emit** CLI; and, when a project needs it, **more frontends**
-   (Maven/CMake/Make) emitting the same IR. A design doc is still to be written.
+- **Emitter increment 2 (bridge emission) — DONE.** Non-spine build-product tasks
+  (custom generators, jib, javadoc, pom/metadata generation) are emitted as cached
+  `ExternalProcessAction` bridges that re-invoke the source tool for exactly that
+  target, keyed by coarse per-module inputs (source/resource dirs, never the build
+  dir → no output→input cycle) with outputs captured file-or-directory (the
+  JavaCompile `FileData(dir)` + recursive-glob idiom). Over-approximate inputs are
+  safe (re-invoke more, never serve stale). Environment/IDE tasks (`Wrapper`,
+  `UpdateDaemonJvm`, Eclipse/IDEA generation) are blocklisted, never run as build
+  steps. Proven on petclinic (5 bridges) and live junit5 (its `generate*` tasks
+  bridged).
+9. **Onboarder — remaining increments.** Close the **semantic gaps** (main class,
+   compiler plugins, `jvm_target`) with detection or a prompt; **cross-module wiring**
+   — the one correctness hole left in bridging: chain brix-built sibling jars, and
+   feed a generator-bridge's output into the downstream compile, instead of riding
+   Gradle's per-module resolved classpath (a generator reading a *sibling* module is
+   not yet caught); **coalesce concurrent bridge invocations** (many parallel
+   `gradlew` calls contend on the daemon — batch or serialize); a **live-run proof**
+   of a generated build end-to-end; a **one-shot dump+emit** CLI; and, when a project
+   needs it, **more frontends** (Maven/CMake/Make) emitting the same IR. A design doc
+   is still to be written.
 
 ---
 

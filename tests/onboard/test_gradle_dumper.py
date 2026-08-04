@@ -148,8 +148,34 @@ def test_emit_notes_flag_semantic_gaps():
     joined = " | ".join(result.notes)
     assert "main class" in joined
     assert "spring" in joined.lower() or "compiler plugin" in joined.lower()
-    # Bridge candidates (non-spine tasks with outputs) are inventoried, not dropped.
-    assert any("not mapped" in n.lower() for n in result.notes)
+    # Non-spine tasks are bridged, not dropped.
+    assert any("bridged back to gradle" in n.lower() for n in result.notes)
+
+
+def test_emit_bridges_delegate_non_spine_to_gradle():
+    ir = json.loads(FIXTURE.read_text())
+    result = emit_build_file(ir)
+    compile(result.source, "<generated>", "exec")
+    src = result.source
+    assert result.bridged_nodes  # something real got bridged
+    assert "ExternalProcessAction" in src
+    assert "from brix import Graph, cli, java, kotlin, ExternalProcessAction" in src
+    # A bridge re-invokes the source tool for exactly its target, with the gradle
+    # tool + module inputs tracked and its outputs captured/cached.
+    assert "{gradle} --console=plain -q :" in src
+    assert '"gradle": data.tool(GRADLE)' in src
+    # Environment/IDE tasks are blocklisted — never run as build steps.
+    assert ":wrapper" not in result.bridged_nodes
+    assert ":updateDaemonJvm" not in result.bridged_nodes
+
+
+def test_emit_bridge_captures_directory_output_as_glob():
+    # A generator that outputs a directory must be captured as FileData + a
+    # recursive glob (the JavaCompile idiom), else cache restore misses files.
+    ir = json.loads(FIXTURE.read_text())
+    src = emit_build_file(ir).source
+    # petclinic's :buildKotlinToolingMetadata writes a directory.
+    assert "data.glob('build/kotlinToolingMetadata/{name}')" in src
 
 
 @pytest.mark.skipif(
@@ -160,5 +186,8 @@ def test_live_emit_multimodule_compiles(tmp_path):
     ir = run_dumper(_LIVE_PROJECT, out_path=tmp_path / "ir.json", java_installations=_java_installations())
     result = emit_build_file(ir)
     compile(result.source, "<generated>", "exec")
-    # A real multi-module build yields several native-spine modules.
+    # A real multi-module build yields several native-spine modules and bridges
+    # its bespoke generators back to gradle (junit5 has many generate* tasks).
     assert len(result.emitted_modules) > 3
+    assert result.bridged_nodes
+    assert any("generate" in nid.lower() for nid in result.bridged_nodes)
