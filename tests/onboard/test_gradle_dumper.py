@@ -41,8 +41,11 @@ def _validate_ir(ir: dict) -> None:
     assert isinstance(ir["nodes"], list) and ir["nodes"]
 
     for m in ir["modules"]:
-        for key in ("path", "name", "project_dir", "source_sets", "dependencies", "project_deps"):
+        for key in ("path", "name", "project_dir", "source_sets", "dependencies",
+                    "project_deps", "java_toolchain"):
             assert key in m, f"module missing {key}"
+        # Portable toolchain version (or null when the build declares none).
+        assert m["java_toolchain"] is None or isinstance(m["java_toolchain"], int)
         assert isinstance(m["source_sets"], list)
         for ss in m["source_sets"]:
             assert {"name", "java_dirs", "kotlin_dirs", "resource_dirs", "output_dirs"} <= ss.keys()

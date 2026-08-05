@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -314,23 +315,28 @@ def _gradle_build_classpath(
     project: str | None,
     out_file: str,
     cwd: str | None = None,
+    java_installations: tuple[str, ...] = (),
 ) -> None:
     """Resolve a Gradle configuration's classpath to out_file via an injected
     init script. `project` is a Gradle project path (":app"); None targets the
     root project. `cwd` is where gradle runs — defaults to project_dir so a
-    `./gradlew` wrapper and settings.gradle are found. Isolated so tests can
-    substitute it without a live Gradle."""
+    `./gradlew` wrapper and settings.gradle are found. `java_installations` are
+    extra JDK directories Gradle should consider when matching a build's Java
+    toolchain (see `gradle`). Isolated so tests can substitute it without a live
+    Gradle."""
     init = Path(out_file).with_suffix(".init.gradle")
     init.write_text(_render_gradle_init(configuration, out_file))
     proj = ":" + project.lstrip(":") if project else ""
-    subprocess.run(
-        [
-            gradle, "--quiet", "--console=plain",
-            "--init-script", str(init), f"{proj}:brixPrintClasspath",
-        ],
-        check=True,
-        cwd=cwd or project_dir,
-    )
+    cmd = [gradle, "--quiet", "--console=plain", "--init-script", str(init)]
+    if java_installations:
+        # Gradle's own reserved property (comma-separated dirs): makes a matching
+        # JDK *discoverable* for toolchain resolution without changing the JDK
+        # Gradle itself runs on. Empty -> pure auto-detection (unchanged).
+        cmd.append(
+            "-Porg.gradle.java.installations.paths=" + ",".join(java_installations)
+        )
+    cmd.append(f"{proj}:brixPrintClasspath")
+    subprocess.run(cmd, check=True, cwd=cwd or project_dir)
 
 
 def gradle(
@@ -341,6 +347,7 @@ def gradle(
     project: str | None = None,
     cache_dir: str | None = ".brix-deps",
     cwd: str | None = None,
+    java_installations: Sequence[str] = (),
 ) -> DepSet:
     """Adopt an existing Gradle project: resolve a *configuration*'s classpath
     (Gradle's ``compileClasspath`` / ``runtimeClasspath`` / ``testRuntimeClasspath``,
@@ -354,7 +361,16 @@ def gradle(
     is a Gradle project path (``":service-a"``) to target a subproject of a
     multi-project build; None targets the root project. ``gradle`` may be a
     wrapper path like ``"./gradlew"``; ``cwd`` is where it runs (defaults to the
-    project dir)."""
+    project dir).
+
+    ``java_installations`` are JDK directories Gradle should consider when a
+    build declares a Java *toolchain* (e.g. ``languageVersion = 17``). Gradle
+    otherwise only auto-detects JDKs in a few standard locations, so on a machine
+    whose only discoverable JDK differs from the build's required version,
+    resolution fails; pass the matching JDK's directory here. Empty (the default)
+    leaves Gradle's auto-detection untouched — behaviour is byte-identical to not
+    passing it. It does not affect the resolved classpath, so it is not part of
+    the cache key."""
     project_dir = Path(path)
     if project_dir.is_file():
         project_dir = project_dir.parent
@@ -367,7 +383,8 @@ def gradle(
     work.mkdir(parents=True, exist_ok=True)
     out_file = (work / f"{key}.rawcp").resolve()
     _gradle_build_classpath(
-        gradle, str(project_dir.resolve()), configuration, project, str(out_file), cwd
+        gradle, str(project_dir.resolve()), configuration, project, str(out_file), cwd,
+        tuple(java_installations),
     )
     jars = _parse_classpath(out_file.read_text())
     if cache_dir:

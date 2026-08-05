@@ -255,10 +255,19 @@ def emit_build_file(
         cp = f"cp_{slug.replace('-', '_')}"
         block: list[str] = []
         block.append(f"    # --- module {mpath} ({lang}) ---")
+        toolchain = module.get("java_toolchain")
+        if toolchain:
+            block.append(
+                f"    # This build declares a Java {toolchain} toolchain. Point "
+                f"BRIX_JAVA_INSTALLATIONS at a\n"
+                f"    # matching JDK dir if Gradle can't auto-detect one (else "
+                f"classpath resolution fails)."
+            )
         block.append(
             f"    {cp} = java.gradle(\n"
             f"        ROOT, project={project_arg}, configuration={'compileClasspath'!r},\n"
             f"        gradle=GRADLE, cache_dir={'build/.brix-deps'!r}, cwd=str(ROOT),\n"
+            f"        java_installations=JAVA_INSTALLATIONS,\n"
             f"    )"
         )
 
@@ -297,6 +306,11 @@ def emit_build_file(
             notes.append(f"{mpath}: Kotlin main class + compiler plugins (e.g. Spring all-open) not derivable — see TODOs.")
         else:
             notes.append(f"{mpath}: Java main class not derivable — see entry_point TODO.")
+        if toolchain:
+            notes.append(
+                f"{mpath}: requires a Java {toolchain} toolchain — set "
+                f"BRIX_JAVA_INSTALLATIONS to a matching JDK if not auto-detected."
+            )
 
     # Bridges: delegate non-spine build products back to the source tool.
     modules_by_path = _module_by_path(ir)
@@ -368,6 +382,13 @@ from brix import Graph, cli, java, kotlin{epa_import}  # noqa: E402
 
 ROOT = Path(os.environ.get({root_env_var!r}, {root!r})).resolve()
 GRADLE = os.environ.get({gradle_env_var!r}, str(ROOT / "gradlew"))
+
+# Extra JDK directories Gradle should consider for toolchain matching (a build
+# may require a Java version this machine does not auto-detect). Set per machine;
+# empty leaves Gradle's own auto-detection untouched. os.pathsep-separated.
+JAVA_INSTALLATIONS = [
+    p for p in os.environ.get("BRIX_JAVA_INSTALLATIONS", "").split(os.pathsep) if p
+]
 
 
 def create_graph() -> Graph:

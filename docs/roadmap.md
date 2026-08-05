@@ -205,16 +205,29 @@ and amortized across Gradle/Maven/CMake/Make.
   `UpdateDaemonJvm`, Eclipse/IDEA generation) are blocklisted, never run as build
   steps. Proven on petclinic (5 bridges) and live junit5 (its `generate*` tasks
   bridged).
-9. **Onboarder — remaining increments.** Close the **semantic gaps** (main class,
-   compiler plugins, `jvm_target`) with detection or a prompt; **cross-module wiring**
-   — the one correctness hole left in bridging: chain brix-built sibling jars, and
-   feed a generator-bridge's output into the downstream compile, instead of riding
+- **Live-run proof (single-module) — DONE.** The full chain runs end-to-end on
+  `spring-petclinic-kotlin`: dump → emit → (human fills only the two flagged TODOs,
+  `entry_point` + `spring_allopen`) → `brix build` compiles 24 Kotlin sources into an
+  executable-manifest jar (resources bundled), warm rebuild replays from cache, and
+  the jar **boots the real Spring Boot app** (`Started PetClinicApplicationKt`, Tomcat
+  + JPA + Spring Data up) — booting at all confirms `spring_allopen` took effect. This
+  surfaced and fixed a toolchain gap: **`java.gradle()` now takes `java_installations=`**
+  (forwarded as Gradle's own `-Porg.gradle.java.installations.paths`), so a build whose
+  required JDK the machine can't auto-detect still resolves; the dumper already had the
+  same knob. The emitter wires it from `$BRIX_JAVA_INSTALLATIONS` and bakes the portable
+  toolchain *version* (captured into the IR) into a TODO; the JDK *path* stays an env
+  var. Verified the `-P` is accepted by junit5's strict `build-parameters` plugin.
+9. **Onboarder — remaining increments.** Close the remaining **semantic gaps** (main
+   class, compiler plugins) with detection or a prompt; emit a **Spring Boot fat jar**
+   (`springboot.SpringBootJar`) when a Boot app is detected, so `java -jar` alone boots
+   (today the spine emits a thin jar needing the runtime classpath); **cross-module
+   wiring** — the one correctness hole left in bridging: chain brix-built sibling jars,
+   and feed a generator-bridge's output into the downstream compile, instead of riding
    Gradle's per-module resolved classpath (a generator reading a *sibling* module is
-   not yet caught); **coalesce concurrent bridge invocations** (many parallel
-   `gradlew` calls contend on the daemon — batch or serialize); a **live-run proof**
-   of a generated build end-to-end; a **one-shot dump+emit** CLI; and, when a project
-   needs it, **more frontends** (Maven/CMake/Make) emitting the same IR. A design doc
-   is still to be written.
+   not yet caught); **coalesce concurrent bridge invocations** (many parallel `gradlew`
+   calls contend on the daemon — batch or serialize); a **one-shot dump+emit** CLI; and,
+   when a project needs it, **more frontends** (Maven/CMake/Make) emitting the same IR.
+   A design doc is still to be written.
 
 ---
 

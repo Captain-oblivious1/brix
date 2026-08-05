@@ -147,7 +147,7 @@ def test_gradle_manifest_material_raises_when_no_build_files(tmp_path):
 
 
 def _fake_gradle_resolver(jars):
-    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None, java_installations=()):
         open(out_file, "w").write(os.pathsep.join(jars))
     return run
 
@@ -158,7 +158,7 @@ def test_gradle_resolves_from_a_project_dir_and_caches(tmp_path, monkeypatch):
     _write_gradle_project(proj, build="deps v1")
     calls = []
 
-    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None, java_installations=()):
         calls.append(configuration)
         open(out_file, "w").write(os.pathsep.join(["/g/foo.jar", "/g/bar.jar"]))
 
@@ -189,7 +189,7 @@ def test_gradle_configuration_and_project_are_part_of_the_cache_key(tmp_path, mo
     _write_gradle_project(proj)
     seen = []
 
-    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None, java_installations=()):
         seen.append((configuration, project))
         open(out_file, "w").write("/g/x.jar")
 
@@ -211,7 +211,7 @@ def test_changing_a_build_file_reresolves(tmp_path, monkeypatch):
     _write_gradle_project(proj, build="deps v1")
     seen = []
 
-    def run(gradle, project_dir, configuration, project, out_file, cwd=None):
+    def run(gradle, project_dir, configuration, project, out_file, cwd=None, java_installations=()):
         seen.append(True)
         open(out_file, "w").write("/g/x.jar")
 
@@ -249,6 +249,22 @@ def test_gradle_build_classpath_builds_task_and_init_script(tmp_path, monkeypatc
     assert "brixPrintClasspath" in script
     assert "runtimeClasspath" in script and str(out) in script
     assert "--init-script" in cmd and str(init) in cmd
+
+
+def test_gradle_forwards_java_installations_as_toolchain_property(tmp_path, monkeypatch):
+    argv = {}
+    monkeypatch.setattr(
+        java.subprocess, "run", lambda cmd, check, cwd: argv.update(cmd=cmd)
+    )
+    out = tmp_path / "cp.rawcp"
+    java._gradle_build_classpath(
+        "gradle", str(tmp_path), "compileClasspath", None, str(out),
+        java_installations=("/opt/jdk-17", "/opt/jdk-21"),
+    )
+    cmd = argv["cmd"]
+    # The JDK dirs land in Gradle's own reserved installations property (comma-
+    # separated), so a build declaring a toolchain can find a matching JDK.
+    assert "-Porg.gradle.java.installations.paths=/opt/jdk-17,/opt/jdk-21" in cmd
 
 
 def test_gradle_root_project_task_has_no_project_prefix(tmp_path, monkeypatch):

@@ -142,14 +142,29 @@ gradle.rootProject { root ->
                     } catch (ignored) {}
                 }
 
+                // -- module model: Java toolchain version -------------------
+                // The *version* the build's toolchain requires (e.g. 17). It is
+                // portable (the same everywhere), so the emitter can bake it in;
+                // the JDK's machine-specific *path* stays an env var. Lets brix
+                // tell Gradle which JDK to match at classpath-resolution time.
+                def javaToolchain = null
+                try {
+                    def jpe = p.extensions.findByType(org.gradle.api.plugins.JavaPluginExtension)
+                    if (jpe != null) {
+                        def lv = jpe.toolchain?.languageVersion?.getOrNull()
+                        if (lv != null) javaToolchain = lv.asInt()
+                    }
+                } catch (ignored) {}
+
                 modules << [
-                    path        : p.path,
-                    name        : p.name,
-                    project_dir : p.projectDir.absolutePath,
-                    build_file  : p.buildFile.exists() ? p.buildFile.absolutePath : null,
-                    source_sets : sourceSets,
-                    dependencies: deps,
-                    project_deps: (projectDeps as List).sort(),
+                    path          : p.path,
+                    name          : p.name,
+                    project_dir   : p.projectDir.absolutePath,
+                    build_file    : p.buildFile.exists() ? p.buildFile.absolutePath : null,
+                    source_sets   : sourceSets,
+                    dependencies  : deps,
+                    project_deps  : (projectDeps as List).sort(),
+                    java_toolchain: javaToolchain,
                 ]
 
                 // -- nodes: one per task ------------------------------------
