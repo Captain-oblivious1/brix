@@ -181,6 +181,80 @@ def test_emit_bridge_captures_directory_output_as_glob():
     assert "data.glob('build/kotlinToolingMetadata/{name}')" in src
 
 
+def test_emit_detects_springboot_and_emits_fat_jar():
+    # petclinic runs the Spring Boot plugin (a bootJar task), so the emitter must
+    # repackage the thin jar into an executable fat jar — with loader-tools pinned
+    # to the version read off the classpath, and the main class as the one TODO.
+    ir = json.loads(FIXTURE.read_text())
+    result = emit_build_file(ir)
+    compile(result.source, "<generated>", "exec")
+    src = result.source
+    assert "from brix import springboot" in src
+    assert "springboot.SpringBootJar(" in src
+    assert "springboot.boot_repackager(" in src
+    # loader-tools resolved at the version derived from spring-boot-<v>.jar (4.1.0).
+    assert "spring-boot-loader-tools:4.1.0" in src
+    assert "TODO_VERSION" not in src
+    # The main class is a human-supplied module constant, not a guess.
+    assert "MAIN_CLASS_SPRING_PETCLINIC_KOTLIN" in src
+    assert "'spring-petclinic-kotlin-boot': 'build/brix/spring-petclinic-kotlin-boot.jar'" in src
+    assert any("fat jar" in n for n in result.notes)
+    # A single-module build still uses the atomic overlay.
+    assert "AtomicBuilder" in src
+
+
+def _mini_multimodule_ir():
+    """A hand-built two-module Java IR: :app depends on :core. Enough shape for
+    the emitter's cross-module wiring path, no live Gradle needed."""
+    def module(path, name, deps):
+        d = f"/ws/{name}"
+        return {
+            "path": path, "name": name, "project_dir": d,
+            "build_file": f"{d}/build.gradle",
+            "source_sets": [{
+                "name": "main", "java_dirs": [f"{d}/src/main/java"],
+                "kotlin_dirs": [], "resource_dirs": [], "output_dirs": [],
+            }],
+            "dependencies": {"compileClasspath": []},
+            "project_deps": deps, "java_toolchain": None,
+        }
+
+    def compile_node(path):
+        return {
+            "id": f"{path}:compileJava", "module": path, "task_name": "compileJava",
+            "type": "org.gradle.api.tasks.compile.JavaCompile",
+            "inputs": [], "outputs": [], "depends_on": [], "recognized": True,
+            "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": f"{path}:compileJava"},
+        }
+
+    return {
+        "ir_version": 1, "source_tool": "gradle", "gradle_version": "8.14",
+        "root": "/ws",
+        "modules": [
+            module(":core", "core", deps=[":core"]),   # self-dep on purpose
+            module(":app", "app", deps=[":core"]),
+        ],
+        "nodes": [compile_node(":core"), compile_node(":app")],
+    }
+
+
+def test_emit_wires_cross_module_siblings_and_uses_in_place_builder():
+    result = emit_build_file(_mini_multimodule_ir())
+    compile(result.source, "<generated>", "exec")
+    src = result.source
+    # :app compiles against brix's own build of :core, not Gradle's copy.
+    assert "cp_app + data.file('build/brix/core.jar')" in src
+    # Gradle's stale copy of the sibling's output is dropped from the classpath.
+    assert "- ['*/core/build/*']" in src
+    # Self-dependency must not wire a module against its own jar.
+    assert "cp_core + data.file('build/brix/core.jar')" not in src
+    # Cross-module builds write outputs in place — no atomic overlay (which would
+    # hide a freshly built sibling jar from javac's -classpath).
+    assert "AtomicBuilder" not in src
+    assert "CacheBuilder" in src and "IncrementalBuilder" in src
+    assert any("sibling" in n for n in result.notes)
+
+
 @pytest.mark.skipif(
     not (_LIVE_PROJECT / "gradlew").exists() or not _java_installations(),
     reason="needs a local Gradle project with a wrapper and a JDK install",
@@ -194,3 +268,8 @@ def test_live_emit_multimodule_compiles(tmp_path):
     assert len(result.emitted_modules) > 3
     assert result.bridged_nodes
     assert any("generate" in nid.lower() for nid in result.bridged_nodes)
+    # Cross-module wiring: sibling brix jars land on dependents' classpaths, and
+    # the build drops to the in-place (non-atomic) stack for foreign resolvers.
+    assert any("sibling" in n for n in result.notes)
+    assert "+ data.file('build/brix/junit-platform-commons.jar')" in result.source
+    assert "AtomicBuilder" not in result.source

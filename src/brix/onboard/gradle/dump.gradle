@@ -67,6 +67,15 @@ def absList = { Collection files ->
     files.findAll { it != null }.collect { it.absolutePath }
 }
 
+// Source/resource roots that Gradle *declares* but that do not exist on disk
+// (e.g. a conventional src/main/resources a module never created) must be
+// dropped: the emitter would otherwise glob/jar a missing directory and the
+// build step fails. Output dirs are exempt — they are build products, absent
+// until built.
+def existingDirList = { Collection files ->
+    files.findAll { it != null && it.isDirectory() }.collect { it.absolutePath }
+}
+
 // -- resolve one configuration's artifacts, tolerant of partial failures ------
 // Uses the lenient artifact view so genuinely-unresolvable dependencies are
 // skipped rather than aborting the whole classpath. Runs at execution time.
@@ -102,17 +111,17 @@ gradle.rootProject { root ->
                         def kotlinDirs = []
                         def resourceDirs = []
                         def outputDirs = []
-                        try { javaDirs = absList.call(ss.java.srcDirs) } catch (ignored) {}
+                        try { javaDirs = existingDirList.call(ss.java.srcDirs) } catch (ignored) {}
                         // The Kotlin plugin adds a separate `kotlin` SourceDirectorySet
                         // (src/main/kotlin) that ss.java.srcDirs does not include; the
                         // emitter needs it to glob .kt sources.
-                        try { kotlinDirs = absList.call(ss.kotlin.srcDirs) } catch (ignored) {
+                        try { kotlinDirs = existingDirList.call(ss.kotlin.srcDirs) } catch (ignored) {
                             try {
                                 def ke = ss.extensions.findByName('kotlin')
-                                if (ke != null) kotlinDirs = absList.call(ke.srcDirs)
+                                if (ke != null) kotlinDirs = existingDirList.call(ke.srcDirs)
                             } catch (ignored2) {}
                         }
-                        try { resourceDirs = absList.call(ss.resources.srcDirs) } catch (ignored) {}
+                        try { resourceDirs = existingDirList.call(ss.resources.srcDirs) } catch (ignored) {}
                         try { outputDirs = absList.call(ss.output.classesDirs.files) } catch (ignored) {}
                         sourceSets << [
                             name         : ss.name,

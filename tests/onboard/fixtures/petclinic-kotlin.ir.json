@@ -13,11 +13,10 @@
                 {
                     "name": "main",
                     "java_dirs": [
-                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/java"
+                        
                     ],
                     "kotlin_dirs": [
-                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/kotlin",
-                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/java"
+                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/kotlin"
                     ],
                     "resource_dirs": [
                         "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/main/resources"
@@ -30,11 +29,10 @@
                 {
                     "name": "test",
                     "java_dirs": [
-                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/java"
+                        
                     ],
                     "kotlin_dirs": [
-                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/kotlin",
-                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/java"
+                        "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/kotlin"
                     ],
                     "resource_dirs": [
                         "{HOME}/Projects/brix_test/spring-petclinic-kotlin/src/test/resources"

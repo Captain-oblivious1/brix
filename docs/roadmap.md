@@ -217,17 +217,35 @@ and amortized across Gradle/Maven/CMake/Make.
   same knob. The emitter wires it from `$BRIX_JAVA_INSTALLATIONS` and bakes the portable
   toolchain *version* (captured into the IR) into a TODO; the JDK *path* stays an env
   var. Verified the `-P` is accepted by junit5's strict `build-parameters` plugin.
+- **Cross-module wiring — DONE.** A dependent module now compiles against brix's own
+  build of its siblings: for each `project_dep` brix also builds, the emitter adds that
+  sibling's `build/brix/<slug>.jar` to the compile classpath (ABI-lensed by the skin —
+  jvm-abi for Java, kotlin-abi for Kotlin) and subtracts Gradle's stale copy of the
+  sibling's build output. Self-deps (Gradle can report a module as its own project-dep)
+  and duplicates are dropped. A cross-module build switches off the atomic overlay
+  (plain in-place `IncrementalBuilder`), since javac/kotlinc resolve a sibling jar via
+  `-classpath` from the real filesystem and staging would hide it (the parked
+  foreign-resolver limitation). Proven on a synthetic `core`←`app` build: brix builds
+  `core`, compiles `app` against brix's `core.jar`, and the ABI edge is correct both
+  ways (comment-only edit to `core` → `app` replays; a new public method → `app`
+  recompiles). The proof also surfaced and fixed a dumper bug — it recorded
+  Gradle-declared source/resource dirs that don't exist on disk (jarring a missing
+  `src/main/resources` failed); the dumper now records only existing input dirs.
+- **Spring Boot fat jar — DONE.** When a module runs the Boot plugin (a `bootJar`
+  task), the emitter repackages its thin jar into an executable one via
+  `springboot.SpringBootJar`, so `java -jar` alone boots it. loader-tools is pinned to
+  the Spring Boot version read straight off the classpath (`spring-boot-<v>.jar`); the
+  runtime classpath comes from Gradle; the `@SpringBootApplication` main class is the
+  one human-supplied constant (env-overridable). Proven live on petclinic: a 76 MB fat
+  jar (142 nested libs) boots with **no** `-classpath` (`Started PetClinicApplicationKt`).
 9. **Onboarder — remaining increments.** Close the remaining **semantic gaps** (main
-   class, compiler plugins) with detection or a prompt; emit a **Spring Boot fat jar**
-   (`springboot.SpringBootJar`) when a Boot app is detected, so `java -jar` alone boots
-   (today the spine emits a thin jar needing the runtime classpath); **cross-module
-   wiring** — the one correctness hole left in bridging: chain brix-built sibling jars,
-   and feed a generator-bridge's output into the downstream compile, instead of riding
-   Gradle's per-module resolved classpath (a generator reading a *sibling* module is
-   not yet caught); **coalesce concurrent bridge invocations** (many parallel `gradlew`
-   calls contend on the daemon — batch or serialize); a **one-shot dump+emit** CLI; and,
-   when a project needs it, **more frontends** (Maven/CMake/Make) emitting the same IR.
-   A design doc is still to be written.
+   class, compiler plugins) with detection or a prompt; the **generator→compile edge** —
+   feed a bridged generator's output dir into the consuming module's sources/classpath
+   (a generator reading a *sibling* module is still not caught); **coalesce concurrent
+   bridge invocations** (many parallel `gradlew` calls contend on the daemon — batch or
+   serialize); a **one-shot dump+emit** CLI; and, when a project needs it, **more
+   frontends** (Maven/CMake/Make) emitting the same IR. A design doc is still to be
+   written.
 
 ---
 

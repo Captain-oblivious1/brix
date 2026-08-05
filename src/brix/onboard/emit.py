@@ -24,6 +24,7 @@ notes alongside the source.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -123,6 +124,39 @@ def _module_by_path(ir: dict) -> dict:
     return {m["path"]: m for m in ir["modules"]}
 
 
+# The core `spring-boot-<version>.jar` artifact (not -starter-*/-autoconfigure-*):
+# its presence on the classpath both flags a Boot app and dates its loader-tools.
+_SPRING_BOOT_JAR = re.compile(r"^spring-boot-(\d[^/]*)\.jar$")
+
+
+def _is_springboot(ir: dict, module_path: str) -> bool:
+    """True if the module runs the Spring Boot plugin — detected by its `bootJar`
+    task. Such a module gets a repackaged executable jar (see `springboot`), not
+    just the thin spine jar."""
+    for n in ir["nodes"]:
+        if n["module"] != module_path:
+            continue
+        if n["task_name"] == "bootJar" or n["type"].endswith("BootJar"):
+            return True
+    return False
+
+
+def _spring_boot_version(module: dict) -> str | None:
+    """The Spring Boot version, read off the resolved classpath's core
+    `spring-boot-<version>.jar` — so loader-tools can be resolved at the matching
+    version without a human supplying it. None if not on the classpath."""
+    for files in module.get("dependencies", {}).values():
+        for p in files:
+            m = _SPRING_BOOT_JAR.match(p.rsplit("/", 1)[-1])
+            if m:
+                return m.group(1)
+    return None
+
+
+def _main_class_const(slug: str) -> str:
+    return "MAIN_CLASS_" + re.sub(r"[^0-9A-Za-z]", "_", slug).upper()
+
+
 def _bridge_input_globs(module: dict, root: str) -> list[str]:
     """Coarse, cycle-free over-approximation of what a module's task reads: every
     declared source/resource directory (never the build-output dir). Over-broad
@@ -198,6 +232,155 @@ def _emit_bridge_block(node: dict, module: dict, root: str) -> str:
     return "\n".join(out)
 
 
+def _render_module_block(
+    plan: dict, plan_by_path: dict, emitted_paths: set, root: str, notes: list
+) -> tuple[str, bool]:
+    """One module's native spine: a Gradle-delegated classpath and a compile+jar,
+    with any brix-built sibling jars wired onto the classpath (and Gradle's stale
+    copies of those siblings dropped). Returns (source, uses_java_worker)."""
+    mpath, lang, slug = plan["mpath"], plan["lang"], plan["slug"]
+    cp = f"cp_{slug.replace('-', '_')}"
+    project_arg = "None" if mpath == ":" else repr(mpath)
+    worker_used = False
+    out: list[str] = [f"    # --- module {mpath} ({lang}) ---"]
+    if plan["toolchain"]:
+        out.append(
+            f"    # This build declares a Java {plan['toolchain']} toolchain. Point "
+            f"BRIX_JAVA_INSTALLATIONS at a\n"
+            f"    # matching JDK dir if Gradle can't auto-detect one (else "
+            f"classpath resolution fails)."
+        )
+        notes.append(
+            f"{mpath}: requires a Java {plan['toolchain']} toolchain — set "
+            f"BRIX_JAVA_INSTALLATIONS to a matching JDK if not auto-detected."
+        )
+
+    # Cross-module wiring: for each dependency brix also builds, use brix's jar
+    # (ABI-lensed by the skin) and exclude Gradle's own build output for it. Skip
+    # self (Gradle can report a module as its own project-dep) and dedupe.
+    seen_dep: set = set()
+    sib_paths = [
+        d for d in plan["project_deps"]
+        if d in emitted_paths and d != mpath and not (d in seen_dep or seen_dep.add(d))
+    ]
+    excludes = [
+        f"*/{_rel(plan_by_path[d]['module']['project_dir'], root)}/build/*"
+        for d in sib_paths
+    ]
+    sib_jar_exprs = [f"data.file({plan_by_path[d]['jar']!r})" for d in sib_paths]
+
+    if excludes:
+        out.append(
+            "    # Sibling modules are built by brix; drop Gradle's copies of their "
+            "outputs\n    # from the resolved classpath and depend on brix's jars instead."
+        )
+    gradle_call = (
+        f"    {cp} = java.gradle(\n"
+        f"        ROOT, project={project_arg}, configuration='compileClasspath',\n"
+        f"        gradle=GRADLE, cache_dir='build/.brix-deps', cwd=str(ROOT),\n"
+        f"        java_installations=JAVA_INSTALLATIONS,\n"
+        f"    )"
+    )
+    if excludes:
+        gradle_call += f" - {excludes!r}"
+    out.append(gradle_call)
+
+    classpath_expr = cp + "".join(f" + {e}" for e in sib_jar_exprs)
+
+    action = "kotlin.JarAction" if lang == "kotlin" else "java.JarAction"
+    value_args = [
+        f"source_files=data.glob({plan['src_glob']!r})",
+        f"output_file=data.file({plan['jar']!r})",
+        f"classes_dir={plan['classes_dir']!r}",
+        f"classpath={classpath_expr}",
+    ]
+    if plan["res_rel"]:
+        value_args.append(f"resource_dir={plan['res_rel']!r}")
+    comment_lines: list[str] = []
+    if lang == "kotlin":
+        value_args.append('jvm_target="17"')
+        comment_lines.append("# TODO: jvm_target assumed 17 — not derivable from the IR")
+        comment_lines.append("# TODO: spring_allopen / Kotlin compiler plugins are not in the IR")
+    else:
+        value_args.append("javac_worker=worker")
+        worker_used = True
+    if not plan["springboot"]:
+        # A Boot module's main class rides its fat jar (below), not the thin jar.
+        comment_lines.append("# TODO: entry_point (main class) is not derivable from the IR")
+
+    out.append(f"    graph.add(\n        {action}(")
+    out += [f"            {a}," for a in value_args]
+    out += [f"            {c}" for c in comment_lines]
+    out.append("        )\n    )")
+
+    if lang == "kotlin":
+        notes.append(f"{mpath}: Kotlin main class + compiler plugins (e.g. Spring all-open) not derivable — see TODOs.")
+    else:
+        notes.append(f"{mpath}: Java main class not derivable — see entry_point TODO.")
+    if sib_paths:
+        notes.append(
+            f"{mpath}: wired {len(sib_paths)} brix-built sibling jar(s) onto the "
+            f"compile classpath ({', '.join(sib_paths)})."
+        )
+    if plan["springboot"]:
+        out.append(_render_springboot_block(plan, project_arg, notes))
+    return "\n".join(out), worker_used
+
+
+def _render_springboot_block(plan: dict, project_arg: str, notes: list) -> str:
+    """Repackage a Boot module's thin jar into an executable fat jar so `java -jar`
+    alone boots it. loader-tools is resolved (via Maven) at the version read off
+    the classpath; the runtime classpath comes from Gradle; the main class is the
+    one human-supplied fact (a `@SpringBootApplication` is not in the IR)."""
+    slug = plan["slug"]
+    mpath = plan["mpath"]
+    tag = slug.replace("-", "_")
+    lt, rp, rtcp = f"loader_tools_{tag}", f"repackager_{tag}", f"rt_{tag}"
+    main_const = _main_class_const(slug)
+    ver = plan["boot_version"]
+    coord = (
+        f"org.springframework.boot:spring-boot-loader-tools:{ver}"
+        if ver
+        else "org.springframework.boot:spring-boot-loader-tools:TODO_VERSION"
+    )
+    out = [
+        "",
+        f"    # --- Spring Boot executable jar for {mpath} ---",
+        "    # Detected the Spring Boot plugin (a bootJar task): repackage the thin",
+        "    # jar so `java -jar` alone boots it (deps nest under BOOT-INF/lib).",
+    ]
+    if not ver:
+        out.append("    # TODO: could not derive the Spring Boot version from the classpath;")
+        out.append("    #       replace TODO_VERSION with the loader-tools version to use.")
+        notes.append(f"{mpath}: Spring Boot app — could not derive loader-tools version; fill TODO_VERSION.")
+    out += [
+        f"    {lt} = java.maven(",
+        f"        [{coord!r}],",
+        "        scope='runtime', mvn=MVN, cache_dir='build/.brix-deps', cwd=str(ROOT),",
+        "    )",
+        f"    {rp} = springboot.boot_repackager(graph, loader_tools_classpath=list({lt}.artifacts))",
+        f"    {rtcp} = java.gradle(",
+        f"        ROOT, project={project_arg}, configuration='runtimeClasspath',",
+        "        gradle=GRADLE, cache_dir='build/.brix-deps', cwd=str(ROOT),",
+        "        java_installations=JAVA_INSTALLATIONS,",
+        "    )",
+        "    graph.add(",
+        "        springboot.SpringBootJar(",
+        f"            source_jar=data.file({plan['jar']!r}),",
+        f"            output_file=data.file({f'build/brix/{slug}-boot.jar'!r}),",
+        f"            main_class={main_const},",
+        f"            runtime_classpath={rtcp},",
+        f"            repackager={rp},",
+        "        )",
+        "    )",
+    ]
+    notes.append(
+        f"{mpath}: emitted a Spring Boot fat jar (alias '{slug}-boot'); set "
+        f"{main_const} to the @SpringBootApplication class."
+    )
+    return "\n".join(out)
+
+
 def emit_build_file(
     ir: dict,
     *,
@@ -218,6 +401,10 @@ def emit_build_file(
     body: list[str] = []
     aliases: dict[str, str] = {}
 
+    # -- pass 1: decide which modules get a native spine, gathering the facts each
+    # block needs. Done first so cross-module wiring can reference any sibling that
+    # will be built (its jar path, language) regardless of module order.
+    plans: list[dict] = []
     for module in ir["modules"]:
         mpath = module["path"]
         lang = _module_language(ir, mpath)
@@ -229,13 +416,6 @@ def emit_build_file(
             skipped.append(mpath)
             notes.append(f"{mpath}: has a compile task but no 'main' source set; skipped.")
             continue
-
-        slug = _slug(mpath, module["name"])
-        jar = f"build/brix/{slug}.jar"
-        classes_dir = f"build/brix/{slug}-classes"
-        project_arg = "None" if mpath == ":" else repr(mpath)
-
-        # Source glob: pick the language's source root, relative to the graph root.
         if lang == "kotlin":
             src_root = _pick_dir(ss.get("kotlin_dirs") or ss["java_dirs"], "kotlin")
             glob_suffix = "{name}.kt"
@@ -246,71 +426,43 @@ def emit_build_file(
             skipped.append(mpath)
             notes.append(f"{mpath}: no {lang} source directory in the IR; skipped.")
             continue
-        src_glob = f"{_rel(src_root, root)}/{glob_suffix}"
-
-        # Resource dir (optional).
+        slug = _slug(mpath, module["name"])
         res_dirs = ss.get("resource_dirs") or []
-        res_rel = _rel(res_dirs[0], root) if res_dirs else None
+        plans.append({
+            "mpath": mpath,
+            "module": module,
+            "lang": lang,
+            "slug": slug,
+            "jar": f"build/brix/{slug}.jar",
+            "classes_dir": f"build/brix/{slug}-classes",
+            "src_glob": f"{_rel(src_root, root)}/{glob_suffix}",
+            "res_rel": _rel(res_dirs[0], root) if res_dirs else None,
+            "toolchain": module.get("java_toolchain"),
+            "project_deps": list(module.get("project_deps", [])),
+            "springboot": _is_springboot(ir, mpath),
+            "boot_version": _spring_boot_version(module),
+        })
 
-        cp = f"cp_{slug.replace('-', '_')}"
-        block: list[str] = []
-        block.append(f"    # --- module {mpath} ({lang}) ---")
-        toolchain = module.get("java_toolchain")
-        if toolchain:
-            block.append(
-                f"    # This build declares a Java {toolchain} toolchain. Point "
-                f"BRIX_JAVA_INSTALLATIONS at a\n"
-                f"    # matching JDK dir if Gradle can't auto-detect one (else "
-                f"classpath resolution fails)."
-            )
-        block.append(
-            f"    {cp} = java.gradle(\n"
-            f"        ROOT, project={project_arg}, configuration={'compileClasspath'!r},\n"
-            f"        gradle=GRADLE, cache_dir={'build/.brix-deps'!r}, cwd=str(ROOT),\n"
-            f"        java_installations=JAVA_INSTALLATIONS,\n"
-            f"    )"
+    plan_by_path = {p["mpath"]: p for p in plans}
+    emitted_paths = set(plan_by_path)
+    has_cross_module = any(
+        any(d in emitted_paths for d in p["project_deps"]) for p in plans
+    )
+    boot_consts = [
+        (_main_class_const(p["slug"]), p["mpath"]) for p in plans if p["springboot"]
+    ]
+
+    # -- pass 2: render each module's spine (+ sibling wiring / Boot fat jar).
+    for p in plans:
+        block, worker_used = _render_module_block(
+            p, plan_by_path, emitted_paths, root, notes
         )
-
-        action = "kotlin.JarAction" if lang == "kotlin" else "java.JarAction"
-        value_args = [
-            f"source_files=data.glob({src_glob!r})",
-            f"output_file=data.file({jar!r})",
-            f"classes_dir={classes_dir!r}",
-            f"classpath={cp}",
-        ]
-        if res_rel:
-            value_args.append(f"resource_dir={res_rel!r}")
-        comment_lines = []
-        if lang == "kotlin":
-            value_args.append('jvm_target="17"')
-            comment_lines.append("# TODO: jvm_target assumed 17 — not derivable from the IR")
-            comment_lines.append("# TODO: spring_allopen / Kotlin compiler plugins are not in the IR")
-        else:
-            value_args.append("javac_worker=worker")
-            needs_java_worker = True
-        comment_lines.append("# TODO: entry_point (main class) is not derivable from the IR")
-
-        block.append(f"    graph.add(\n        {action}(")
-        for a in value_args:
-            block.append(f"            {a},")
-        for c in comment_lines:
-            block.append(f"            {c}")
-        block.append("        )\n    )")
-
-        body.append("\n".join(block))
-        emitted.append(mpath)
-        aliases[slug] = jar
-
-        # Note the semantic gaps for this module.
-        if lang == "kotlin":
-            notes.append(f"{mpath}: Kotlin main class + compiler plugins (e.g. Spring all-open) not derivable — see TODOs.")
-        else:
-            notes.append(f"{mpath}: Java main class not derivable — see entry_point TODO.")
-        if toolchain:
-            notes.append(
-                f"{mpath}: requires a Java {toolchain} toolchain — set "
-                f"BRIX_JAVA_INSTALLATIONS to a matching JDK if not auto-detected."
-            )
+        needs_java_worker = needs_java_worker or worker_used
+        body.append(block)
+        emitted.append(p["mpath"])
+        aliases[p["slug"]] = p["jar"]
+        if p["springboot"]:
+            aliases[f"{p['slug']}-boot"] = f"build/brix/{p['slug']}-boot.jar"
 
     # Bridges: delegate non-spine build products back to the source tool.
     modules_by_path = _module_by_path(ir)
@@ -337,7 +489,8 @@ def emit_build_file(
         )
 
     source = _render(
-        ir, root, root_env_var, gradle_env_var, needs_java_worker, body, bridge_body, aliases
+        ir, root, root_env_var, gradle_env_var, needs_java_worker, body, bridge_body,
+        aliases, has_cross_module=has_cross_module, boot_consts=boot_consts,
     )
     return EmitResult(
         source=source,
@@ -348,9 +501,13 @@ def emit_build_file(
     )
 
 
-def _render(ir, root, root_env_var, gradle_env_var, needs_java_worker, body, bridge_body, aliases) -> str:
+def _render(
+    ir, root, root_env_var, gradle_env_var, needs_java_worker, body, bridge_body,
+    aliases, *, has_cross_module=False, boot_consts=(),
+) -> str:
     worker_line = "    worker = java.javac_worker(graph)\n" if needs_java_worker else ""
     epa_import = ", ExternalProcessAction" if bridge_body else ""
+    sb_import = "\nfrom brix import springboot  # noqa: E402" if boot_consts else ""
     spine = chr(10).join(body) if body else "    pass  # no compilable module found"
     bridge_section = ""
     if bridge_body:
@@ -358,7 +515,52 @@ def _render(ir, root, root_env_var, gradle_env_var, needs_java_worker, body, bri
             "\n    # --- bridged tasks (delegated to the source build) ---\n"
             + "\n".join(bridge_body)
         )
+    # Spring Boot needs a Maven launcher (for loader-tools) and a human-supplied
+    # main class per Boot module — surfaced as editable module-level constants.
+    boot_config = ""
+    if boot_consts:
+        lines = [
+            "",
+            "# Maven launcher used only to resolve spring-boot-loader-tools for the",
+            "# executable-jar repackager (the project's own deps still come from Gradle).",
+            'MVN = os.environ.get("BRIX_MVN", "mvn")',
+            "",
+            "# TODO: set each to its module's @SpringBootApplication main class.",
+        ]
+        for const, mpath in boot_consts:
+            lines.append(f'{const} = os.environ.get({const!r}, "TODO.SetMainClass")  # {mpath}')
+        boot_config = "\n".join(lines) + "\n"
     alias_items = ",\n            ".join(f"{k!r}: {v!r}" for k, v in aliases.items())
+
+    # Cross-module builds must NOT use the atomic overlay: javac/kotlinc resolve
+    # a sibling jar via -classpath from the real filesystem, and atomic staging
+    # would hide a freshly built sibling from the module that consumes it (the
+    # parked "staged-overlay invisible to foreign resolvers" limitation). Write
+    # outputs in place via a plain IncrementalBuilder instead.
+    if has_cross_module:
+        builder_note = (
+            "    # Cross-module build: outputs are written in place (no atomic overlay)\n"
+            "    # so each module's javac/kotlinc can see sibling jars on -classpath.\n"
+        )
+        builder_body = (
+            "        return CacheBuilder(\n"
+            "            IncrementalBuilder(create_graph, root=ROOT, metadata_dir=\"build/.brix\"),\n"
+            "            cache_dir=\"build/.brix-cache\",\n"
+            "        )"
+        )
+        builder_imports = "from brix import CacheBuilder, IncrementalBuilder"
+    else:
+        builder_note = ""
+        builder_body = (
+            "        return AtomicBuilder(\n"
+            "            CacheBuilder(\n"
+            "                IncrementalBuilder(create_graph, root=ROOT, metadata_dir=\"build/.brix\"),\n"
+            "                cache_dir=\"build/.brix-cache\",\n"
+            "            ),\n"
+            "            staging_dir=\"build/.brix-staging\",\n"
+            "        )"
+        )
+        builder_imports = "from brix import AtomicBuilder, CacheBuilder, IncrementalBuilder"
     return f'''#!/usr/bin/env python3
 """AUTO-GENERATED by the brix onboarder (brix.onboard.emit) from a {ir['source_tool']} build.
 
@@ -378,7 +580,7 @@ _brix_src = os.environ.get("BRIX_SRC")
 if _brix_src:
     sys.path.insert(0, _brix_src)
 
-from brix import Graph, cli, java, kotlin{epa_import}  # noqa: E402
+from brix import Graph, cli, java, kotlin{epa_import}  # noqa: E402{sb_import}
 
 ROOT = Path(os.environ.get({root_env_var!r}, {root!r})).resolve()
 GRADLE = os.environ.get({gradle_env_var!r}, str(ROOT / "gradlew"))
@@ -389,7 +591,7 @@ GRADLE = os.environ.get({gradle_env_var!r}, str(ROOT / "gradlew"))
 JAVA_INSTALLATIONS = [
     p for p in os.environ.get("BRIX_JAVA_INSTALLATIONS", "").split(os.pathsep) if p
 ]
-
+{boot_config}
 
 def create_graph() -> Graph:
     graph = Graph()
@@ -401,16 +603,10 @@ def create_graph() -> Graph:
 
 
 if __name__ == "__main__":
-    from brix import AtomicBuilder, CacheBuilder, IncrementalBuilder
+    {builder_imports}
 
     def builder():
-        return AtomicBuilder(
-            CacheBuilder(
-                IncrementalBuilder(create_graph, root=ROOT, metadata_dir="build/.brix"),
-                cache_dir="build/.brix-cache",
-            ),
-            staging_dir="build/.brix-staging",
-        )
+{builder_note}{builder_body}
 
     sys.exit(
         cli.main(
