@@ -48,7 +48,9 @@ def _validate_ir(ir: dict) -> None:
         assert m["java_toolchain"] is None or isinstance(m["java_toolchain"], int)
         assert isinstance(m["source_sets"], list)
         for ss in m["source_sets"]:
-            assert {"name", "java_dirs", "kotlin_dirs", "resource_dirs", "output_dirs"} <= ss.keys()
+            assert {"name", "java_dirs", "kotlin_dirs", "resource_dirs",
+                    "output_dirs", "generated_dirs"} <= ss.keys()
+            assert isinstance(ss["generated_dirs"], list)
         assert isinstance(m["dependencies"], dict)
         for files in m["dependencies"].values():
             assert isinstance(files, list)
@@ -236,6 +238,56 @@ def _mini_multimodule_ir():
         ],
         "nodes": [compile_node(":core"), compile_node(":app")],
     }
+
+
+def _gen_source_ir():
+    """A one-module pure-Java IR whose main source set has a generated source dir
+    under build/ produced by a custom (bridged) codegen task the compile depends
+    on — the generator→compile shape, no live Gradle."""
+    root = "/ws"
+    d = "/ws"
+    gen_dir = "/ws/build/generated/sources/brixgen/main"
+    return {
+        "ir_version": 1, "source_tool": "gradle", "gradle_version": "8.14", "root": root,
+        "modules": [{
+            "path": ":", "name": "app", "project_dir": d, "build_file": f"{d}/build.gradle",
+            "source_sets": [{
+                "name": "main", "java_dirs": [f"{d}/src/main/java"], "kotlin_dirs": [],
+                "resource_dirs": [], "output_dirs": [], "generated_dirs": [gen_dir],
+            }],
+            "dependencies": {"compileClasspath": []}, "project_deps": [], "java_toolchain": 17,
+        }],
+        "nodes": [
+            {
+                "id": ":compileJava", "module": ":", "task_name": "compileJava",
+                "type": "org.gradle.api.tasks.compile.JavaCompile",
+                "inputs": [], "outputs": [], "depends_on": [":genCode"], "recognized": True,
+                "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": ":compileJava"},
+            },
+            {
+                "id": ":genCode", "module": ":", "task_name": "genCode",
+                "type": "org.gradle.api.DefaultTask",
+                "inputs": [], "outputs": [gen_dir], "depends_on": [], "recognized": False,
+                "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": ":genCode"},
+            },
+        ],
+    }
+
+
+def test_emit_globs_generated_sources_and_bridges_the_generator():
+    result = emit_build_file(_gen_source_ir())
+    compile(result.source, "<generated>", "exec")
+    src = result.source
+    # The generated source dir is globbed alongside the primary sources, so the
+    # compile consumes the generator's output.
+    assert ("source_files=data.glob('src/main/java/{name}.java')"
+            " + data.glob('build/generated/sources/brixgen/main/{name}.java')") in src
+    # The generator itself is emitted as a bridge (brix infers the ordering edge).
+    assert ":genCode" in result.bridged_nodes
+    # A generated-source edge also forces the in-place builder (javac reads the
+    # generated files from the real filesystem, which atomic staging would hide).
+    assert "AtomicBuilder" not in src
+    assert any("generated source" in n for n in result.notes)
 
 
 def test_emit_wires_cross_module_siblings_and_uses_in_place_builder():

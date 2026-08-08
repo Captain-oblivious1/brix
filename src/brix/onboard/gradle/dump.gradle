@@ -123,12 +123,37 @@ gradle.rootProject { root ->
                         }
                         try { resourceDirs = existingDirList.call(ss.resources.srcDirs) } catch (ignored) {}
                         try { outputDirs = absList.call(ss.output.classesDirs.files) } catch (ignored) {}
+
+                        // Generated source roots: source-set srcDirs that live under
+                        // the module's build dir (a code generator's output wired into
+                        // the source set). Captured existence-agnostic — on a clean
+                        // checkout they do not exist yet, but the emitter must still
+                        // glob them so the compile consumes the generator's output (the
+                        // generator itself is emitted as a bridge; brix infers the edge
+                        // from the output/input overlap).
+                        def buildPrefix
+                        try { buildPrefix = p.layout.buildDirectory.get().asFile.absolutePath }
+                        catch (ignored) { buildPrefix = p.buildDir.absolutePath }
+                        def underBuild = { Collection files ->
+                            files.findAll { it != null && it.absolutePath.startsWith(buildPrefix) }
+                                 .collect { it.absolutePath }
+                        }
+                        def generatedDirs = [] as Set
+                        try { generatedDirs.addAll(underBuild.call(ss.java.srcDirs)) } catch (ignored) {}
+                        try { generatedDirs.addAll(underBuild.call(ss.kotlin.srcDirs)) } catch (ignored) {
+                            try {
+                                def ke = ss.extensions.findByName('kotlin')
+                                if (ke != null) generatedDirs.addAll(underBuild.call(ke.srcDirs))
+                            } catch (ignored2) {}
+                        }
+
                         sourceSets << [
-                            name         : ss.name,
-                            java_dirs    : javaDirs,
-                            kotlin_dirs  : kotlinDirs,
-                            resource_dirs: resourceDirs,
-                            output_dirs  : outputDirs,
+                            name          : ss.name,
+                            java_dirs     : javaDirs,
+                            kotlin_dirs   : kotlinDirs,
+                            resource_dirs : resourceDirs,
+                            output_dirs   : outputDirs,
+                            generated_dirs: (generatedDirs as List).sort(),
                         ]
                     }
                 }

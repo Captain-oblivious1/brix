@@ -238,14 +238,29 @@ and amortized across Gradle/Maven/CMake/Make.
   runtime classpath comes from Gradle; the `@SpringBootApplication` main class is the
   one human-supplied constant (env-overridable). Proven live on petclinic: a 76 MB fat
   jar (142 nested libs) boots with **no** `-classpath` (`Started PetClinicApplicationKt`).
-9. **Onboarder — remaining increments.** Close the remaining **semantic gaps** (main
-   class, compiler plugins) with detection or a prompt; the **generator→compile edge** —
-   feed a bridged generator's output dir into the consuming module's sources/classpath
-   (a generator reading a *sibling* module is still not caught); **coalesce concurrent
-   bridge invocations** (many parallel `gradlew` calls contend on the daemon — batch or
-   serialize); a **one-shot dump+emit** CLI; and, when a project needs it, **more
-   frontends** (Maven/CMake/Make) emitting the same IR. A design doc is still to be
-   written.
+- **Generator→compile edge — DONE.** A codegen task whose output is wired into a
+  module's source set (a `srcDir` under the module's build dir) now feeds the compile:
+  the dumper captures those generated source roots *existence-agnostic* (on a clean
+  checkout they don't exist yet), and the emitter globs each alongside the primary
+  sources (`data.glob(src) + data.glob(generated)`). The generator is emitted as a
+  bridge; brix infers the ordering edge from the output/input overlap (bridge produces
+  `glob(dir/{name})`, compile consumes `glob(dir/{name}.java)`), and the edge forces the
+  in-place builder (javac reads generated files from the real filesystem, which atomic
+  staging would hide). Proven on a synthetic pure-Java codegen build: brix runs the
+  generator bridge, compiles against its output, the app runs, and it's a *real*
+  dependency — changing what the generator emits (v1→v2) recompiles the consumer;
+  no-op rebuild replays. Also fixed a dumper over-filter from the prior increment
+  (`existingDirList` was dropping generated source roots that don't exist at dump time).
+9. **Onboarder — remaining increments.** **Mixed Java+Kotlin modules** — the spine
+   currently classifies a module as one language and globs one source root, so a module
+   with both `.java` and `.kt` (e.g. junit5's `junit-jupiter-api`: 166 `.java` + 1 `.kt`)
+   under-compiles; needs chained kotlinc→javac. *Deferred: the real driver is pure-Java
+   Gradle (confirmed), so this is a junit5-proof concern, not a 1.0 blocker.* Remaining
+   semantic gaps (main class, compiler plugins); **coalesce concurrent bridge
+   invocations** (many parallel `gradlew` calls contend on the daemon — batch or
+   serialize); a **one-shot dump+emit** CLI. Maven/CMake/Make frontends are **not** 1.0
+   blockers (the real monorepo's Java side is Gradle — confirmed). A design doc is still
+   to be written.
 
 ---
 

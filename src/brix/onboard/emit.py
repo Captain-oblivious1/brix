@@ -287,9 +287,21 @@ def _render_module_block(
 
     classpath_expr = cp + "".join(f" + {e}" for e in sib_jar_exprs)
 
+    # A codegen task's output wired into the source set: glob it alongside the
+    # primary sources so the compile consumes generated code. The generator is a
+    # bridge; brix infers the ordering from the output/input overlap.
+    src_expr = f"data.glob({plan['src_glob']!r})" + "".join(
+        f" + data.glob({g!r})" for g in plan["gen_src_globs"]
+    )
+    if plan["gen_src_globs"]:
+        out.append(
+            "    # Generated sources (a bridged codegen task's output) are globbed "
+            "alongside\n    # the primary sources; brix builds the generator first."
+        )
+
     action = "kotlin.JarAction" if lang == "kotlin" else "java.JarAction"
     value_args = [
-        f"source_files=data.glob({plan['src_glob']!r})",
+        f"source_files={src_expr}",
         f"output_file=data.file({plan['jar']!r})",
         f"classes_dir={plan['classes_dir']!r}",
         f"classpath={classpath_expr}",
@@ -321,6 +333,11 @@ def _render_module_block(
         notes.append(
             f"{mpath}: wired {len(sib_paths)} brix-built sibling jar(s) onto the "
             f"compile classpath ({', '.join(sib_paths)})."
+        )
+    if plan["gen_src_globs"]:
+        notes.append(
+            f"{mpath}: globbed {len(plan['gen_src_globs'])} generated source dir(s) "
+            f"into the compile; the producing codegen task runs first as a bridge."
         )
     if plan["springboot"]:
         out.append(_render_springboot_block(plan, project_arg, notes))
@@ -428,6 +445,17 @@ def emit_build_file(
             continue
         slug = _slug(mpath, module["name"])
         res_dirs = ss.get("resource_dirs") or []
+        # Generated source roots (a codegen task's output wired into the source
+        # set): globbed alongside the primary sources so the compile consumes the
+        # generator's output. The generator is emitted as a bridge; brix infers
+        # the ordering edge from the output/input overlap. Skip the primary root
+        # itself (it is not a generated dir) and dedupe.
+        primary_rel = _rel(src_root, root)
+        gen_globs = []
+        for d in ss.get("generated_dirs") or []:
+            drel = _rel(d, root)
+            if drel != primary_rel and drel not in gen_globs:
+                gen_globs.append(drel)
         plans.append({
             "mpath": mpath,
             "module": module,
@@ -435,7 +463,8 @@ def emit_build_file(
             "slug": slug,
             "jar": f"build/brix/{slug}.jar",
             "classes_dir": f"build/brix/{slug}-classes",
-            "src_glob": f"{_rel(src_root, root)}/{glob_suffix}",
+            "src_glob": f"{primary_rel}/{glob_suffix}",
+            "gen_src_globs": [f"{d}/{glob_suffix}" for d in gen_globs],
             "res_rel": _rel(res_dirs[0], root) if res_dirs else None,
             "toolchain": module.get("java_toolchain"),
             "project_deps": list(module.get("project_deps", [])),
@@ -445,9 +474,15 @@ def emit_build_file(
 
     plan_by_path = {p["mpath"]: p for p in plans}
     emitted_paths = set(plan_by_path)
-    has_cross_module = any(
-        any(d in emitted_paths for d in p["project_deps"]) for p in plans
+    has_sibling_edge = any(
+        any(d in emitted_paths and d != p["mpath"] for d in p["project_deps"])
+        for p in plans
     )
+    has_generated_sources = any(p["gen_src_globs"] for p in plans)
+    # Either kind of edge means a foreign tool (javac/kotlinc) reads a
+    # brix-produced file from the real filesystem — a sibling jar via -classpath
+    # or generated sources via a glob — so the atomic overlay must be off.
+    needs_in_place = has_sibling_edge or has_generated_sources
     boot_consts = [
         (_main_class_const(p["slug"]), p["mpath"]) for p in plans if p["springboot"]
     ]
@@ -490,7 +525,7 @@ def emit_build_file(
 
     source = _render(
         ir, root, root_env_var, gradle_env_var, needs_java_worker, body, bridge_body,
-        aliases, has_cross_module=has_cross_module, boot_consts=boot_consts,
+        aliases, has_cross_module=needs_in_place, boot_consts=boot_consts,
     )
     return EmitResult(
         source=source,

@@ -24,6 +24,9 @@
                     "output_dirs": [
                         "{HOME}/Projects/brix_test/spring-petclinic-kotlin/build/classes/java/main",
                         "{HOME}/Projects/brix_test/spring-petclinic-kotlin/build/classes/kotlin/main"
+                    ],
+                    "generated_dirs": [
+                        
                     ]
                 },
                 {
@@ -40,6 +43,9 @@
                     "output_dirs": [
                         "{HOME}/Projects/brix_test/spring-petclinic-kotlin/build/classes/java/test",
                         "{HOME}/Projects/brix_test/spring-petclinic-kotlin/build/classes/kotlin/test"
+                    ],
+                    "generated_dirs": [
+                        
                     ]
                 }
             ],
