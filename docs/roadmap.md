@@ -177,7 +177,8 @@ one backend serves every source tool: **dumpers** (frontends, one per build syst
 → a tool-neutral **IR** (brix's own graph shape + a per-node `fidelity` flag + a
 tool-neutral `bridge` descriptor) → one **emitter** (backend). Because the IR is
 shaped by brix's needs, not any one tool's, the expensive emitter is written once
-and amortized across Gradle/Maven/CMake/Make.
+and amortized across Gradle/Maven/CMake/Make. Full design contract:
+[onboarder.md](onboarder.md).
 
 - **Gradle dumper — DONE.** An injected init script (`brixDumpModel`, run at
   execution phase so classpath resolution is legal) transcribes Gradle's resolved
@@ -268,7 +269,8 @@ and amortized across Gradle/Maven/CMake/Make.
    semantic gaps (main class, compiler plugins); **coalesce concurrent bridge
    invocations** (many parallel `gradlew` calls contend on the daemon — batch or
    serialize). Maven/CMake/Make frontends are **not** 1.0 blockers (the real monorepo's
-   Java side is Gradle — confirmed). A design doc is still to be written.
+   Java side is Gradle — confirmed). The design contract is written
+   ([onboarder.md](onboarder.md)) and is a candidate for a Fable review pass.
 
 ---
 
