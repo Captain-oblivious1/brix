@@ -251,6 +251,15 @@ and amortized across Gradle/Maven/CMake/Make.
   dependency — changing what the generator emits (v1→v2) recompiles the consumer;
   no-op rebuild replays. Also fixed a dumper over-filter from the prior increment
   (`existingDirList` was dropping generated source roots that don't exist at dump time).
+- **One-shot onboard CLI — DONE.** `python -m brix.onboard <project>` runs both halves
+  in one command: dump → emit → `brix_build.py`, then prints the gaps a human must close
+  (toolchain JDK, main classes, compiler plugins) and the wiring decisions taken. Writes
+  to `<project>/brix_build.py` by default with a fail-fast overwrite guard (checked
+  before the expensive dump, so an existing build file is never clobbered without
+  `--force`); `--ir` keeps the intermediate IR, else it goes to a temp file and is
+  discarded. The two halves stay accessible for debugging (`brix.onboard.gradle`,
+  `brix.onboard.emit`). Proven live on petclinic end-to-end + unit-tested (write and
+  overwrite-guard paths) without Gradle via an `ir=` hook. `src/brix/onboard/__main__.py`.
 9. **Onboarder — remaining increments.** **Mixed Java+Kotlin modules** — the spine
    currently classifies a module as one language and globs one source root, so a module
    with both `.java` and `.kt` (e.g. junit5's `junit-jupiter-api`: 166 `.java` + 1 `.kt`)
@@ -258,9 +267,8 @@ and amortized across Gradle/Maven/CMake/Make.
    Gradle (confirmed), so this is a junit5-proof concern, not a 1.0 blocker.* Remaining
    semantic gaps (main class, compiler plugins); **coalesce concurrent bridge
    invocations** (many parallel `gradlew` calls contend on the daemon — batch or
-   serialize); a **one-shot dump+emit** CLI. Maven/CMake/Make frontends are **not** 1.0
-   blockers (the real monorepo's Java side is Gradle — confirmed). A design doc is still
-   to be written.
+   serialize). Maven/CMake/Make frontends are **not** 1.0 blockers (the real monorepo's
+   Java side is Gradle — confirmed). A design doc is still to be written.
 
 ---
 

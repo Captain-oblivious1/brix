@@ -20,6 +20,7 @@ import pytest
 
 from brix.onboard.emit import emit_build_file
 from brix.onboard.gradle import run_dumper
+from brix.onboard.__main__ import run_onboard
 
 FIXTURE = Path(__file__).parent / "fixtures" / "petclinic-kotlin.ir.json"
 
@@ -305,6 +306,54 @@ def test_emit_wires_cross_module_siblings_and_uses_in_place_builder():
     assert "AtomicBuilder" not in src
     assert "CacheBuilder" in src and "IncrementalBuilder" in src
     assert any("sibling" in n for n in result.notes)
+
+
+# -- one-shot onboard (dump + emit) ------------------------------------------
+
+
+def test_onboard_writes_build_file_from_ir(tmp_path):
+    # The write half, no Gradle: feed a captured IR and confirm the one-shot
+    # writes a compilable brix_build.py to the default <project>/brix_build.py.
+    ir = json.loads(FIXTURE.read_text())
+    out_path, result = run_onboard(tmp_path, ir=ir)
+    assert out_path == (tmp_path / "brix_build.py").resolve()
+    assert out_path.exists()
+    compile(out_path.read_text(), "<generated>", "exec")
+    assert result.emitted_modules  # something got emitted
+
+
+def test_onboard_refuses_to_overwrite_without_force(tmp_path):
+    # Fail fast: the overwrite guard trips before any dump, so an existing build
+    # file is never clobbered (and here no Gradle is invoked at all).
+    (tmp_path / "brix_build.py").write_text("# hand-written, keep me\n")
+    ir = json.loads(FIXTURE.read_text())
+    with pytest.raises(FileExistsError):
+        run_onboard(tmp_path, ir=ir)
+    # Untouched.
+    assert (tmp_path / "brix_build.py").read_text() == "# hand-written, keep me\n"
+    # With force, it is replaced.
+    out_path, _ = run_onboard(tmp_path, ir=ir, force=True)
+    assert "hand-written" not in out_path.read_text()
+    compile(out_path.read_text(), "<generated>", "exec")
+
+
+@pytest.mark.skipif(
+    not (_LIVE_PROJECT / "gradlew").exists() or not _java_installations(),
+    reason="needs a local Gradle project with a wrapper and a JDK install",
+)
+def test_live_onboard_end_to_end(tmp_path):
+    # The full front door against real Gradle: dump + emit in one call, keeping
+    # the intermediate IR, producing a compilable build file plus gap notes.
+    out = tmp_path / "brix_build.py"
+    ir_out = tmp_path / "brix-ir.json"
+    out_path, result = run_onboard(
+        _LIVE_PROJECT, out=out, ir_out=ir_out,
+        java_installations=_java_installations(),
+    )
+    assert out_path.exists() and ir_out.exists()
+    compile(out_path.read_text(), "<generated>", "exec")
+    assert len(result.emitted_modules) > 3
+    assert result.notes  # gaps to fill are surfaced
 
 
 @pytest.mark.skipif(
