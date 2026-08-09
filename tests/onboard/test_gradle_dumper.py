@@ -34,7 +34,7 @@ _JDK_DIR = Path.home() / "Projects" / "brix_test" / "jdk"
 
 def _validate_ir(ir: dict) -> None:
     """Assert the document satisfies the onboarding-IR contract."""
-    assert ir["ir_version"] == 1
+    assert ir["ir_version"] == 2
     assert ir["source_tool"] == "gradle"
     assert isinstance(ir["gradle_version"], str) and ir["gradle_version"]
     assert isinstance(ir["root"], str)
@@ -42,9 +42,12 @@ def _validate_ir(ir: dict) -> None:
     assert isinstance(ir["nodes"], list) and ir["nodes"]
 
     for m in ir["modules"]:
-        for key in ("path", "name", "project_dir", "source_sets", "dependencies",
-                    "project_deps", "java_toolchain"):
+        for key in ("path", "name", "project_dir", "build_dir", "source_sets",
+                    "dependencies", "project_deps", "java_toolchain"):
             assert key in m, f"module missing {key}"
+        # Absolute build dir — lets the emitter exclude the source tool's own
+        # intermediates from bridge inputs.
+        assert isinstance(m["build_dir"], str) and m["build_dir"]
         # Portable toolchain version (or null when the build declares none).
         assert m["java_toolchain"] is None or isinstance(m["java_toolchain"], int)
         assert isinstance(m["source_sets"], list)
@@ -213,6 +216,7 @@ def _mini_multimodule_ir():
         d = f"/ws/{name}"
         return {
             "path": path, "name": name, "project_dir": d,
+            "build_dir": f"{d}/build",
             "build_file": f"{d}/build.gradle",
             "source_sets": [{
                 "name": "main", "java_dirs": [f"{d}/src/main/java"],
@@ -231,7 +235,7 @@ def _mini_multimodule_ir():
         }
 
     return {
-        "ir_version": 1, "source_tool": "gradle", "gradle_version": "8.14",
+        "ir_version": 2, "source_tool": "gradle", "gradle_version": "8.14",
         "root": "/ws",
         "modules": [
             module(":core", "core", deps=[":core"]),   # self-dep on purpose
@@ -249,9 +253,10 @@ def _gen_source_ir():
     d = "/ws"
     gen_dir = "/ws/build/generated/sources/brixgen/main"
     return {
-        "ir_version": 1, "source_tool": "gradle", "gradle_version": "8.14", "root": root,
+        "ir_version": 2, "source_tool": "gradle", "gradle_version": "8.14", "root": root,
         "modules": [{
-            "path": ":", "name": "app", "project_dir": d, "build_file": f"{d}/build.gradle",
+            "path": ":", "name": "app", "project_dir": d, "build_dir": f"{d}/build",
+            "build_file": f"{d}/build.gradle",
             "source_sets": [{
                 "name": "main", "java_dirs": [f"{d}/src/main/java"], "kotlin_dirs": [],
                 "resource_dirs": [], "output_dirs": [], "generated_dirs": [gen_dir],
@@ -306,6 +311,114 @@ def test_emit_wires_cross_module_siblings_and_uses_in_place_builder():
     assert "AtomicBuilder" not in src
     assert "CacheBuilder" in src and "IncrementalBuilder" in src
     assert any("sibling" in n for n in result.notes)
+
+
+def _recognized_unmapped_ir():
+    """A Java module whose `war` and `copy` tasks the emitter does NOT map
+    natively — but which the dumper flagged `recognized` (the old, over-broad
+    RECOGNIZED_TYPES). They produce in-root outputs, so they must be bridged, not
+    dropped. `recognized` being True must not protect a task from bridging."""
+    root, d = "/ws", "/ws"
+    return {
+        "ir_version": 2, "source_tool": "gradle", "gradle_version": "8.14", "root": root,
+        "modules": [{
+            "path": ":", "name": "app", "project_dir": d, "build_dir": f"{d}/build",
+            "build_file": f"{d}/build.gradle",
+            "source_sets": [{
+                "name": "main", "java_dirs": [f"{d}/src/main/java"], "kotlin_dirs": [],
+                "resource_dirs": [], "output_dirs": [], "generated_dirs": [],
+            }],
+            "dependencies": {"compileClasspath": []}, "project_deps": [], "java_toolchain": None,
+        }],
+        "nodes": [
+            {
+                "id": ":compileJava", "module": ":", "task_name": "compileJava",
+                "type": "org.gradle.api.tasks.compile.JavaCompile",
+                "inputs": [], "outputs": [], "depends_on": [], "recognized": True,
+                "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": ":compileJava"},
+            },
+            {   # a War: the emitter has no native mapping — must bridge, not drop.
+                "id": ":war", "module": ":", "task_name": "war",
+                "type": "org.gradle.api.tasks.bundling.War",
+                "inputs": [], "outputs": [f"{d}/build/libs/app.war"], "depends_on": [],
+                "recognized": True,  # flagged recognized by an over-broad dumper
+                "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": ":war"},
+            },
+            {   # a Copy staging into build/: likewise recognized-but-unmapped.
+                "id": ":stageDist", "module": ":", "task_name": "stageDist",
+                "type": "org.gradle.api.tasks.Copy",
+                "inputs": [], "outputs": [f"{d}/build/dist"], "depends_on": [],
+                "recognized": True,
+                "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": ":stageDist"},
+            },
+        ],
+    }
+
+
+def test_emit_bridges_recognized_but_unmapped_tasks_instead_of_dropping():
+    # Fix: bridging is decided by what the emitter maps natively (the spine), not
+    # by the advisory `recognized` flag — so a recognized War/Copy the emitter
+    # cannot map is bridged, never silently dropped.
+    result = emit_build_file(_recognized_unmapped_ir())
+    compile(result.source, "<generated>", "exec")
+    assert ":war" in result.bridged_nodes, "War must be bridged, not dropped"
+    assert ":stageDist" in result.bridged_nodes, "Copy must be bridged, not dropped"
+    # The Jar/compile spine members are still handled natively (not bridged).
+    assert ":compileJava" not in result.bridged_nodes
+
+
+def _out_of_sourceset_input_ir():
+    """A module with a codegen bridge that reads a file *outside* any source set
+    (an OpenAPI schema at the module root) and also lists a build-dir intermediate
+    among its inputs. The out-of-source-set file must become a bridge input (else
+    editing it serves stale output); the build-dir intermediate must not (brix
+    does not produce it; it would key on nothing or form a cycle)."""
+    root, d = "/ws", "/ws"
+    return {
+        "ir_version": 2, "source_tool": "gradle", "gradle_version": "8.14", "root": root,
+        "modules": [{
+            "path": ":", "name": "app", "project_dir": d, "build_dir": f"{d}/build",
+            "build_file": f"{d}/build.gradle",
+            "source_sets": [{
+                "name": "main", "java_dirs": [f"{d}/src/main/java"], "kotlin_dirs": [],
+                "resource_dirs": [], "output_dirs": [], "generated_dirs": [],
+            }],
+            "dependencies": {"compileClasspath": []}, "project_deps": [], "java_toolchain": None,
+        }],
+        "nodes": [
+            {
+                "id": ":compileJava", "module": ":", "task_name": "compileJava",
+                "type": "org.gradle.api.tasks.compile.JavaCompile",
+                "inputs": [], "outputs": [], "depends_on": [], "recognized": True,
+                "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": ":compileJava"},
+            },
+            {
+                "id": ":genApi", "module": ":", "task_name": "genApi",
+                "type": "org.gradle.api.DefaultTask",
+                "inputs": [
+                    f"{d}/openapi.yaml",                 # out-of-source-set: must be tracked
+                    f"{d}/build/classes/java/main",       # build intermediate: must be dropped
+                ],
+                "outputs": [f"{d}/build/generated/api"], "depends_on": [], "recognized": False,
+                "fidelity": "authoritative", "bridge": {"tool": "gradle", "target": ":genApi"},
+            },
+        ],
+    }
+
+
+def test_emit_bridge_tracks_out_of_sourceset_inputs_and_drops_build_dir():
+    # Fix: bridge inputs are the task's real declared inputs (in-root, non-build)
+    # unioned with the coarse source dirs — so an out-of-source-set schema is
+    # tracked, while the source tool's own build/ intermediates are excluded.
+    result = emit_build_file(_out_of_sourceset_input_ir())
+    compile(result.source, "<generated>", "exec")
+    src = result.source
+    # The schema file is captured, so editing it re-invokes the generator.
+    assert "data.file('openapi.yaml')" in src
+    # The build-dir intermediate is NOT a bridge input (brix does not produce it).
+    assert "build/classes/java/main" not in src
+    # The coarse source-dir backstop is still present.
+    assert "data.glob('src/main/java/{name}')" in src
 
 
 # -- one-shot onboard (dump + emit) ------------------------------------------

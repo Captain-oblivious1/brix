@@ -1,5 +1,5 @@
 {
-    "ir_version": 1,
+    "ir_version": 2,
     "source_tool": "gradle",
     "gradle_version": "9.6.1",
     "root": "{HOME}/Projects/brix_test/spring-petclinic-kotlin",
@@ -8,6 +8,7 @@
             "path": ":",
             "name": "spring-petclinic-kotlin",
             "project_dir": "{HOME}/Projects/brix_test/spring-petclinic-kotlin",
+            "build_dir": "{HOME}/Projects/brix_test/spring-petclinic-kotlin/build",
             "build_file": "{HOME}/Projects/brix_test/spring-petclinic-kotlin/build.gradle.kts",
             "source_sets": [
                 {

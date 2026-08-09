@@ -96,6 +96,7 @@ requires `source_tool == "gradle"` today (other tools need their own classpath a
 | `path`           | Gradle project path (`":"`, `":service-a"`) — the identity used everywhere |
 | `name`           | short name (`app`) |
 | `project_dir`    | absolute directory |
+| `build_dir`      | absolute build-output directory — lets the emitter exclude the source tool's own intermediates (`build/classes/…`) from bridge inputs (§5) |
 | `build_file`     | absolute path or `null` |
 | `source_sets`    | list; each `{name, java_dirs, kotlin_dirs, resource_dirs, output_dirs, generated_dirs}` |
 | `dependencies`   | `{configuration → [resolved jar paths]}` (compile/runtime/test…) |
@@ -118,7 +119,7 @@ emitter never globs/jars a declared-but-absent `src/main/resources`).
 | `type`       | de-decorated task class (`...JavaCompile`; Gradle's `_Decorated`/`$$Lambda` suffixes stripped) |
 | `inputs` / `outputs` | declared absolute paths |
 | `depends_on` | task-graph edges (task paths) |
-| `recognized` | `true` if `type` is one the emitter maps natively (drives §5); never affects correctness |
+| `recognized` | advisory: `true` if `type` is one the emitter maps natively (the spine). **Never affects correctness** — the emitter decides bridging by spine-membership, not this flag (§5), so a type flagged recognized but not actually mapped is still bridged, not dropped |
 | `fidelity`   | `authoritative` if recognized **or** it declares outputs; else `verify` (a node with no declared outputs and an unknown type — the emitter cannot trust it blind; reserved for a future double-build-and-diff pass) |
 | `bridge`     | tool-neutral descriptor `{tool, target}` — how to reproduce this node by invoking the source tool for it |
 
@@ -161,25 +162,42 @@ comment/note so a human knows which JDK to point it at.
 
 ### Bridges (`_bridge_candidates`, `_emit_bridge_block`)
 
-Any node that is not recognized, is not part of the spine (`_SPINE_SUFFIXES`), is not an
-environment/IDE task (`_BRIDGE_TYPE_BLOCKLIST` — `Wrapper`, `UpdateDaemonJvm`,
-Eclipse/IDEA generation; running these as build steps is wrong), and produces at least
-one in-root output, is emitted as a cached `ExternalProcessAction` that re-invokes the
-source tool for exactly that target (`{gradle} --console=plain -q :module:task`).
+Any node the emitter does **not** map natively (i.e. not a spine type,
+`_SPINE_SUFFIXES`), that is not an environment/IDE task (`_BRIDGE_TYPE_BLOCKLIST` —
+`Wrapper`, `UpdateDaemonJvm`, Eclipse/IDEA generation; running these as build steps is
+wrong), and produces at least one in-root output, is emitted as a cached
+`ExternalProcessAction` that re-invokes the source tool for exactly that target
+(`{gradle} --console=plain -q :module:task`). Membership is by spine-mapping, not the
+advisory `recognized` flag — so a `War`/`Copy`/`Groovy`/`Scala` task the emitter cannot
+map is bridged, never silently dropped.
 
-The safety argument for a bridge's inputs is the load-bearing idea:
+The safety argument for a bridge's inputs (`_bridge_input_exprs`) is the load-bearing
+idea. Inputs are the **union** of two sources, so the design over-approximates without
+missing a change:
 
-- Inputs are a **coarse over-approximation** — the module's source/resource dirs and its
-  build file, **never the build-output dir** (which would create an output→input cycle).
-- Over-approximation is **safe**: it makes brix re-invoke the tool more often than
-  strictly necessary, but it can **never serve a stale output**. Under-approximation
-  would be the unsafe direction, so we deliberately err coarse.
-- Outputs are captured file-or-directory: a directory output becomes `FileData(dir)` plus
-  a recursive `glob(dir/{name})` — the same idiom `JavaCompile` uses to capture class
-  files it cannot enumerate in advance.
+- The task's **own declared inputs** (from the IR), filtered to those that are in-root
+  and **not under the module's build dir**. This is what catches an input a source-set
+  glob cannot see — an `openapi.yaml` schema, `*.proto` files, `gradle/libs.versions.toml`
+  — so editing it re-keys the bridge.
+- A coarse **backstop**: every declared source/resource dir (again never the build dir).
 
-The one input hole this leaves is a generator that reads a **sibling module**; that is
-the cross-module bridge-input gap, still open (§9).
+Build-dir inputs are deliberately excluded. They are the *source tool's own*
+intermediates (`build/classes/…`) that brix does not itself produce, so keying on them
+would either find nothing (stale) or form an output→input cycle — and because the bridge
+re-runs the whole target subtree via the source tool, the true upstream is the sources
+below, which the union already tracks. The same filter drops a generated `srcDir` that
+leaked into `java_dirs` at dump time.
+
+Over-approximation is **safe**: it makes brix re-invoke the tool more often than strictly
+necessary, but it can **never serve a stale output**. Under-approximation would be the
+unsafe direction, so we deliberately err coarse.
+
+Outputs are captured file-or-directory: a directory output becomes `FileData(dir)` plus
+a recursive `glob(dir/{name})` — the same idiom `JavaCompile` uses to capture class files
+it cannot enumerate in advance.
+
+The one input hole this leaves is a generator that reads a **sibling module**'s tree;
+that is the cross-module bridge-input gap, still open (§9).
 
 ## 6. The three wiring rules the spine adds
 
@@ -256,9 +274,26 @@ the hand-authored `examples/kotlin_multimodule/` build follows.
   `junit-jupiter-api`: 166 `.java` + 1 `.kt`) under-compiles; it needs a chained
   kotlinc→javac spine. *Deferred: the real driver is pure-Java Gradle, so this is a
   junit5-proof concern, not a 1.0 blocker.*
-- **Generator reading a sibling module.** The coarse per-module bridge inputs (§5) do not
-  capture a generator that reads another module's sources — the remaining cross-module
-  bridge-input hole.
+- **Generator reading a sibling module.** The bridge inputs (§5) capture a task's own
+  declared in-root inputs and its module's source dirs, but not a generator that reads
+  *another* module's sources — the remaining cross-module bridge-input hole.
+- **Pure Groovy/Scala modules produce nothing.** The spine maps only Java/Kotlin; a
+  module with only `GroovyCompile`/`ScalaCompile` is skipped, and its `Jar` (a spine type)
+  is neither emitted nor bridged, so no jar is produced. Its non-jar tasks *are* bridged.
+  *Deferred: brix targets pure-Java Gradle; a native Groovy/Scala spine is not a 1.0 goal.
+  A module skipped despite having a compile task should at least emit a loud note.*
+- **`War` modules also emit a redundant thin jar.** A `War` module has a `JavaCompile`, so
+  it gets a native jar spine *and* a bridged `war`. The war (the real product) is correct;
+  the jar is a harmless extra. *Deferred: needs module product-type detection to suppress
+  the jar; correctness is fine (nothing stale or dropped).*
+- **`project_deps` are not configuration-scoped.** The dumper unions compile/runtime/test
+  project deps, so a `testImplementation`-only sibling is wired onto the *main* compile
+  classpath (and flips the build to the in-place builder). Over-wiring, not stale output.
+  *Deferred: needs per-configuration project deps in the IR.*
+- **Spring Boot runtime classpath is not sibling-substituted.** The fat jar's
+  `runtimeClasspath` comes straight from Gradle with no brix-sibling substitution, so a
+  Boot module depending on a brix-built sibling could ship without it. *Deferred: rare
+  (Boot + sibling); apply the §6 compile-classpath substitution to the runtime one.*
 - **Coalesce concurrent bridge invocations.** Many bridges firing parallel `gradlew`
   calls can contend on the Gradle daemon; batch or serialize. Opportunistic — a
   pure-Java target is mostly native spine.
@@ -272,9 +307,11 @@ the hand-authored `examples/kotlin_multimodule/` build follows.
 - **The IR is the contract.** A new frontend produces this schema; it does not get to
   add tool-specific fields the emitter must special-case. Shape changes bump
   `ir_version`.
-- **Correctness over speed in bridges.** Keep bridge inputs coarse/over-approximate;
-  never narrow them to the point where a change could be missed. Re-running too much is
-  acceptable; a stale output is not.
+- **Correctness over speed in bridges.** Bridge inputs are the union of the task's own
+  declared in-root, non-build inputs and a coarse source-dir backstop (§5). Keep both;
+  never narrow to where a change could be missed. Re-running too much is acceptable; a
+  stale output is not. Bridge by what the emitter maps natively, never by the advisory
+  `recognized` flag — or a type the emitter cannot map is silently dropped.
 - **Never guess a semantic gap.** A fact the source model cannot carry (main class,
   compiler plugin) is a `# TODO` + a note, never an inferred value.
 - **Portable fact in the IR, machine fact in an env var.** Toolchain version travels in

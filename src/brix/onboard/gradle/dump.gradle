@@ -24,23 +24,22 @@ import groovy.json.JsonOutput
 import org.gradle.api.artifacts.ProjectDependency
 
 // The onboarder's IR version. Bump when the schema changes shape.
-def IR_VERSION = 1
+def IR_VERSION = 2
 
-// Task types the emitter is expected to map to a *native* brix atom rather than
-// bridge. Membership drives `recognized`; it never affects correctness (an
-// unrecognized task is still emitted, just flagged for bridging).
+// Task types the emitter maps to a *native* brix atom (the compile+jar+resources
+// spine). Membership drives only the advisory `recognized` flag; it never affects
+// correctness — the emitter bridges anything it does not natively map (see
+// `_bridge_candidates`), so an out-of-set task is still emitted, just bridged.
+// Keep this honest: list *only* types the emitter actually maps, or `recognized`
+// starts lying (a `War`/`Copy`/`Groovy`/`Scala` task the emitter does not map
+// must read as unrecognized so its bridge is not surprising).
 def RECOGNIZED_TYPES = [
     'org.gradle.api.tasks.compile.JavaCompile',
-    'org.gradle.api.tasks.compile.GroovyCompile',
-    'org.gradle.api.tasks.scala.ScalaCompile',
     'org.jetbrains.kotlin.gradle.tasks.KotlinCompile',
-    'org.jetbrains.kotlin.gradle.tasks.KotlinCompileCommon',
     'org.gradle.api.tasks.testing.Test',
     'org.gradle.api.tasks.bundling.Jar',
     'org.gradle.jvm.tasks.Jar',
-    'org.gradle.api.tasks.bundling.War',
     'org.gradle.language.jvm.tasks.ProcessResources',
-    'org.gradle.api.tasks.Copy',
 ] as Set
 
 // Configurations we resolve for the dependency classpath model. Only resolvable
@@ -102,6 +101,13 @@ gradle.rootProject { root ->
             def nodes = []
 
             root.allprojects { p ->
+                // The module's build dir (absolute). Used both to recognize
+                // generated source roots and to let the emitter exclude the
+                // source tool's own intermediates from bridge inputs.
+                def buildPrefix
+                try { buildPrefix = p.layout.buildDirectory.get().asFile.absolutePath }
+                catch (ignored) { buildPrefix = p.buildDir.absolutePath }
+
                 // -- module model: source sets ------------------------------
                 def sourceSets = []
                 def ssContainer = p.extensions.findByName('sourceSets')
@@ -131,9 +137,6 @@ gradle.rootProject { root ->
                         // glob them so the compile consumes the generator's output (the
                         // generator itself is emitted as a bridge; brix infers the edge
                         // from the output/input overlap).
-                        def buildPrefix
-                        try { buildPrefix = p.layout.buildDirectory.get().asFile.absolutePath }
-                        catch (ignored) { buildPrefix = p.buildDir.absolutePath }
                         def underBuild = { Collection files ->
                             files.findAll { it != null && it.absolutePath.startsWith(buildPrefix) }
                                  .collect { it.absolutePath }
@@ -194,6 +197,7 @@ gradle.rootProject { root ->
                     path          : p.path,
                     name          : p.name,
                     project_dir   : p.projectDir.absolutePath,
+                    build_dir     : buildPrefix,
                     build_file    : p.buildFile.exists() ? p.buildFile.absolutePath : null,
                     source_sets   : sourceSets,
                     dependencies  : deps,

@@ -101,15 +101,21 @@ def _in_root(path: str, root: str) -> bool:
 
 
 def _bridge_candidates(ir: dict) -> list[dict]:
-    """Unrecognized tasks that produce real, in-root build artifacts — the work a
-    bridge delegates back to the source tool. Excludes the native spine, no-op /
-    reporting tasks that declare nothing, environment/IDE tasks (blocklist), and
-    tasks whose only outputs live outside the project (nothing brix can capture)."""
+    """Tasks the native spine does *not* emit but that produce real, in-root build
+    artifacts — the work a bridge delegates back to the source tool. Excludes the
+    native spine itself (``_SPINE_SUFFIXES``), no-op/reporting tasks that declare
+    nothing, environment/IDE tasks (blocklist), and tasks whose only outputs live
+    outside the project (nothing brix can capture).
+
+    Membership is decided by what the emitter *maps natively* (the spine
+    suffixes), **not** by the IR's advisory ``recognized`` flag: a type the dumper
+    flags recognized but the emitter never maps (``Copy``, ``War``,
+    ``GroovyCompile``, ``ScalaCompile``) must still be bridged, or its output
+    silently vanishes. This is what keeps ``recognized`` a hint that never affects
+    correctness."""
     root = ir["root"]
     out = []
     for n in ir["nodes"]:
-        if n["recognized"]:
-            continue
         if any(n["type"].endswith(s) for s in _SPINE_SUFFIXES):
             continue
         if any(n["type"].endswith(s) for s in _BRIDGE_TYPE_BLOCKLIST):
@@ -157,21 +163,66 @@ def _main_class_const(slug: str) -> str:
     return "MAIN_CLASS_" + re.sub(r"[^0-9A-Za-z]", "_", slug).upper()
 
 
-def _bridge_input_globs(module: dict, root: str) -> list[str]:
-    """Coarse, cycle-free over-approximation of what a module's task reads: every
-    declared source/resource directory (never the build-output dir). Over-broad
-    is safe — it re-invokes the source tool more often, never serves stale. The
-    remaining hole (a generator reading a *sibling* module) is the same
-    cross-module wiring gap tracked for a later increment."""
-    dirs: list[str] = []
-    seen = set()
+def _under(path: str, prefix: str | None) -> bool:
+    """True if ``path`` is ``prefix`` or lives beneath it."""
+    if not prefix:
+        return False
+    return path == prefix or path.startswith(prefix.rstrip("/") + "/")
+
+
+def _looks_like_file(rel: str) -> bool:
+    """A dotted last segment means a file; else a directory — the same heuristic
+    the output side (`_output_exprs`) uses."""
+    return "." in rel.rsplit("/", 1)[-1]
+
+
+def _bridge_input_exprs(node: dict, module: dict, root: str) -> list[str]:
+    """Data expressions for what a bridged task reads, so brix re-invokes the
+    source tool exactly when its inputs change. Two sources, unioned:
+
+    * The task's **own declared inputs** (from the IR) that are in-root and *not*
+      under the module's build dir. This is what catches inputs a source-set glob
+      would miss entirely — an ``openapi.yaml`` schema, ``*.proto`` files,
+      ``gradle/libs.versions.toml``. Build-dir inputs are deliberately dropped:
+      they are the source tool's *own* intermediates (``build/classes/...``) that
+      brix does not produce, so keying on them would either find nothing (stale)
+      or form an output→input cycle — and the bridge re-runs the whole target
+      subtree via the source tool anyway, so the true upstream is the sources
+      below.
+    * A coarse **backstop**: every declared source/resource dir (again never the
+      build dir — see the build-dir filter, which also drops a generated ``srcDir``
+      that leaked into ``java_dirs``). Over-broad is safe — it re-invokes the tool
+      more often, never serves stale.
+
+    The remaining hole is a generator that reads a *sibling* module's tree; that
+    is the cross-module bridge-input gap tracked separately."""
+    build_dir = module.get("build_dir")
+    exprs: list[str] = []
+    seen: set[str] = set()
+
+    def add(rel: str, code: str) -> None:
+        if rel not in seen:
+            seen.add(rel)
+            exprs.append(code)
+
+    # Precise declared inputs the coarse source-dir backstop cannot see.
+    for i in node.get("inputs", []):
+        if not _in_root(i, root) or _under(i, build_dir):
+            continue
+        rel = _rel(i, root)
+        if _looks_like_file(rel):
+            add(rel, f"data.file({rel!r})")
+        else:
+            add(rel, f"data.glob({(rel + '/{name}')!r})")
+
+    # Coarse source/resource backstop (never the build-output dir).
     for ss in module["source_sets"]:
         for d in ss.get("java_dirs", []) + ss.get("kotlin_dirs", []) + ss.get("resource_dirs", []):
+            if _under(d, build_dir):
+                continue
             rel = _rel(d, root)
-            if rel not in seen:
-                seen.add(rel)
-                dirs.append(rel)
-    return dirs
+            add(rel, f"data.glob({(rel + '/{name}')!r})")
+    return exprs
 
 
 def _output_exprs(node: dict, root: str) -> list[tuple[str, str]]:
@@ -196,8 +247,9 @@ def _output_exprs(node: dict, root: str) -> list[tuple[str, str]]:
 def _emit_bridge_block(node: dict, module: dict, root: str) -> str:
     """A cached ExternalProcessAction that reproduces one non-spine task by
     invoking the source tool for exactly that target. brix caches its outputs
-    keyed by the coarse module inputs; a down/absent change just re-invokes the
-    tool, which no-ops if nothing changed."""
+    keyed by the task's declared inputs unioned with a coarse source-dir backstop
+    (`_bridge_input_exprs`); a change just re-invokes the tool, which no-ops if
+    nothing changed."""
     target = node["bridge"]["target"]
     cmd = "{gradle} --console=plain -q " + target
     out: list[str] = []
@@ -211,10 +263,10 @@ def _emit_bridge_block(node: dict, module: dict, root: str) -> str:
     bf = module.get("build_file")
     if bf and _in_root(bf, root):
         out.append(f'                "buildfile": data.file({_rel(bf, root)!r}),')
-    src_dirs = _bridge_input_globs(module, root)
-    if src_dirs:
-        for i, d in enumerate(src_dirs):
-            out.append(f'                "src{i}": data.glob({(d + "/{name}")!r}),')
+    in_exprs = _bridge_input_exprs(node, module, root)
+    if in_exprs:
+        for i, e in enumerate(in_exprs):
+            out.append(f'                "in{i}": {e},')
     else:
         # No declared source dirs (e.g. an aggregator module): watch the whole
         # module tree minus its build-output dir (avoids an output→input cycle).
@@ -518,8 +570,8 @@ def emit_build_file(
         top = sorted(by_type.items(), key=lambda kv: -kv[1])[:8]
         notes.append(
             f"{len(bridged)} non-spine task(s) bridged back to gradle (cached by "
-            f"coarse per-module inputs; a generator reading a sibling module is a "
-            f"known cross-module gap); top types: "
+            f"declared inputs + a source-dir backstop; a generator reading a "
+            f"sibling module is a known cross-module gap); top types: "
             + ", ".join(f"{t.split('.')[-1]}×{c}" for t, c in top)
         )
 
