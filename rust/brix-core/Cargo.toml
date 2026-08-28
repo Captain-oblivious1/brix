@@ -12,6 +12,7 @@ regex = "1"
 # Jar reading for the jvm-abi content identity (jvmabi.rs). Deflate only —
 # jars are plain zip archives; no encryption/zstd/etc.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+fancy-regex = "0.19.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"  # SIGTERM for graceful worker teardown (workers.rs)

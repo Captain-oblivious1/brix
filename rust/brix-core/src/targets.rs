@@ -141,9 +141,10 @@ fn regex_admits(atom: &DataAtom, bindings: &[(String, String)]) -> Option<bool> 
     let DataAtom::Regex { pattern } = atom else {
         return None;
     };
-    // Compile the collection regex exactly as `regex_match` does; a pattern the
-    // engine cannot compile tells us nothing about membership.
-    let compiled = regex::Regex::new(&format!(r"\A(?:{pattern})\z")).ok()?;
+    // Compile the collection regex exactly as `regex_match` does (fancy-regex,
+    // so lookaround collections are decidable here too); a pattern that will
+    // not compile tells us nothing about membership.
+    let compiled = fancy_regex::Regex::new(&format!(r"\A(?:{pattern})\z")).ok()?;
     let names: Vec<String> = compiled.capture_names().flatten().map(String::from).collect();
     let relevant: Vec<(String, String)> =
         bindings.iter().filter(|(k, _)| names.contains(k)).cloned().collect();
@@ -349,13 +350,33 @@ mod tests {
     }
 
     #[test]
-    fn regex_admits_conservative_when_uncheckable() {
-        // Lookaround the `regex` crate cannot compile -> undecidable, not a reject.
-        let look = regex(r"src/(?P<video>(?!rights/)[^/]+)\.py");
-        assert_eq!(regex_admits(&look, &b(&[("video", "rights")])), None);
+    fn regex_admits_handles_lookaround() {
+        // fancy-regex compiles the animation build's negative-lookahead
+        // container guard, so the collection-blind case is now *decidable* in
+        // the Rust engine, not merely kept-conservative. `rights/` is a
+        // container: the scene regex refuses video="rights" + a scene...
+        let scenes = regex(
+            r"src/videos/(?P<video>(?:rights)/[0-9][^/]*|(?!(?:rights)/)[^/]+)/(?P<scene>[0-9][^/]*)\.py",
+        );
+        assert_eq!(
+            regex_admits(&scenes, &b(&[("video", "rights"), ("scene", "02_islandEmperor")])),
+            Some(false),
+        );
+        // ...but a genuinely-nested member is admitted.
+        assert_eq!(
+            regex_admits(&scenes, &b(&[("video", "rights/02_islandEmperor"), ("scene", "00_title")])),
+            Some(true),
+        );
+    }
+
+    #[test]
+    fn regex_admits_conservative_when_unprovable() {
         // A name the collection does not bind -> nothing to prove.
         let plain = regex(r"src/(?P<video>[^/]+)\.py");
         assert_eq!(regex_admits(&plain, &b(&[("scene", "02")])), None);
+        // A pattern that will not compile at all -> undecidable, not a reject.
+        let broken = regex(r"src/(?P<video>[a-z)\.py");
+        assert_eq!(regex_admits(&broken, &b(&[("video", "x")])), None);
         // A non-regex atom is never a reject.
         assert_eq!(
             regex_admits(&DataAtom::Glob { template: "x".into(), content_key: None, exclude: vec![] }, &b(&[("video", "x")])),

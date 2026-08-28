@@ -160,8 +160,14 @@ impl DataAtom {
             return None;
         };
         // \A..\z anchors both ends -> full match, matching Python re.fullmatch.
-        let re = regex::Regex::new(&format!(r"\A(?:{pattern})\z")).ok()?;
-        let caps = re.captures(path)?;
+        // fancy-regex (not the `regex` crate) so author collections may use
+        // lookaround, e.g. a `(?!container/)` guard distinguishing a container
+        // directory from a real member. It falls back to the linear `regex`
+        // engine for patterns without fancy features, so the common case keeps
+        // its guarantees; `captures` returns a Result because a fancy pattern
+        // can hit the backtrack limit — a match error is treated as no match.
+        let re = fancy_regex::Regex::new(&format!(r"\A(?:{pattern})\z")).ok()?;
+        let caps = re.captures(path).ok()??;
         let mut out = Vec::new();
         for name in re.capture_names().flatten() {
             if let Some(m) = caps.name(name) {
