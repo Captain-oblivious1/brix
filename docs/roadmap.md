@@ -19,7 +19,7 @@ Two governing rules, in tension, and the order below resolves them:
   API (track 3) *mirrors* the Python one, so it must come *after* that surface has
   stopped churning, or it re-mirrors every change.
 
-### Tier 0 — correctness bug — **FIXED** (both engines, fully)
+### Tier 0 — correctness bugs — **ALL FIXED** (both engines, fully)
 
 **Fixed 2026-08-27.** Selection now drops any candidate whose bindings a
 collection in its expansion spine *provably* refuses, before `_specificity` is
@@ -43,7 +43,7 @@ they never did before) and proves the collection-blind rejection, so the
 default engine is fully correct. The original diagnosis is kept below as the
 record.
 
-0. **Collection-blind target selection.** Target selection can manufacture an
+0. **Collection-blind target selection — FIXED, see above.** Target selection can manufacture an
    action for a binding its own collection rejects — and then caches the wrong
    artifact over the right one. Found in `~/Projects/animation` 2026-08-27. Asking for a *nested* video
    (`build output/videos/rights/02_islandEmperor.mpg`, where `rights/` is a
@@ -86,6 +86,54 @@ record.
    selection/planner layering. Contributing factor on the caller's side, worth
    noting but not brix's to fix: `animation.render` exits 0 when it renders no
    scene, which is what let this stay silent.
+
+0.1. **FIXED — `RegexData.substitute` silently declined a named group whose body has
+   parentheses — so an outer binding never narrowed an inner regex collection.**
+   **Fixed 2026-08-27.** `RegexData.substitute` now narrows a group whose body
+   contains nested groups (a lookahead alternation) exactly as it does a plain
+   `[^/]+`, so binding `{video}` narrows the `{scene}` collection to that one
+   video. Done by making both engines share the paren-aware scanner the item 0
+   fix introduced, lifted to `data.py`/`data.rs` (`_fill_named_groups` /
+   `fill_named_groups`) as the single source of truth for `substitute` *and* the
+   membership check — and hardened with character-class awareness so a `)` inside
+   `[...]` cannot fool the depth counter. The Rust side keeps its byte-exact
+   `re_escape` (fingerprint material) rather than `regex::escape`, verified
+   byte-identical to the old substitution on plain groups. On the unreachable
+   malformed-pattern branch (a valid `RegexData` cannot have unbalanced groups —
+   construction compiles the regex) both engines degrade to unchanged, staying in
+   lockstep. End-to-end: the animation nested video now plans its one real scene →
+   combine → finalize (both engines agree), and the build-file lookahead spelling
+   is restored — the workaround is gone. The original diagnosis is kept below.
+
+   Found in `~/Projects/animation` 2026-08-27, immediately behind item 0 and
+   exposed by fixing it. `data.py`'s substitution matched a named group with
+   `\(\?P<name>(?:[^()\\]|\\.)*\)` — a body with no parens — and its docstring
+   states the constraint ("Group bodies must not contain nested groups"). But
+   nothing enforces it: on a body that *does* contain a group it matches
+   nothing, the pattern comes back unchanged, and `substitute` returns `self`.
+   The caller cannot tell the difference between "narrowed" and "declined".
+
+   Concretely: animation's video regex has to say "a digit-prefixed segment
+   inside a container directory, **or** a segment that is not a container" —
+   the second half is a negative lookahead, which is parentheses. So binding
+   `video="rights/02_islandEmperor"` left the `scenes` collection at its
+   project-wide pattern, and brix expanded
+   `render rights/02_islandEmperor/{scene}` over **all 80 scenes in the
+   project**, pairing that video with scene names belonging to other videos
+   (`render rights/02_islandEmperor/00_title` → `ModuleNotFoundError`). Present in
+   **both engines**, from the same spelling: `src/brix/data.py:152` and
+   `rust/brix-core/src/data.rs:202`. And in both, the item 0 fix already added
+   the correct nested-paren-aware routine next door —
+   `targets._fill_named_groups` and `rust/brix-core/src/targets.rs:59` — whose
+   comment says outright that `RegexData.substitute` cannot do this. So the fix
+   is to give `RegexData` that same capability (or have it delegate to it) on
+   each side, and to make an unsubstitutable binding *loud* rather than a silent
+   no-op: silence is what made this cost a debugging session rather than a
+   glance, and it will read as "brix ignored my binding" every time.
+
+   (Historical: the build file briefly worked around this by enumerating flat
+   video stems instead of a lookahead. The workaround has been reverted now that
+   the fix landed — `animation/brix_build.py` is back to the natural lookahead.)
 
 ### Tier A — close out the in-flight capability (test-impact) — **DONE**
 

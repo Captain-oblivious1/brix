@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 
 from .actions import Action, ExpandAll, Expandable
-from .data import DataExpr, FileData, GlobData, RegexData
+from .data import DataExpr, FileData, GlobData, RegexData, _fill_named_groups
 from .patterns import overlaps
 
 _PROBE = "\x00target\x00"
@@ -72,45 +72,6 @@ def _specificity(bindings: dict[str, str]) -> float:
 # it cannot decide keeps the candidate, preserving selection's conservatism.
 
 _REGEX_META = set(".^$*+?{}[]()|")
-
-
-def _fill_named_groups(pattern: str, values: dict[str, str]) -> tuple[str | None, bool]:
-    """Replace each ``(?P<name>...)`` whose name is in ``values`` with the
-    (escaped) value, matching nested parens so bodies like ``(?:a)|(?!b)c`` are
-    handled — `RegexData.substitute` cannot, it forbids nested groups. Returns
-    ``(filled, all_pinned)``; ``filled`` is None on a malformed pattern, and
-    ``all_pinned`` is False if any named group was left unresolved."""
-    out: list[str] = []
-    i, n = 0, len(pattern)
-    all_pinned = True
-    while i < n:
-        head = re.match(r"\(\?P<([A-Za-z_]\w*)>", pattern[i:])
-        if head:
-            name = head.group(1)
-            depth, k = 1, i + head.end()
-            while k < n and depth:
-                c = pattern[k]
-                if c == "\\":
-                    k += 2
-                    continue
-                depth += 1 if c == "(" else -1 if c == ")" else 0
-                k += 1
-            if depth != 0:
-                return None, False  # unbalanced — do not guess
-            if name in values:
-                out.append(re.escape(values[name]))
-            else:
-                all_pinned = False
-                out.append(pattern[i:k])
-            i = k
-            continue
-        if pattern[i] == "\\":
-            out.append(pattern[i : i + 2])
-            i += 2
-            continue
-        out.append(pattern[i])
-        i += 1
-    return "".join(out), all_pinned
 
 
 def _literal_of(pattern: str) -> str | None:

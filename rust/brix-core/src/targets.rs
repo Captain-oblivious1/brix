@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use crate::actions::Action;
-use crate::data::DataAtom;
+use crate::data::{fill_named_groups, DataAtom};
 use crate::patterns::overlaps;
 use crate::planner::atoms_overlap;
 use crate::spec::ForcedOrder;
@@ -37,76 +37,6 @@ fn specificity(bindings: &[(String, String)]) -> usize {
 // `_bindings_refused` in `src/brix/targets.py`.
 
 const REGEX_META: &str = ".^$*+?{}[]()|";
-
-/// If `chars[i..]` opens a `(?P<name>` group, return `(name, index_after_'>')`.
-fn parse_group_head(chars: &[char], i: usize) -> Option<(String, usize)> {
-    let head: Vec<char> = "(?P<".chars().collect();
-    if i + head.len() > chars.len() || chars[i..i + head.len()] != head[..] {
-        return None;
-    }
-    let mut j = i + head.len();
-    let mut name = String::new();
-    while j < chars.len() && chars[j] != '>' {
-        name.push(chars[j]);
-        j += 1;
-    }
-    if j >= chars.len() || name.is_empty() {
-        return None;
-    }
-    Some((name, j + 1)) // skip the '>'
-}
-
-/// Replace each `(?P<name>...)` whose name is bound with the escaped value,
-/// matching nested parens so bodies like `(?:a)|(?!b)c` are handled (the
-/// regex-crate `substitute` cannot — it forbids nested groups). Returns
-/// `(filled, all_pinned)`; `None` on an unbalanced group.
-fn fill_named_groups(pattern: &str, values: &[(String, String)]) -> Option<(String, bool)> {
-    let chars: Vec<char> = pattern.chars().collect();
-    let n = chars.len();
-    let mut out = String::new();
-    let mut all_pinned = true;
-    let mut i = 0;
-    while i < n {
-        if let Some((name, body_start)) = parse_group_head(&chars, i) {
-            let (mut depth, mut k) = (1i32, body_start);
-            while k < n && depth > 0 {
-                match chars[k] {
-                    '\\' => {
-                        k += 2;
-                        continue;
-                    }
-                    '(' => depth += 1,
-                    ')' => depth -= 1,
-                    _ => {}
-                }
-                k += 1;
-            }
-            if depth != 0 {
-                return None; // unbalanced — do not guess
-            }
-            match values.iter().find(|(nm, _)| nm == &name) {
-                Some((_, v)) => out.push_str(&regex::escape(v)),
-                None => {
-                    all_pinned = false;
-                    out.extend(chars[i..k].iter());
-                }
-            }
-            i = k;
-            continue;
-        }
-        if chars[i] == '\\' {
-            out.push(chars[i]);
-            if i + 1 < n {
-                out.push(chars[i + 1]);
-            }
-            i += 2;
-            continue;
-        }
-        out.push(chars[i]);
-        i += 1;
-    }
-    Some((out, all_pinned))
-}
 
 /// The single concrete string a fully-literal regex matches (collapsing `\x`
 /// escapes), or `None` if any unescaped metacharacter remains.

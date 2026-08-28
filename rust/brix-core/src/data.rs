@@ -194,18 +194,117 @@ fn re_escape(s: &str) -> String {
     out
 }
 
-/// Replace each `(?P<name>...)` group whose name is bound with the escaped
-/// value — mirrors `RegexData.substitute`.
-fn regex_substitute(pattern: &str, bindings: &[(String, String)]) -> String {
-    let mut p = pattern.to_string();
-    for (name, value) in bindings {
-        let group = format!(r"\(\?P<{}>(?:[^()\\]|\\.)*\)", regex::escape(name));
-        if let Ok(re) = regex::Regex::new(&group) {
-            let replacement = re_escape(value);
-            p = re.replace_all(&p, |_: &regex::Captures| replacement.clone()).into_owned();
-        }
+/// If `chars[i..]` opens a `(?P<name>` group, return `(name, index_after_'>')`.
+fn parse_group_head(chars: &[char], i: usize) -> Option<(String, usize)> {
+    let head: [char; 4] = ['(', '?', 'P', '<'];
+    if i + head.len() > chars.len() || chars[i..i + head.len()] != head {
+        return None;
     }
-    p
+    let mut j = i + head.len();
+    let mut name = String::new();
+    while j < chars.len() && chars[j] != '>' {
+        name.push(chars[j]);
+        j += 1;
+    }
+    if j >= chars.len() || name.is_empty() {
+        return None;
+    }
+    Some((name, j + 1)) // skip the '>'
+}
+
+/// Replace each `(?P<name>...)` whose name is bound with the escaped value,
+/// leaving groups whose names are not in `values` intact. Scans the body with a
+/// paren-depth counter (and stays out of `[...]` character classes), so a body
+/// that itself contains groups — `(?:a)|(?!b)c` — is handled; the naive
+/// group-shaped regex silently declines a paren-bearing body, leaving the
+/// pattern unnarrowed. Returns `(filled, all_pinned)`; `None` on an unbalanced
+/// group. Shared by `regex_substitute` and target selection's membership check;
+/// mirrors `_fill_named_groups` in `src/brix/data.py`. Uses `re_escape` (not
+/// `regex::escape`) because the result is fingerprint material and must be
+/// byte-identical to the Python engine.
+pub(crate) fn fill_named_groups(
+    pattern: &str,
+    values: &[(String, String)],
+) -> Option<(String, bool)> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    let mut out = String::new();
+    let mut all_pinned = true;
+    let mut i = 0;
+    while i < n {
+        if let Some((name, body_start)) = parse_group_head(&chars, i) {
+            let (mut depth, mut k, mut in_class) = (1i32, body_start, false);
+            while k < n && depth > 0 {
+                let c = chars[k];
+                if c == '\\' {
+                    k += 2;
+                    continue;
+                }
+                if in_class {
+                    in_class = c != ']';
+                    k += 1;
+                    continue;
+                }
+                if c == '[' {
+                    in_class = true;
+                    k += 1;
+                    if k < n && chars[k] == '^' {
+                        k += 1;
+                    }
+                    if k < n && chars[k] == ']' {
+                        // a leading ] is a literal class member
+                        k += 1;
+                    }
+                    continue;
+                }
+                depth += if c == '(' {
+                    1
+                } else if c == ')' {
+                    -1
+                } else {
+                    0
+                };
+                k += 1;
+            }
+            if depth != 0 {
+                return None; // unbalanced — do not guess
+            }
+            match values.iter().find(|(nm, _)| nm == &name) {
+                Some((_, v)) => out.push_str(&re_escape(v)),
+                None => {
+                    all_pinned = false;
+                    out.extend(chars[i..k].iter());
+                }
+            }
+            i = k;
+            continue;
+        }
+        if chars[i] == '\\' {
+            out.push(chars[i]);
+            if i + 1 < n {
+                out.push(chars[i + 1]);
+            }
+            i += 2;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    Some((out, all_pinned))
+}
+
+/// Replace each `(?P<name>...)` group whose name is bound with the escaped
+/// value — mirrors `RegexData.substitute`. Names not present as groups are
+/// ignored (bindings are commonly a superset).
+fn regex_substitute(pattern: &str, bindings: &[(String, String)]) -> String {
+    // `None` is only reached on an unbalanced group, which the `Regex::new`
+    // in `regex_match`/construction already rejects — unreachable for a real
+    // pattern. Degrade to unchanged (as the Python engine does) rather than
+    // diverge the two engines.
+    match fill_named_groups(pattern, bindings) {
+        Some((filled, _)) => filled,
+        None => pattern.to_string(),
+    }
 }
 
 fn subst(template: &str, bindings: &[(String, String)]) -> String {
@@ -275,5 +374,69 @@ mod tests {
             serde_json::from_str(r#"{"kind":"glob","template":"a/{n}.cc"}"#).unwrap();
         let DataAtom::Glob { exclude, .. } = &parsed else { panic!() };
         assert!(exclude.is_empty());
+    }
+
+    fn regex(pattern: &str) -> DataAtom {
+        DataAtom::Regex { pattern: pattern.to_string() }
+    }
+
+    #[test]
+    fn substitute_narrows_a_group_whose_body_has_parens() {
+        // Bug 0.1: a bound {video} must narrow the collection even when its
+        // group body is a lookahead alternation (parentheses). The old
+        // group-shaped matcher silently declined it, leaving the collection
+        // project-wide so a nested video expanded over every scene.
+        let scenes = regex(
+            r"src/main/videos/(?P<video>(?:rights)/[0-9][^/]*|(?!(?:rights)/)[^/]+)/(?P<scene>[0-9][^/]*)\.py",
+        );
+        let narrowed = scenes.substitute(&[("video".into(), "rights/02_islandEmperor".into())]);
+        let DataAtom::Regex { pattern } = &narrowed else { panic!() };
+        assert_eq!(
+            pattern,
+            r"src/main/videos/rights/02_islandEmperor/(?P<scene>[0-9][^/]*)\.py"
+        );
+        // The narrowed collection binds a scene only for that one video...
+        assert_eq!(
+            narrowed.regex_match("src/main/videos/rights/02_islandEmperor/00_title.py"),
+            Some(vec![("scene".to_string(), "00_title".to_string())]),
+        );
+        // ...and rejects a scene path belonging to another video.
+        assert_eq!(narrowed.regex_match("src/main/videos/wealth/03_x.py"), None);
+    }
+
+    #[test]
+    fn substitute_ignores_parens_inside_a_character_class() {
+        // A ')' inside [...] must not fool the paren-depth counter.
+        let atom = regex(r"(?P<v>[()]+)/(?P<s>[0-9]+)\.py");
+        let DataAtom::Regex { pattern } = &atom.substitute(&[("v".into(), "AB".into())]) else {
+            panic!()
+        };
+        assert_eq!(pattern, r"AB/(?P<s>[0-9]+)\.py");
+    }
+
+    #[test]
+    fn substitute_matches_legacy_escaping_on_plain_groups() {
+        // Byte-for-byte parity with the previous regex-based substitution for
+        // the simple (paren-free body) cases it handled — fingerprint material.
+        let legacy = |pattern: &str, binds: &[(&str, &str)]| {
+            let mut p = pattern.to_string();
+            for (name, value) in binds {
+                let group = format!(r"\(\?P<{}>(?:[^()\\]|\\.)*\)", regex::escape(name));
+                if let Ok(re) = regex::Regex::new(&group) {
+                    let replacement = re_escape(value);
+                    p = re.replace_all(&p, |_: &regex::Captures| replacement.clone()).into_owned();
+                }
+            }
+            p
+        };
+        for (pattern, binds) in [
+            (r"(?P<video>[^/]+)/(?P<scene>[0-9]\S*)", vec![("video", "intro")]),
+            (r"a/(?P<n>[^/]+)\.cc", vec![("n", "a.b-c+d")]),
+            (r"(?P<x>[^/]+)", vec![("y", "unrelated")]),
+        ] {
+            let owned: Vec<(String, String)> =
+                binds.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            assert_eq!(regex_substitute(pattern, &owned), legacy(pattern, &binds), "{pattern}");
+        }
     }
 }

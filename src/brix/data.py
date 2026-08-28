@@ -132,6 +132,62 @@ class GlobData(DataAtom):
         return text
 
 
+def _fill_named_groups(pattern: str, values: dict[str, str]) -> tuple[str | None, bool]:
+    """Replace each ``(?P<name>...)`` whose name is in ``values`` with the
+    (escaped) value, leaving groups whose names are not in ``values`` intact.
+
+    Unlike a group-shaped regex, this scans the body with a paren-depth counter
+    (and stays out of ``[...]`` character classes), so a body that itself
+    contains groups — ``(?:a)|(?!b)c`` — is handled. That is the whole point:
+    the naive ``\\(\\?P<name>(?:[^()\\\\]|\\\\.)*\\)`` silently declines a
+    paren-bearing body, leaving the pattern unnarrowed. Returns
+    ``(filled, all_pinned)``; ``filled`` is None on a malformed (unbalanced)
+    group, and ``all_pinned`` is False if any named group was left unresolved.
+    Shared by `RegexData.substitute` and target selection's membership check."""
+    out: list[str] = []
+    i, n = 0, len(pattern)
+    all_pinned = True
+    while i < n:
+        head = re.match(r"\(\?P<([A-Za-z_]\w*)>", pattern[i:])
+        if head:
+            name = head.group(1)
+            depth, k, in_class = 1, i + head.end(), False
+            while k < n and depth:
+                c = pattern[k]
+                if c == "\\":
+                    k += 2
+                    continue
+                if in_class:
+                    in_class = c != "]"
+                    k += 1
+                    continue
+                if c == "[":
+                    in_class, k = True, k + 1
+                    if k < n and pattern[k] == "^":  # negated class
+                        k += 1
+                    if k < n and pattern[k] == "]":  # a leading ] is literal
+                        in_class, k = True, k + 1
+                    continue
+                depth += 1 if c == "(" else -1 if c == ")" else 0
+                k += 1
+            if depth != 0:
+                return None, False  # unbalanced — do not guess
+            if name in values:
+                out.append(re.escape(values[name]))
+            else:
+                all_pinned = False
+                out.append(pattern[i:k])
+            i = k
+            continue
+        if pattern[i] == "\\":
+            out.append(pattern[i : i + 2])
+            i += 2
+            continue
+        out.append(pattern[i])
+        i += 1
+    return "".join(out), all_pinned
+
+
 class RegexData(DataAtom):
     """A path set matched by a regular expression with named groups.
 
@@ -150,15 +206,22 @@ class RegexData(DataAtom):
         return dict(m.groupdict())
 
     def substitute(self, bindings: dict[str, str]) -> RegexData:
-        """Replace named groups with literal values, e.g. under expansion:
+        """Narrow the regex under expansion: replace each named group whose
+        name is bound with the escaped value, e.g.
         ``(?P<video>[^/]+)/(?P<scene>[0-9]\\S*)`` with video=intro becomes
-        ``intro/(?P<scene>[0-9]\\S*)``. Group bodies must not contain
-        nested groups."""
-        pattern = self.regex.pattern
-        for name, value in bindings.items():
-            group = rf"\(\?P<{re.escape(name)}>(?:[^()\\]|\\.)*\)"
-            pattern = re.sub(group, lambda _m: re.escape(value), pattern)
-        return RegexData(pattern) if pattern != self.regex.pattern else self
+        ``intro/(?P<scene>[0-9]\\S*)``. Group bodies *may* contain nested
+        groups — a bound ``{video}`` narrows a collection whose video segment
+        is a lookahead alternation just as well as a plain ``[^/]+``. Names not
+        bound here are left as groups; names not present as groups are ignored
+        (bindings are commonly a superset)."""
+        filled, _ = _fill_named_groups(self.regex.pattern, bindings)
+        if filled is None:
+            # The scanner only reports None on an unbalanced group, which
+            # `re.compile` in __init__ already rejects — so it is unreachable
+            # for a constructed RegexData. Degrade to unchanged (identically in
+            # the Rust engine) rather than diverge the two engines here.
+            return self
+        return RegexData(filled) if filled != self.regex.pattern else self
 
     def __repr__(self) -> str:
         return f"data.regex({self.regex.pattern!r})"
