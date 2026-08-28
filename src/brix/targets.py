@@ -23,8 +23,10 @@ producer (stem ``wealth``) is the specific one.
 
 from __future__ import annotations
 
-from .actions import Action, Expandable
-from .data import FileData, GlobData, RegexData
+import re
+
+from .actions import Action, ExpandAll, Expandable
+from .data import DataExpr, FileData, GlobData, RegexData
 from .patterns import overlaps
 
 _PROBE = "\x00target\x00"
@@ -54,6 +56,125 @@ def _specificity(bindings: dict[str, str]) -> float:
     if not bindings:
         return float("inf")
     return float(sum(len(v) for v in bindings.values()))
+
+
+# -- collection membership (static) ------------------------------------------
+# Selection can extract bindings that satisfy an action's *output template*
+# while naming something the action's *collection* would never bind — e.g. a
+# nested video path binds a render rule's `{video}` to a bare container name
+# that the scene regex refuses. `_specificity` then picks that collection-blind
+# candidate over the right one, and the wrong artifact gets cached over the
+# right one. So before ranking, drop any candidate whose bindings a collection
+# in its expansion spine *provably* refuses. This is purely static (pattern
+# math, no workspace): membership against the real filesystem is the executor's
+# job, and resolving it here would violate the selection/planner layering. The
+# check is one-sided — it only rejects on a *proof* of non-membership; anything
+# it cannot decide keeps the candidate, preserving selection's conservatism.
+
+_REGEX_META = set(".^$*+?{}[]()|")
+
+
+def _fill_named_groups(pattern: str, values: dict[str, str]) -> tuple[str | None, bool]:
+    """Replace each ``(?P<name>...)`` whose name is in ``values`` with the
+    (escaped) value, matching nested parens so bodies like ``(?:a)|(?!b)c`` are
+    handled — `RegexData.substitute` cannot, it forbids nested groups. Returns
+    ``(filled, all_pinned)``; ``filled`` is None on a malformed pattern, and
+    ``all_pinned`` is False if any named group was left unresolved."""
+    out: list[str] = []
+    i, n = 0, len(pattern)
+    all_pinned = True
+    while i < n:
+        head = re.match(r"\(\?P<([A-Za-z_]\w*)>", pattern[i:])
+        if head:
+            name = head.group(1)
+            depth, k = 1, i + head.end()
+            while k < n and depth:
+                c = pattern[k]
+                if c == "\\":
+                    k += 2
+                    continue
+                depth += 1 if c == "(" else -1 if c == ")" else 0
+                k += 1
+            if depth != 0:
+                return None, False  # unbalanced — do not guess
+            if name in values:
+                out.append(re.escape(values[name]))
+            else:
+                all_pinned = False
+                out.append(pattern[i:k])
+            i = k
+            continue
+        if pattern[i] == "\\":
+            out.append(pattern[i : i + 2])
+            i += 2
+            continue
+        out.append(pattern[i])
+        i += 1
+    return "".join(out), all_pinned
+
+
+def _literal_of(pattern: str) -> str | None:
+    """The single concrete string a fully-literal regex matches (collapsing
+    ``\\x`` escapes), or None if any unescaped regex metacharacter remains —
+    in which case we cannot reduce it to one probe path."""
+    out: list[str] = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "\\":
+            if i + 1 >= n:
+                return None
+            out.append(pattern[i + 1])
+            i += 2
+            continue
+        if c in _REGEX_META:
+            return None
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _regex_admits(coll: RegexData, bindings: dict[str, str]) -> bool | None:
+    """True/False if provable that ``coll`` does/does not bind ``bindings``;
+    None if it cannot be decided statically (keep the candidate)."""
+    relevant = {k: v for k, v in bindings.items() if k in coll.binding_names}
+    if not relevant:
+        return None  # collection binds none of these names — nothing to prove
+    filled, all_pinned = _fill_named_groups(coll.regex.pattern, relevant)
+    if filled is None or not all_pinned:
+        return None  # a group we could not pin — no single probe path exists
+    path = _literal_of(filled)
+    if path is None:
+        return None  # residual regex structure — do not guess a path
+    matched = coll.match(path)
+    if matched is None:
+        return False  # the collection regex refuses this exact path
+    # It matches, but must reproduce the *same* values — the regex may bind a
+    # name differently (a container name absorbed into a nested group).
+    return None if any(matched.get(k) != v for k, v in relevant.items()) else True
+
+
+def _collection_refuses(collection: DataExpr, bindings: dict[str, str]) -> bool:
+    """A value is a member if *any* collection atom admits it; so refuse only
+    when every atom provably rejects (and at least one is a checkable regex)."""
+    verdicts = [
+        _regex_admits(atom, bindings)
+        for atom in collection.atoms()
+        if isinstance(atom, RegexData)
+    ]
+    return bool(verdicts) and all(v is False for v in verdicts)
+
+
+def _bindings_refused(action: Action, bindings: dict[str, str]) -> bool:
+    """True if a collection anywhere in ``action``'s expansion spine provably
+    refuses ``bindings`` — i.e. the target names a non-member and this
+    candidate is collection-blind."""
+    current: Action = action
+    while isinstance(current, ExpandAll):
+        if _collection_refuses(current.collection, bindings):
+            return True
+        current = current.child
+    return False
 
 
 def select_actions_with_origins(
@@ -95,6 +216,16 @@ def select_actions_with_origins(
                     candidates.append((index, bindings))
         if not candidates:
             continue  # a source file, not something an action produces
+        # Drop collection-blind candidates: a match whose bindings a nested
+        # expansion's collection provably refuses is not a real producer of
+        # this target, and must not be allowed to win on `_specificity`.
+        candidates = [
+            (index, bindings)
+            for index, bindings in candidates
+            if not _bindings_refused(actions[index], bindings)
+        ]
+        if not candidates:
+            continue
         best = min(_specificity(b) for _, b in candidates)
         for index, bindings in candidates:
             if _specificity(bindings) > best:

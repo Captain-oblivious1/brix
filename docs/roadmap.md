@@ -19,6 +19,73 @@ Two governing rules, in tension, and the order below resolves them:
   API (track 3) *mirrors* the Python one, so it must come *after* that surface has
   stopped churning, or it re-mirrors every change.
 
+### Tier 0 — correctness bug — **FIXED** (both engines; see the Rust caveat below)
+
+**Fixed 2026-08-27.** Selection now drops any candidate whose bindings a
+collection in its expansion spine *provably* refuses, before `_specificity` is
+consulted — the load-bearing defect. The check is purely static (pattern math,
+no workspace: real-filesystem membership stays the executor's job, so the
+selection/planner layering is untouched) and strictly one-sided — it rejects
+only on a *proof* of non-membership, so anything undecidable keeps the
+candidate and selection stays conservative. Landed in both engines
+(`_bindings_refused` in `src/brix/targets.py`; `bindings_refused` in
+`rust/brix-core/src/targets.rs`), proven end-to-end on the real
+`~/Projects/animation` nested-video build under the Python engine (now renders
+the true scenes → combine → finalize instead of a bogus `render rights/…`).
+**Rust caveat:** the guard is a *no-op* for the animation collections
+specifically, because the `regex` crate (v1, no lookaround) cannot compile
+their negative-lookahead `video_part` — the check treats an
+engine-uncompilable collection as undecidable and keeps the candidate. So under
+the *default* Rust engine the animation nested case is not yet corrected; it is
+correct there for every collection the crate can evaluate. This exposes a
+pre-existing, larger limitation (Rust cannot evaluate these lookaround
+collections at all — their members never expand), now filed under "Needs a
+decision from you." The original diagnosis is kept below as the record.
+
+0. **Collection-blind target selection.** Target selection can manufacture an
+   action for a binding its own collection rejects — and then caches the wrong
+   artifact over the right one. Found in `~/Projects/animation` 2026-08-27. Asking for a *nested* video
+   (`build output/videos/rights/02_islandEmperor.mpg`, where `rights/` is a
+   container directory holding video modules rather than scenes) selects the
+   **render** rule instead of **finalize**, runs the renderer against a module
+   that is not a scene, and reports `BUILD OK`. Two defects compound:
+   - `_specificity` in `targets.py` breaks the tie on total bound text, lower
+     wins. Render binds `video="rights"` + `scene="02_islandEmperor"` (23 chars)
+     against `output/videos/{video}/{scene}.mpg`; finalize binds
+     `video="rights/02_islandEmperor"` (25) against `output/videos/{video}.mpg`.
+     Render wins on a stem-length rule that has no way to know its `{video}` can
+     never be a bare container name.
+   - `ExpandAll.substitute` then collapses **both** expansion levels, because
+     selection bound both element names — *"there is nothing left to expand
+     over"*. So the `scenes` collection is never consulted, and the binding is
+     never checked for membership. This is the load-bearing defect: the build
+     file's collection regex already refuses to bind `video="rights"`, so the
+     information to reject the candidate is present and simply not asked for.
+     `_specificity` picking the wrong rule would be harmless if membership were
+     validated.
+
+   Worse than a no-op: the renderer exits 0 having written nothing, brix harvests
+   the declared output from the workspace (a correct file left by an earlier
+   `make`) and caches it as this action's result. Every later run replays that
+   entry **over** whatever the real build just produced, so the user sees the
+   same stale video forever and `status` reports nothing to build. Clearing
+   `.brix/` and `.brix-cache/` does not help — the same bogus action is
+   re-selected and re-poisons on the next edit. Verified by md5: `make` writes
+   `2add0393…` (8681472 bytes), `brix build` immediately restores `846651e2…`
+   (2385920 bytes, an artifact from the previous day).
+
+   Not a build-file bug — `animation/brix_build.py`'s `videos` and `scenes`
+   regexes were checked directly and bind correctly. Hits **every** nested video,
+   since only those have a `{video}` containing a slash; flat ones
+   (`wealth`, `poverty`) cannot collide. Proposed fix: in
+   `select_actions_with_origins`, drop a candidate whose bindings are not members
+   of the collection the enclosing `ExpandAll` expands over, before
+   `_specificity` is consulted at all — which needs a look at whether collection
+   membership can be resolved during selection without violating the
+   selection/planner layering. Contributing factor on the caller's side, worth
+   noting but not brix's to fix: `animation.render` exits 0 when it renders no
+   scene, which is what let this stay silent.
+
 ### Tier A — close out the in-flight capability (test-impact) — **DONE**
 
 Java, C++, and TS all select tests in real builds by **runtime discovery** (record
@@ -276,6 +343,21 @@ and amortized across Gradle/Maven/CMake/Make. Full design contract:
 
 ## Needs a decision from you
 
+- **Rust engine cannot evaluate lookaround collection regexes.** Surfaced by the
+  Tier 0 fix (2026-08-27): the `regex` crate (v1) has no lookaround, so a
+  collection like the animation build's `video_part`
+  (`(?:rights)/[0-9][^/]*|(?!(?:rights)/)[^/]+`) fails to compile in
+  `DataAtom::regex_match`. Consequences under the *default* Rust engine: such a
+  collection resolves to **zero members** (renders never expand — the animation
+  build only works via pre-existing `.mpg` files or `BRIX_ENGINE=py`), and the
+  new collection-blind guard cannot prove non-membership for it (stays
+  conservative). The Python engine (`re`) has full lookaround and is unaffected.
+  Two ways forward: (a) swap the Rust `regex` crate for **`fancy-regex`** (adds
+  lookaround/backreferences over the same base engine) so both engines agree; or
+  (b) require collection regexes to avoid lookaround and express container
+  exclusion positively. (a) restores engine parity with the least author burden;
+  (b) keeps the linear-time guarantee but pushes complexity onto every build
+  file that needs a container distinction. Recommend (a). Your call.
 - **Replacing your Java/TS build tools with brix:** (a) wrap the existing builds
   and replace piece by piece, or replace all at once; and (b) does brix also
   *download* third-party dependencies, or leave that to an existing tool.

@@ -23,6 +23,180 @@ fn specificity(bindings: &[(String, String)]) -> usize {
     }
 }
 
+// -- collection membership (static) -----------------------------------------
+// Selection can extract bindings that satisfy an action's output template while
+// naming something the action's collection would never bind (a nested video
+// path binds a render rule's `{video}` to a bare container name the scene regex
+// refuses). `specificity` would then pick that collection-blind candidate over
+// the right one and cache the wrong artifact over the right one. So before
+// ranking, drop any candidate whose bindings a collection in its expansion
+// spine *provably* refuses. Purely static (no workspace): real-filesystem
+// membership is the executor's job, and resolving it here would break the
+// selection/planner layering. One-sided — reject only on a proof of
+// non-membership; anything undecidable keeps the candidate. Mirrors
+// `_bindings_refused` in `src/brix/targets.py`.
+
+const REGEX_META: &str = ".^$*+?{}[]()|";
+
+/// If `chars[i..]` opens a `(?P<name>` group, return `(name, index_after_'>')`.
+fn parse_group_head(chars: &[char], i: usize) -> Option<(String, usize)> {
+    let head: Vec<char> = "(?P<".chars().collect();
+    if i + head.len() > chars.len() || chars[i..i + head.len()] != head[..] {
+        return None;
+    }
+    let mut j = i + head.len();
+    let mut name = String::new();
+    while j < chars.len() && chars[j] != '>' {
+        name.push(chars[j]);
+        j += 1;
+    }
+    if j >= chars.len() || name.is_empty() {
+        return None;
+    }
+    Some((name, j + 1)) // skip the '>'
+}
+
+/// Replace each `(?P<name>...)` whose name is bound with the escaped value,
+/// matching nested parens so bodies like `(?:a)|(?!b)c` are handled (the
+/// regex-crate `substitute` cannot — it forbids nested groups). Returns
+/// `(filled, all_pinned)`; `None` on an unbalanced group.
+fn fill_named_groups(pattern: &str, values: &[(String, String)]) -> Option<(String, bool)> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    let mut out = String::new();
+    let mut all_pinned = true;
+    let mut i = 0;
+    while i < n {
+        if let Some((name, body_start)) = parse_group_head(&chars, i) {
+            let (mut depth, mut k) = (1i32, body_start);
+            while k < n && depth > 0 {
+                match chars[k] {
+                    '\\' => {
+                        k += 2;
+                        continue;
+                    }
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                k += 1;
+            }
+            if depth != 0 {
+                return None; // unbalanced — do not guess
+            }
+            match values.iter().find(|(nm, _)| nm == &name) {
+                Some((_, v)) => out.push_str(&regex::escape(v)),
+                None => {
+                    all_pinned = false;
+                    out.extend(chars[i..k].iter());
+                }
+            }
+            i = k;
+            continue;
+        }
+        if chars[i] == '\\' {
+            out.push(chars[i]);
+            if i + 1 < n {
+                out.push(chars[i + 1]);
+            }
+            i += 2;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    Some((out, all_pinned))
+}
+
+/// The single concrete string a fully-literal regex matches (collapsing `\x`
+/// escapes), or `None` if any unescaped metacharacter remains.
+fn literal_of(pattern: &str) -> Option<String> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < n {
+        if chars[i] == '\\' {
+            if i + 1 >= n {
+                return None;
+            }
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if REGEX_META.contains(chars[i]) {
+            return None;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    Some(out)
+}
+
+/// `Some(true)`/`Some(false)` if provable that the regex atom does/does not
+/// bind these values; `None` if undecidable in this engine (keep the
+/// candidate). A collection regex this build's engine cannot even compile
+/// (e.g. lookaround) is undecidable, never a rejection.
+fn regex_admits(atom: &DataAtom, bindings: &[(String, String)]) -> Option<bool> {
+    let DataAtom::Regex { pattern } = atom else {
+        return None;
+    };
+    // Compile the collection regex exactly as `regex_match` does; a pattern the
+    // engine cannot compile tells us nothing about membership.
+    let compiled = regex::Regex::new(&format!(r"\A(?:{pattern})\z")).ok()?;
+    let names: Vec<String> = compiled.capture_names().flatten().map(String::from).collect();
+    let relevant: Vec<(String, String)> =
+        bindings.iter().filter(|(k, _)| names.contains(k)).cloned().collect();
+    if relevant.is_empty() {
+        return None; // regex binds none of these names — nothing to prove
+    }
+    let (filled, all_pinned) = fill_named_groups(pattern, &relevant)?;
+    if !all_pinned {
+        return None; // a group we could not pin — no single probe path exists
+    }
+    let path = literal_of(&filled)?; // residual regex structure — do not guess
+    match atom.regex_match(&path) {
+        None => Some(false), // the collection regex refuses this exact path
+        Some(matched) => {
+            // Matches, but must reproduce the same values — the regex may bind a
+            // name differently (a container name absorbed into a nested group).
+            let same = relevant
+                .iter()
+                .all(|(k, v)| matched.iter().any(|(mk, mv)| mk == k && mv == v));
+            if same {
+                Some(true)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// A value is a member if *any* collection atom admits it; so refuse only when
+/// every checkable atom provably rejects.
+fn collection_refuses(collection: &[DataAtom], bindings: &[(String, String)]) -> bool {
+    let verdicts: Vec<Option<bool>> = collection
+        .iter()
+        .filter(|a| matches!(a, DataAtom::Regex { .. }))
+        .map(|a| regex_admits(a, bindings))
+        .collect();
+    !verdicts.is_empty() && verdicts.iter().all(|v| *v == Some(false))
+}
+
+/// True if a collection anywhere in `action`'s expansion spine provably refuses
+/// `bindings` — i.e. the target names a non-member and this candidate is
+/// collection-blind.
+fn bindings_refused(action: &Action, bindings: &[(String, String)]) -> bool {
+    let mut current = action;
+    while let Action::Expand { collection, child, .. } = current {
+        if collection_refuses(collection, bindings) {
+            return true;
+        }
+        current = child;
+    }
+    false
+}
+
 /// How does producing `out_atom` help `need_atom`? `None` = unrelated;
 /// `Some([])` = related but no constraint provable; otherwise the bindings
 /// that specialize the producer to this need. Mirrors `_extract_bindings`.
@@ -81,6 +255,13 @@ pub(crate) fn select_actions_with_origins(
                     }
                 }
             }
+            if candidates.is_empty() {
+                continue;
+            }
+            // Drop collection-blind candidates: a match whose bindings a nested
+            // expansion's collection provably refuses is not a real producer of
+            // this target, and must not win on `specificity`.
+            candidates.retain(|(index, bindings)| !bindings_refused(&actions[*index], bindings));
             if candidates.is_empty() {
                 continue;
             }
@@ -145,4 +326,59 @@ pub fn select_actions(actions: &[Action], targets: &[String]) -> Result<Vec<Acti
         .into_iter()
         .map(|(_, action)| action)
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn regex(pattern: &str) -> DataAtom {
+        DataAtom::Regex { pattern: pattern.to_string() }
+    }
+
+    fn b(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn regex_admits_provable_reject_and_accept() {
+        // A scene must be all-digits; a value with letters can never be bound.
+        let scenes = regex(r"src/(?P<video>[^/]+)/(?P<scene>[0-9]+)\.py");
+        assert_eq!(regex_admits(&scenes, &b(&[("video", "a"), ("scene", "02x")])), Some(false));
+        assert_eq!(regex_admits(&scenes, &b(&[("video", "a"), ("scene", "02")])), Some(true));
+    }
+
+    #[test]
+    fn regex_admits_conservative_when_uncheckable() {
+        // Lookaround the `regex` crate cannot compile -> undecidable, not a reject.
+        let look = regex(r"src/(?P<video>(?!rights/)[^/]+)\.py");
+        assert_eq!(regex_admits(&look, &b(&[("video", "rights")])), None);
+        // A name the collection does not bind -> nothing to prove.
+        let plain = regex(r"src/(?P<video>[^/]+)\.py");
+        assert_eq!(regex_admits(&plain, &b(&[("scene", "02")])), None);
+        // A non-regex atom is never a reject.
+        assert_eq!(
+            regex_admits(&DataAtom::Glob { template: "x".into(), content_key: None, exclude: vec![] }, &b(&[("video", "x")])),
+            None
+        );
+    }
+
+    #[test]
+    fn bindings_refused_walks_the_spine() {
+        let videos = regex(r"src/(?P<video>[^/]+)\.py");
+        let scenes = regex(r"src/(?P<video>[^/]+)/(?P<scene>[0-9]+)\.py");
+        let render = Action::Expand {
+            element: "video".into(),
+            collection: vec![videos.clone()],
+            child: Box::new(Action::Expand {
+                element: "scene".into(),
+                collection: vec![scenes],
+                child: Box::new(Action::Delete { paths: vec![] }),
+            }),
+        };
+        // The scene level refuses a non-numeric scene, even though the video
+        // level would admit it.
+        assert!(bindings_refused(&render, &b(&[("video", "a"), ("scene", "02x")])));
+        assert!(!bindings_refused(&render, &b(&[("video", "a"), ("scene", "02")])));
+    }
 }

@@ -177,3 +177,93 @@ def test_cli_custom_command_builds_then_acts(tmp_path, capsys):
     with pytest.raises(SystemExit):
         cli.main(make_graph, root=tmp_path, argv=["view"], commands=commands)
     assert "required" in capsys.readouterr().err
+
+
+# -- collection-blind target selection (regression) --------------------------
+# A nested video path can bind a two-level render rule's {video}/{scene} to a
+# bare container name the scene collection's regex would never bind, while a
+# one-level finalize rule binds {video} to the whole nested path. Without a
+# membership check, `_specificity` picks the collection-blind render candidate
+# and its wrong artifact gets cached over the right one. The fix drops any
+# candidate a collection in its expansion spine provably refuses, before
+# ranking. Found in ~/Projects/animation (2026-08-27).
+
+def _animation_shaped_collections():
+    """The real animation collection shapes, small: a container `rights/`
+    holds nested videos (`rights/NN_*`) rather than scenes, encoded with the
+    same negative-lookahead the build file uses."""
+    from brix.data import DataFactory
+
+    data = DataFactory()
+    video_part = r"(?:rights)/[0-9][^/]*|(?!(?:rights)/)[^/]+"
+    videos = data.regex(rf"src/main/videos/(?P<video>{video_part})\.py")
+    scenes = data.regex(
+        rf"src/main/videos/(?P<video>{video_part})/(?P<scene>[0-9][^/]*)\.py"
+    )
+    return data, videos, scenes
+
+
+def test_bindings_refused_drops_collection_blind_render():
+    from brix.actions import ExpandAll, ExternalProcessAction
+    from brix.targets import _bindings_refused
+
+    data, videos, scenes = _animation_shaped_collections()
+    render = ExpandAll(
+        "video", videos,
+        ExpandAll("scene", scenes, ExternalProcessAction(
+            name="render {video}/{scene}", command_line="x",
+            outputs={"mpg": data.file("output/videos/{video}/{scene}.mpg")},
+        )),
+    )
+    finalize = ExpandAll(
+        "video", videos, ExternalProcessAction(
+            name="finalize {video}", command_line="x",
+            outputs={"mpg": data.file("output/videos/{video}.mpg")},
+        ),
+    )
+
+    # The bug case: the scene collection refuses video="rights" (a container),
+    # so the collection-blind render candidate is dropped...
+    assert _bindings_refused(
+        render, {"video": "rights", "scene": "02_islandEmperor"}
+    )
+    # ...while finalize, binding the whole nested path, is a real member.
+    assert not _bindings_refused(finalize, {"video": "rights/02_islandEmperor"})
+
+
+def test_bindings_kept_for_real_members():
+    """The guard is one-sided: real members and flat videos are never dropped."""
+    from brix.actions import ExpandAll, ExternalProcessAction
+    from brix.targets import _bindings_refused
+
+    data, videos, scenes = _animation_shaped_collections()
+    render = ExpandAll(
+        "video", videos,
+        ExpandAll("scene", scenes, ExternalProcessAction(
+            name="render", command_line="x",
+            outputs={"mpg": data.file("output/videos/{video}/{scene}.mpg")},
+        )),
+    )
+    # A flat video's scene, and a genuinely-nested video's scene, both stay.
+    assert not _bindings_refused(render, {"video": "wealth", "scene": "03_x"})
+    assert not _bindings_refused(
+        render, {"video": "rights/02_islandEmperor", "scene": "00_title"}
+    )
+
+
+def test_collection_check_conservative_when_unprovable():
+    """No collection regex to check, or names it does not bind: keep candidate."""
+    from brix.actions import ExpandAll, ExternalProcessAction
+    from brix.data import DataFactory
+    from brix.targets import _bindings_refused
+
+    data = DataFactory()
+    # A glob collection is not statically checkable — never a rejection.
+    glob_expand = ExpandAll(
+        "video", data.glob("src/videos/{video}"),
+        ExternalProcessAction(
+            name="x", command_line="x",
+            outputs={"o": data.file("out/{video}.mpg")},
+        ),
+    )
+    assert not _bindings_refused(glob_expand, {"video": "anything"})
